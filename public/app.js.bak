@@ -1,0 +1,360 @@
+let currentPortfolioId = null;
+
+// Initialize the app
+document.addEventListener('DOMContentLoaded', () => {
+  loadPortfolios();
+  setupNavigation();
+  setupEventListeners();
+});
+
+// Navigation
+function setupNavigation() {
+  const navLinks = document.querySelectorAll('.nav-link');
+  const pages = document.querySelectorAll('.page-content');
+
+  navLinks.forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetPage = link.dataset.page;
+
+      // Update active nav link
+      navLinks.forEach(l => l.classList.remove('active'));
+      link.classList.add('active');
+
+      // Show target page
+      pages.forEach(p => p.classList.remove('active'));
+      document.getElementById(`page-${targetPage}`).classList.add('active');
+    });
+  });
+}
+
+function setupEventListeners() {
+  // Set today's date as default
+  document.getElementById('date').valueAsDate = new Date();
+
+  // Transaction type change handler
+  document.getElementById('type').addEventListener('change', (e) => {
+    const isDividend = e.target.value === 'DIVIDEND';
+    const sharesFields = document.getElementById('shares-fields');
+    const dividendField = document.getElementById('dividend-field');
+    const quantityInput = document.getElementById('quantity');
+    const priceInput = document.getElementById('price');
+    const totalInput = document.getElementById('total');
+
+    if (isDividend) {
+      // Show total field, hide shares/price fields
+      sharesFields.style.display = 'none';
+      dividendField.style.display = 'block';
+      quantityInput.required = false;
+      priceInput.required = false;
+      totalInput.required = true;
+      quantityInput.value = '';
+      priceInput.value = '';
+    } else {
+      // Show shares/price fields, hide total field
+      sharesFields.style.display = 'grid';
+      dividendField.style.display = 'none';
+      quantityInput.required = true;
+      priceInput.required = true;
+      totalInput.required = false;
+      totalInput.value = '';
+    }
+  });
+
+  // Portfolio selection (Portfolios page)
+  document.getElementById('portfolio-select').addEventListener('change', (e) => {
+    currentPortfolioId = e.target.value ? parseInt(e.target.value) : null;
+
+    if (currentPortfolioId) {
+      document.getElementById('portfolio-content').style.display = 'block';
+      loadPortfolio();
+    } else {
+      document.getElementById('portfolio-content').style.display = 'none';
+    }
+  });
+
+  // Portfolio selection (Transactions page)
+  document.getElementById('transaction-portfolio-select').addEventListener('change', (e) => {
+    currentPortfolioId = e.target.value ? parseInt(e.target.value) : null;
+
+    if (currentPortfolioId) {
+      document.getElementById('transaction-content').style.display = 'block';
+      loadTransactions();
+    } else {
+      document.getElementById('transaction-content').style.display = 'none';
+    }
+  });
+
+  // New portfolio button
+  document.getElementById('new-portfolio-btn').addEventListener('click', () => {
+    document.getElementById('new-portfolio-form').style.display = 'block';
+  });
+
+  // Cancel new portfolio
+  document.getElementById('cancel-portfolio-btn').addEventListener('click', () => {
+    document.getElementById('new-portfolio-form').style.display = 'none';
+    document.getElementById('portfolio-name').value = '';
+    document.getElementById('portfolio-code').value = '';
+  });
+
+  // Create portfolio
+  document.getElementById('create-portfolio-btn').addEventListener('click', async () => {
+    const name = document.getElementById('portfolio-name').value.trim();
+    const code = document.getElementById('portfolio-code').value.trim();
+
+    if (!name || !code) {
+      alert('Please enter both name and code');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/portfolios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, code })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error);
+      }
+
+      const portfolio = await response.json();
+
+      // Reset form and hide it
+      document.getElementById('portfolio-name').value = '';
+      document.getElementById('portfolio-code').value = '';
+      document.getElementById('new-portfolio-form').style.display = 'none';
+
+      // Reload portfolios and select the new one
+      await loadPortfolios();
+      document.getElementById('portfolio-select').value = portfolio.id;
+      document.getElementById('portfolio-select').dispatchEvent(new Event('change'));
+    } catch (error) {
+      alert('Error creating portfolio: ' + error.message);
+    }
+  });
+
+  // Transaction form submission
+  document.getElementById('transaction-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    if (!currentPortfolioId) {
+      alert('Please select a portfolio first');
+      return;
+    }
+
+    const type = document.getElementById('type').value;
+    const isDividend = type === 'DIVIDEND';
+
+    let transaction = {
+      portfolio_id: currentPortfolioId,
+      ticker: document.getElementById('ticker').value.trim(),
+      type: type,
+      date: document.getElementById('date').value
+    };
+
+    if (isDividend) {
+      // For dividends, only send total (quantity and price are 0)
+      transaction.quantity = 0;
+      transaction.price = 0;
+      transaction.total = parseFloat(document.getElementById('total').value);
+    } else {
+      // For other types, send quantity and price
+      transaction.quantity = parseFloat(document.getElementById('quantity').value);
+      transaction.price = parseFloat(document.getElementById('price').value);
+    }
+
+    try {
+      const response = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(transaction)
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to add transaction');
+      }
+
+      // Reset form
+      document.getElementById('transaction-form').reset();
+      document.getElementById('date').valueAsDate = new Date();
+      // Reset field visibility
+      document.getElementById('shares-fields').style.display = 'grid';
+      document.getElementById('dividend-field').style.display = 'none';
+
+      // Reload data
+      loadPortfolio();
+      loadTransactions();
+    } catch (error) {
+      alert('Error adding transaction: ' + error.message);
+    }
+  });
+
+  // CSV Import
+  document.getElementById('import-csv-btn').addEventListener('click', async () => {
+    const csvData = document.getElementById('csv-data').value.trim();
+    if (!csvData) {
+      alert('Please paste CSV data first');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/import/csv', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csvData })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to import CSV');
+      }
+
+      const result = await response.json();
+      const statusDiv = document.getElementById('import-status');
+
+      if (result.errors && result.errors.length > 0) {
+        statusDiv.className = 'import-status error';
+        statusDiv.innerHTML = `
+          <strong>Import completed with errors:</strong><br>
+          Imported: ${result.imported} transactions<br>
+          Errors: ${result.errors}<br>
+          <details style="margin-top: 0.5rem;">
+            <summary>View error details</summary>
+            <pre style="margin-top: 0.5rem; font-size: 0.85rem;">${JSON.stringify(result.details.errors, null, 2)}</pre>
+          </details>
+        `;
+      } else {
+        statusDiv.className = 'import-status success';
+        statusDiv.innerHTML = `<strong>Success!</strong> Imported ${result.imported} transactions.`;
+      }
+
+      // Clear CSV data and reload
+      document.getElementById('csv-data').value = '';
+      loadPortfolio();
+      loadTransactions();
+
+      // Hide status after 5 seconds
+      setTimeout(() => {
+        statusDiv.style.display = 'none';
+      }, 5000);
+
+    } catch (error) {
+      const statusDiv = document.getElementById('import-status');
+      statusDiv.className = 'import-status error';
+      statusDiv.textContent = 'Error importing CSV: ' + error.message;
+    }
+  });
+}
+
+// Load all portfolios
+async function loadPortfolios() {
+  try {
+    const response = await fetch('/api/portfolios');
+    const portfolios = await response.json();
+
+    // Populate all portfolio selects
+    const selects = [
+      document.getElementById('portfolio-select'),
+      document.getElementById('transaction-portfolio-select')
+    ];
+
+    selects.forEach(select => {
+      select.innerHTML = '<option value="">Select a portfolio...</option>';
+      portfolios.forEach(portfolio => {
+        const option = document.createElement('option');
+        option.value = portfolio.id;
+        option.textContent = `${portfolio.name} (${portfolio.code})`;
+        select.appendChild(option);
+      });
+    });
+  } catch (error) {
+    console.error('Error loading portfolios:', error);
+  }
+}
+
+// Load portfolio summary
+async function loadPortfolio() {
+  if (!currentPortfolioId) return;
+
+  try {
+    const response = await fetch(`/api/portfolios/${currentPortfolioId}/summary`);
+    const portfolio = await response.json();
+
+    const grid = document.getElementById('portfolio-grid');
+
+    if (portfolio.length === 0) {
+      grid.innerHTML = '<p class="empty-state">No holdings yet. Add your first transaction below!</p>';
+      return;
+    }
+
+    grid.innerHTML = portfolio.map(holding => `
+      <div class="portfolio-card">
+        <div class="ticker">${holding.ticker}</div>
+        <div class="shares">${holding.shares.toFixed(2)} shares</div>
+        <div class="avg-cost">Avg Cost: $${holding.avgCost.toFixed(2)}</div>
+        ${holding.totalDividends > 0 ? `<div class="avg-cost">Dividends: $${holding.totalDividends.toFixed(2)}</div>` : ''}
+      </div>
+    `).join('');
+  } catch (error) {
+    console.error('Error loading portfolio:', error);
+  }
+}
+
+// Load transaction history
+async function loadTransactions() {
+  if (!currentPortfolioId) return;
+
+  try {
+    const response = await fetch(`/api/portfolios/${currentPortfolioId}/transactions`);
+    const transactions = await response.json();
+
+    const list = document.getElementById('transactions-list');
+
+    if (transactions.length === 0) {
+      list.innerHTML = '<p class="empty-state">No transactions yet.</p>';
+      return;
+    }
+
+    list.innerHTML = transactions.map(t => {
+      const typeClass = t.type.toLowerCase().replace('_', '-');
+      const typeLabel = t.type.replace('_', ' ');
+
+      return `
+        <div class="transaction-item ${typeClass}">
+          <div class="ticker">${t.ticker}</div>
+          <div class="type ${typeClass}">${typeLabel}</div>
+          <div>${t.quantity} shares</div>
+          <div>$${parseFloat(t.price).toFixed(2)}/share</div>
+          <div>Total: $${parseFloat(t.total).toFixed(2)}</div>
+          <div>${new Date(t.date).toLocaleDateString()}</div>
+          <button class="btn-delete" onclick="deleteTransaction(${t.id})">Delete</button>
+        </div>
+      `;
+    }).join('');
+  } catch (error) {
+    console.error('Error loading transactions:', error);
+  }
+}
+
+// Delete transaction
+async function deleteTransaction(id) {
+  if (!confirm('Are you sure you want to delete this transaction?')) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/transactions/${id}`, {
+      method: 'DELETE'
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to delete transaction');
+    }
+
+    loadPortfolio();
+    loadTransactions();
+  } catch (error) {
+    alert('Error deleting transaction: ' + error.message);
+  }
+}

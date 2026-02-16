@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 900">
+  <!-- Outer circle with gradient -->
+  <defs>
+    <linearGradient id="circleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#82C341;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1B7F42;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="arrowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#82C341;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#A2D45E;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="barGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" style="stop-color:#3B9FC2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#5EBCE5;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Circle -->
+  <circle cx="400" cy="320" r="220" fill="none" stroke="url(#circleGrad)" stroke-width="40"/>
+
+  <!-- Arrow -->
+  <path d="M 370 450 L 530 240 L 640 320 L 530 280 L 530 400 Z" fill="url(#arrowGrad)"/>
+
+  <!-- Bar chart -->
+  <rect x="320" y="380" width="50" height="80" rx="8" fill="url(#barGrad)"/>
+  <rect x="390" y="340" width="50" height="120" rx="8" fill="url(#barGrad)"/>
+  <rect x="460" y="300" width="50" height="160" rx="8" fill="url(#barGrad)"/>
+
+  <!-- Leaf (yield symbol) -->
+  <ellipse cx="560" cy="420" rx="35" ry="50" fill="#F4C542" transform="rotate(-30 560 420)"/>
+  <path d="M 545 395 Q 560 420 545 445" stroke="#E5B230" stroke-width="3" fill="none"/>
+
+  <!-- Text -->
+  <text x="400" y="720" font-family="Arial, sans-serif" font-size="180" font-weight="700" fill="#1E3A8A" text-anchor="middle">Yieldly</text>
+</svg>

@@ -1,0 +1,16 @@
+{
+  "name": "yieldly",
+  "version": "1.0.0",
+  "description": "Stock portfolio tracker",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["stocks", "portfolio", "tracker"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "better-sqlite3": "^9.2.2"
+  }
+}
