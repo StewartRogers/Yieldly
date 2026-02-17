@@ -56,7 +56,12 @@
     <div id="page-portfolios" class="page-content">
       <div class="page-header">
         <h1>Portfolio Holdings</h1>
-        <button id="new-portfolio-btn" class="btn-link">+ New Portfolio</button>
+        <div class="page-header-actions">
+          <button id="refresh-prices-btn" class="btn-secondary" style="display: none;">
+            🔄 Refresh Prices
+          </button>
+          <button id="new-portfolio-btn" class="btn-link">+ New Portfolio</button>
+        </div>
       </div>
 
       <!-- New Portfolio Form -->
@@ -89,6 +94,60 @@
             <p class="empty-state">Select a portfolio to view holdings</p>
           </div>
         </section>
+      </div>
+
+      <!-- Edit Stock Info Modal -->
+      <div id="stock-info-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>Update Stock Information</h2>
+            <button class="modal-close" onclick="closeStockInfoModal()">&times;</button>
+          </div>
+          <form id="stock-info-form">
+            <input type="hidden" id="edit-portfolio-id">
+            <input type="hidden" id="edit-ticker">
+
+            <div class="form-section">
+              <h3 id="edit-stock-title"></h3>
+
+              <div class="form-group">
+                <label for="edit-market-price">Market Price</label>
+                <input type="number" id="edit-market-price" step="0.01" placeholder="0.00">
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h3>Dividend Information</h3>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="edit-dividend-frequency">Frequency</label>
+                  <select id="edit-dividend-frequency">
+                    <option value="">None</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Semi-Annual">Semi-Annual</option>
+                    <option value="Annual">Annual</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="edit-dividend-per-share">Per Share Amount</label>
+                  <input type="number" id="edit-dividend-per-share" step="0.01" placeholder="0.00">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="edit-last-dividend-date">Last Dividend Date</label>
+                <input type="date" id="edit-last-dividend-date">
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Save Changes</button>
+              <button type="button" class="btn-secondary" onclick="closeStockInfoModal()">Cancel</button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
 
