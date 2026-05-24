@@ -36,6 +36,17 @@ function setupEventListeners() {
   // Set today's date as default
   document.getElementById('date').valueAsDate = new Date();
 
+  // Auto-calculate total when quantity or price changes
+  function recalcSharesTotal() {
+    const qty = parseFloat(document.getElementById('quantity').value) || 0;
+    const px = parseFloat(document.getElementById('price').value) || 0;
+    if (qty > 0 && px > 0) {
+      document.getElementById('shares-total').value = (qty * px).toFixed(2);
+    }
+  }
+  document.getElementById('quantity').addEventListener('input', recalcSharesTotal);
+  document.getElementById('price').addEventListener('input', recalcSharesTotal);
+
   // Transaction type change handler
   document.getElementById('type').addEventListener('change', (e) => {
     const isDividend = e.target.value === 'DIVIDEND';
@@ -55,6 +66,7 @@ function setupEventListeners() {
       totalInput.required = true;
       quantityInput.value = '';
       priceInput.value = '';
+      document.getElementById('shares-total').value = '';
       dateDividendInput.value = dateInput.value;
     } else {
       sharesFields.style.display = 'grid';
@@ -151,6 +163,8 @@ function setupEventListeners() {
     } else {
       transaction.quantity = parseFloat(document.getElementById('quantity').value);
       transaction.price = parseFloat(document.getElementById('price').value);
+      const enteredTotal = parseFloat(document.getElementById('shares-total').value);
+      if (enteredTotal > 0) transaction.total = enteredTotal;
     }
 
     try {
@@ -164,7 +178,10 @@ function setupEventListeners() {
         throw new Error('Failed to add transaction');
       }
 
+      // Preserve portfolio selection and reset only transaction fields
+      const savedPortfolioId = document.getElementById('transaction-portfolio-select').value;
       document.getElementById('transaction-form').reset();
+      document.getElementById('transaction-portfolio-select').value = savedPortfolioId;
       document.getElementById('date').valueAsDate = new Date();
       document.getElementById('shares-fields').style.display = 'grid';
       document.getElementById('dividend-field').style.display = 'none';
