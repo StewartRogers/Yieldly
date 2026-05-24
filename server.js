@@ -31,6 +31,7 @@ function queryHoldings(portfolioId) {
       SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN COALESCE(t.commission,0) ELSE 0 END) AS buy_expense,
       SUM(CASE WHEN t.type = 'SELL' THEN COALESCE(t.commission,0) ELSE 0 END) AS sale_expense,
       s.market_price,
+      s.dividend_yield,
       s.dividend_frequency,
       s.dividend_per_share,
       s.last_dividend_date,
@@ -59,13 +60,26 @@ function computeHoldings(rows) {
     const marketValue = shares * marketPrice;
     const totalReturn = marketValue + saleTotal + divPaid - buyTotal;
     const returnPct   = buyTotal > 0 ? (totalReturn / buyTotal) * 100 : 0;
-    const divPerShare = h.dividend_per_share || 0;
-    const divFreq     = h.dividend_frequency || '';
-    const freqMap     = { Monthly: 12, Quarterly: 4, 'Semi-Annual': 2, Annual: 1 };
-    const multiplier  = freqMap[divFreq] || 0;
-    const nextPayout  = shares * divPerShare;
-    const annualPayout= nextPayout * multiplier;
-    const divYield    = marketValue > 0 ? (annualPayout / marketValue) * 100 : 0;
+    const divFreq    = h.dividend_frequency || '';
+    const freqMap    = { Monthly: 12, Quarterly: 4, 'Semi-Annual': 2, Annual: 1 };
+    const multiplier = freqMap[divFreq] || 0;
+    const storedYield = h.dividend_yield;   // % from TMX (e.g. 5.5)
+    const storedPerShare = h.dividend_per_share || 0;
+
+    let annualPayout, nextPayout, divPerShare, divYield;
+    if (storedYield != null && storedYield > 0 && marketValue > 0) {
+      // Yield-first approach: Annual = MktVal × Yield%, Next = Annual ÷ Freq, PerShare = Next ÷ Shares
+      annualPayout = marketValue * storedYield / 100;
+      nextPayout   = multiplier > 0 ? annualPayout / multiplier : 0;
+      divPerShare  = (shares > 0 && multiplier > 0) ? nextPayout / shares : 0;
+      divYield     = storedYield;
+    } else {
+      // Fallback: per-share manually entered
+      nextPayout   = shares * storedPerShare;
+      annualPayout = nextPayout * multiplier;
+      divPerShare  = storedPerShare;
+      divYield     = marketValue > 0 ? (annualPayout / marketValue) * 100 : 0;
+    }
     const totalExpense= buyExpense + saleExpense;
     const proceeds    = saleTotal - saleExpense;
     const acb         = sharesBought > 0 ? (buyTotal + buyExpense) * (shares / sharesBought) : 0;
@@ -223,7 +237,7 @@ async function fetchTMXQuote(ticker) {
   const query = `{
     getQuoteBySymbol(symbol: "${symbol}", locale: "en") {
       price
-      dividend
+      dividendYield
       dividendPayDate
     }
   }`;
@@ -242,17 +256,17 @@ async function fetchTMXQuote(ticker) {
   return data?.data?.getQuoteBySymbol ?? null;
 }
 
-function upsertStockInfo(portfolioId, ticker, marketPrice, dividendPerShare, payDate) {
+function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, payDate) {
   db.prepare(`
-    INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_per_share, last_dividend_date, updated_at)
+    INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_yield, last_dividend_date, updated_at)
     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
-      market_price       = COALESCE(?, market_price),
-      dividend_per_share = COALESCE(?, dividend_per_share),
+      market_price    = COALESCE(?, market_price),
+      dividend_yield  = COALESCE(?, dividend_yield),
       last_dividend_date = COALESCE(?, last_dividend_date),
-      updated_at         = CURRENT_TIMESTAMP
-  `).run(portfolioId, ticker, marketPrice, dividendPerShare, payDate,
-         marketPrice, dividendPerShare, payDate);
+      updated_at      = CURRENT_TIMESTAMP
+  `).run(portfolioId, ticker, marketPrice, dividendYield, payDate,
+         marketPrice, dividendYield, payDate);
 }
 
 // Refresh prices for one portfolio using TMX
@@ -279,12 +293,13 @@ app.post('/api/portfolios/:portfolioId/refresh-prices', async (req, res) => {
         const q = await fetchTMXQuote(ticker);
         if (!q) { errors.push({ ticker, error: 'No data' }); }
         else {
-          const price   = q.price    != null ? parseFloat(q.price)    : null;
-          const divPS   = q.dividend != null ? parseFloat(q.dividend) : null;
-          const payDate = q.dividendPayDate && new Date(q.dividendPayDate) > today
-                          ? q.dividendPayDate : null;
-          upsertStockInfo(portfolioId, ticker, price, divPS, payDate);
-          console.log(`${ticker}: $${price?.toFixed(2)} div=${divPS}`);
+          const price = q.price != null ? parseFloat(q.price) : null;
+          // TMX returns dividendYield as 0–100 percentage (e.g. 5.5 = 5.5%)
+          const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
+          const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today
+                           ? q.dividendPayDate : null;
+          upsertStockInfo(portfolioId, ticker, price, divYield, payDate);
+          console.log(`${ticker}: $${price?.toFixed(2)} yield=${divYield}%`);
           updated++;
         }
       } catch (e) { errors.push({ ticker, error: e.message }); }
@@ -336,11 +351,11 @@ app.post('/api/refresh-all-prices', async (req, res) => {
     for (const { portfolio_id, ticker } of holdings) {
       const q = quotes[ticker];
       if (!q) continue;
-      const price   = q.price    != null ? parseFloat(q.price)    : null;
-      const divPS   = q.dividend != null ? parseFloat(q.dividend) : null;
-      const payDate = q.dividendPayDate && new Date(q.dividendPayDate) > today
-                      ? q.dividendPayDate : null;
-      upsertStockInfo(portfolio_id, ticker, price, divPS, payDate);
+      const price    = q.price         != null ? parseFloat(q.price)         : null;
+      const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
+      const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today
+                       ? q.dividendPayDate : null;
+      upsertStockInfo(portfolio_id, ticker, price, divYield, payDate);
       updated++;
     }
 

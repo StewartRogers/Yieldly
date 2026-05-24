@@ -158,6 +158,16 @@ if (investmentTypeExists.count === 0) {
   db.exec(`ALTER TABLE stock_info ADD COLUMN investment_type TEXT`);
 }
 
+// Migration: Add dividend_yield column to stock_info
+const divYieldColExists = db.prepare(`
+  SELECT COUNT(*) as count FROM pragma_table_info('stock_info')
+  WHERE name = 'dividend_yield'
+`).get();
+if (divYieldColExists.count === 0) {
+  console.log('Adding dividend_yield column to stock_info...');
+  db.exec(`ALTER TABLE stock_info ADD COLUMN dividend_yield REAL`);
+}
+
 // Migration: Add CONTRIBUTION and WITHDRAWAL transaction types
 const txTypeSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`).get();
 if (txTypeSql && !txTypeSql.sql.includes('CONTRIBUTION')) {
