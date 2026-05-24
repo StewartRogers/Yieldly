@@ -129,6 +129,35 @@ db.exec(`
   )
 `);
 
+// Migration: Add commission column to transactions
+const commissionExists = db.prepare(`
+  SELECT COUNT(*) as count FROM pragma_table_info('transactions')
+  WHERE name = 'commission'
+`).get();
+if (commissionExists.count === 0) {
+  console.log('Adding commission column to transactions...');
+  db.exec(`ALTER TABLE transactions ADD COLUMN commission REAL DEFAULT 0`);
+}
+
+// Migration: Add sector and investment_type columns to stock_info
+const sectorExists = db.prepare(`
+  SELECT COUNT(*) as count FROM pragma_table_info('stock_info')
+  WHERE name = 'sector'
+`).get();
+if (sectorExists.count === 0) {
+  console.log('Adding sector column to stock_info...');
+  db.exec(`ALTER TABLE stock_info ADD COLUMN sector TEXT`);
+}
+
+const investmentTypeExists = db.prepare(`
+  SELECT COUNT(*) as count FROM pragma_table_info('stock_info')
+  WHERE name = 'investment_type'
+`).get();
+if (investmentTypeExists.count === 0) {
+  console.log('Adding investment_type column to stock_info...');
+  db.exec(`ALTER TABLE stock_info ADD COLUMN investment_type TEXT`);
+}
+
 console.log('Database initialized at:', dbPath);
 
 module.exports = db;

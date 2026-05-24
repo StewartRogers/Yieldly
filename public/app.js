@@ -28,6 +28,8 @@ function setupNavigation() {
       // Show target page
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
+
+      if (targetPage === 'summary') loadSummary();
     });
   });
 }
@@ -165,6 +167,8 @@ function setupEventListeners() {
       transaction.price = parseFloat(document.getElementById('price').value);
       const enteredTotal = parseFloat(document.getElementById('shares-total').value);
       if (enteredTotal > 0) transaction.total = enteredTotal;
+      const commission = parseFloat(document.getElementById('commission').value) || 0;
+      if (commission > 0) transaction.commission = commission;
     }
 
     try {
@@ -330,6 +334,63 @@ async function loadPortfolios() {
   }
 }
 
+async function loadSummary() {
+  const tbody = document.getElementById('summary-tbody');
+  tbody.innerHTML = '<tr><td colspan="28" class="empty-state">Loading...</td></tr>';
+  try {
+    const response = await fetch('/api/summary');
+    const holdings = await response.json();
+
+    if (holdings.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="28" class="empty-state">No holdings yet.</td></tr>';
+      return;
+    }
+
+    const totalMktValue = holdings.reduce((s, h) => s + h.market_value, 0);
+
+    const fmt  = v => v ? '$' + v.toFixed(2) : '—';
+    const fmtN = v => v ? v.toFixed(4) : '—';
+    const fmtP = v => v ? v.toFixed(2) + '%' : '—';
+
+    tbody.innerHTML = holdings.map(h => {
+      const portShare = totalMktValue > 0 ? (h.market_value / totalMktValue * 100) : 0;
+      const retClass  = h.return >= 0 ? 'positive' : 'negative';
+      return `<tr>
+        <td>${h.portfolio_code}</td>
+        <td>${h.investment_type}</td>
+        <td class="ticker-cell">${h.ticker}</td>
+        <td>${fmtN(h.shares)}</td>
+        <td>${fmt(h.buy_price)}</td>
+        <td>${h.market_price > 0 ? fmt(h.market_price) : '—'}</td>
+        <td>${h.sale_price > 0 ? fmt(h.sale_price) : '—'}</td>
+        <td>${fmt(h.buy_total)}</td>
+        <td>${h.market_price > 0 ? fmt(h.market_value) : '—'}</td>
+        <td>${h.sale_total > 0 ? fmt(h.sale_total) : '—'}</td>
+        <td>${h.dividends_paid > 0 ? fmt(h.dividends_paid) : '—'}</td>
+        <td>${h.dividend_frequency || '—'}</td>
+        <td>${h.last_dividend_date || '—'}</td>
+        <td>${h.dividend_per_share > 0 ? fmt(h.dividend_per_share) : '—'}</td>
+        <td>${h.next_payout > 0 ? fmt(h.next_payout) : '—'}</td>
+        <td>${h.annual_payout > 0 ? fmt(h.annual_payout) : '—'}</td>
+        <td class="${retClass}">${h.market_price > 0 ? fmt(h.return) : '—'}</td>
+        <td class="${retClass}">${h.market_price > 0 ? fmtP(h.return_percent) : '—'}</td>
+        <td>${h.market_price > 0 && h.dividend_yield > 0 ? fmtP(h.dividend_yield) : '—'}</td>
+        <td>${h.buy_count}</td>
+        <td>${h.sell_count}</td>
+        <td>${h.buy_expense > 0 ? fmt(h.buy_expense) : '—'}</td>
+        <td>${h.sale_expense > 0 ? fmt(h.sale_expense) : '—'}</td>
+        <td>${h.sale_total > 0 ? fmt(h.proceeds) : '—'}</td>
+        <td>${fmt(h.acb)}</td>
+        <td>${h.total_expense > 0 ? fmt(h.total_expense) : '—'}</td>
+        <td>${h.sector || '—'}</td>
+        <td>${totalMktValue > 0 ? fmtP(portShare) : '—'}</td>
+      </tr>`;
+    }).join('');
+  } catch (error) {
+    tbody.innerHTML = `<tr><td colspan="28" class="empty-state">Error loading summary: ${error.message}</td></tr>`;
+  }
+}
+
 // Create portfolio tabs
 function createPortfolioTabs(portfolios) {
   const tabsContainer = document.getElementById('portfolio-tabs');
@@ -411,7 +472,7 @@ async function loadPortfolioHoldings(portfolioId) {
             <div class="ticker">${holding.ticker}</div>
             <div class="shares">${holding.shares.toFixed(2)} shares</div>
           </div>
-          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}')">
+          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">
             Edit
           </button>
         </div>
@@ -657,7 +718,7 @@ async function updatePortfolioOrder() {
 
 // ===== STOCK INFO MODAL =====
 
-function openStockInfoModal(portfolioId, ticker, marketPrice, dividendFreq, dividendPerShare, lastDivDate) {
+function openStockInfoModal(portfolioId, ticker, marketPrice, dividendFreq, dividendPerShare, lastDivDate, sector, investmentType) {
   document.getElementById('edit-portfolio-id').value = portfolioId;
   document.getElementById('edit-ticker').value = ticker;
   document.getElementById('edit-stock-title').textContent = `Stock: ${ticker}`;
@@ -665,6 +726,8 @@ function openStockInfoModal(portfolioId, ticker, marketPrice, dividendFreq, divi
   document.getElementById('edit-dividend-frequency').value = dividendFreq || '';
   document.getElementById('edit-dividend-per-share').value = dividendPerShare || '';
   document.getElementById('edit-last-dividend-date').value = lastDivDate || '';
+  document.getElementById('edit-sector').value = sector || '';
+  document.getElementById('edit-investment-type').value = investmentType || '';
 
   document.getElementById('stock-info-modal').style.display = 'flex';
 }
@@ -684,6 +747,8 @@ document.getElementById('stock-info-form').addEventListener('submit', async (e) 
   const dividendFrequency = document.getElementById('edit-dividend-frequency').value || null;
   const dividendPerShare = parseFloat(document.getElementById('edit-dividend-per-share').value) || null;
   const lastDividendDate = document.getElementById('edit-last-dividend-date').value || null;
+  const sector         = document.getElementById('edit-sector').value || null;
+  const investmentType = document.getElementById('edit-investment-type').value || null;
 
   try {
     const response = await fetch(`/api/portfolios/${portfolioId}/stocks/${ticker}`, {
@@ -693,7 +758,9 @@ document.getElementById('stock-info-form').addEventListener('submit', async (e) 
         market_price: marketPrice,
         dividend_frequency: dividendFrequency,
         dividend_per_share: dividendPerShare,
-        last_dividend_date: lastDividendDate
+        last_dividend_date: lastDividendDate,
+        sector: sector,
+        investment_type: investmentType
       })
     });
 
