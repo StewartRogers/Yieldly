@@ -7,6 +7,115 @@ const app = express();
 const PORT = 3000;
 const ALPHA_KEY = process.env.ALPHA_KEY;
 
+// Build the holdings SQL query. When portfolioId is provided, filters to that portfolio.
+function queryHoldings(portfolioId) {
+  const whereClause = portfolioId ? `WHERE t.portfolio_id = ${portfolioId}` : '';
+  return db.prepare(`
+    SELECT
+      p.code  AS portfolio_code,
+      p.name  AS portfolio_name,
+      t.ticker,
+      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity
+               WHEN t.type = 'SELL' THEN -t.quantity ELSE 0 END) AS shares,
+      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END) AS shares_bought,
+      SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END) AS shares_sold,
+      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.total ELSE 0 END) AS buy_total,
+      SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) AS sale_total,
+      SUM(CASE WHEN t.type = 'DIVIDEND' THEN t.total ELSE 0 END) AS dividends_paid,
+      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.total ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END), 0) AS buy_price,
+      SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END), 0) AS sale_price,
+      COUNT(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN 1 END) AS buy_count,
+      COUNT(CASE WHEN t.type = 'SELL' THEN 1 END) AS sell_count,
+      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN COALESCE(t.commission,0) ELSE 0 END) AS buy_expense,
+      SUM(CASE WHEN t.type = 'SELL' THEN COALESCE(t.commission,0) ELSE 0 END) AS sale_expense,
+      s.market_price,
+      s.dividend_yield,
+      s.dividend_frequency,
+      s.dividend_per_share,
+      s.last_dividend_date,
+      s.sector,
+      s.investment_type
+    FROM transactions t
+    JOIN portfolios p ON t.portfolio_id = p.id
+    LEFT JOIN stock_info s ON s.portfolio_id = t.portfolio_id AND s.ticker = t.ticker
+    ${whereClause}
+    GROUP BY t.portfolio_id, t.ticker
+    HAVING shares > 0 OR shares_sold > 0
+    ORDER BY p.display_order, p.code, t.ticker
+  `).all();
+}
+
+function computeHoldings(rows) {
+  return rows.map(h => {
+    const shares      = h.shares      || 0;
+    const buyTotal    = h.buy_total   || 0;
+    const saleTotal   = h.sale_total  || 0;
+    const divPaid     = h.dividends_paid || 0;
+    const buyExpense  = h.buy_expense || 0;
+    const saleExpense = h.sale_expense || 0;
+    const sharesBought= h.shares_bought || 0;
+    const marketPrice = h.market_price  || 0;
+    const marketValue = shares * marketPrice;
+    const totalReturn = marketValue + saleTotal + divPaid - buyTotal;
+    const returnPct   = buyTotal > 0 ? (totalReturn / buyTotal) * 100 : 0;
+    const divFreq    = h.dividend_frequency || '';
+    const freqMap    = { Monthly: 12, Quarterly: 4, 'Semi-Annual': 2, Annual: 1 };
+    const multiplier = freqMap[divFreq] || 0;
+    const storedYield = h.dividend_yield;   // % from TMX (e.g. 5.5)
+    const storedPerShare = h.dividend_per_share || 0;
+
+    let annualPayout, nextPayout, divPerShare, divYield;
+    if (storedYield != null && storedYield > 0 && marketValue > 0) {
+      // Yield-first approach: Annual = MktVal × Yield%, Next = Annual ÷ Freq, PerShare = Next ÷ Shares
+      annualPayout = marketValue * storedYield / 100;
+      nextPayout   = multiplier > 0 ? annualPayout / multiplier : 0;
+      divPerShare  = (shares > 0 && multiplier > 0) ? nextPayout / shares : 0;
+      divYield     = storedYield;
+    } else {
+      // Fallback: per-share manually entered
+      nextPayout   = shares * storedPerShare;
+      annualPayout = nextPayout * multiplier;
+      divPerShare  = storedPerShare;
+      divYield     = marketValue > 0 ? (annualPayout / marketValue) * 100 : 0;
+    }
+    const totalExpense= buyExpense + saleExpense;
+    const proceeds    = saleTotal - saleExpense;
+    const acb         = sharesBought > 0 ? (buyTotal + buyExpense) * (shares / sharesBought) : 0;
+    return {
+      portfolio_code:    h.portfolio_code || '',
+      portfolio_name:    h.portfolio_name || '',
+      ticker:            h.ticker,
+      investment_type:   h.investment_type || '',
+      sector:            h.sector || '',
+      shares,
+      buy_price:         h.buy_price  || 0,
+      market_price:      marketPrice,
+      sale_price:        h.sale_price || 0,
+      buy_total:         buyTotal,
+      market_value:      marketValue,
+      sale_total:        saleTotal,
+      dividends_paid:    divPaid,
+      return:            totalReturn,
+      return_percent:    returnPct,
+      dividend_frequency:  divFreq,
+      dividend_per_share:  divPerShare,
+      last_dividend_date:  h.last_dividend_date || '',
+      next_payout:   nextPayout,
+      annual_payout: annualPayout,
+      dividend_yield:    divYield,
+      buy_count:   h.buy_count  || 0,
+      sell_count:  h.sell_count || 0,
+      buy_expense:   buyExpense,
+      sale_expense:  saleExpense,
+      total_expense: totalExpense,
+      proceeds,
+      acb
+    };
+  });
+}
+
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
@@ -90,23 +199,25 @@ app.delete('/api/portfolios/:id', (req, res) => {
 app.put('/api/portfolios/:portfolioId/stocks/:ticker', (req, res) => {
   try {
     const { portfolioId, ticker } = req.params;
-    const { market_price, dividend_frequency, dividend_per_share, last_dividend_date } = req.body;
+    const { market_price, dividend_frequency, dividend_per_share, last_dividend_date, sector, investment_type } = req.body;
 
     const stmt = db.prepare(`
-      INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_frequency, dividend_per_share, last_dividend_date, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_frequency, dividend_per_share, last_dividend_date, sector, investment_type, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
-        market_price = COALESCE(?, market_price),
-        dividend_frequency = COALESCE(?, dividend_frequency),
-        dividend_per_share = COALESCE(?, dividend_per_share),
-        last_dividend_date = COALESCE(?, last_dividend_date),
-        updated_at = CURRENT_TIMESTAMP
+        market_price        = COALESCE(?, market_price),
+        dividend_frequency  = COALESCE(?, dividend_frequency),
+        dividend_per_share  = COALESCE(?, dividend_per_share),
+        last_dividend_date  = COALESCE(?, last_dividend_date),
+        sector              = COALESCE(?, sector),
+        investment_type     = COALESCE(?, investment_type),
+        updated_at          = CURRENT_TIMESTAMP
     `);
 
     stmt.run(
       portfolioId, ticker.toUpperCase(),
-      market_price, dividend_frequency, dividend_per_share, last_dividend_date,
-      market_price, dividend_frequency, dividend_per_share, last_dividend_date
+      market_price, dividend_frequency, dividend_per_share, last_dividend_date, sector, investment_type,
+      market_price, dividend_frequency, dividend_per_share, last_dividend_date, sector, investment_type
     );
 
     res.json({ message: 'Stock info updated' });
@@ -115,147 +226,142 @@ app.put('/api/portfolios/:portfolioId/stocks/:ticker', (req, res) => {
   }
 });
 
-// Refresh prices from Alpha Vantage API
+// ===== TMX DATA HELPERS =====
+
+function normalizeTicker(ticker) {
+  return ticker.replace(/\.TO$/i, '').replace(/-/g, '.');
+}
+
+async function fetchTMXQuote(ticker) {
+  const symbol = normalizeTicker(ticker);
+  const query = `{
+    getQuoteBySymbol(symbol: "${symbol}", locale: "en") {
+      price
+      dividendYield
+      dividendPayDate
+    }
+  }`;
+  const response = await fetch('https://app-money.tmx.com/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Origin': 'https://money.tmx.com',
+      'Referer': 'https://money.tmx.com/'
+    },
+    body: JSON.stringify({ query })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  if (data.errors) throw new Error(data.errors[0]?.message || 'GraphQL error');
+  return data?.data?.getQuoteBySymbol ?? null;
+}
+
+function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, payDate) {
+  db.prepare(`
+    INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_yield, last_dividend_date, updated_at)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
+      market_price    = COALESCE(?, market_price),
+      dividend_yield  = COALESCE(?, dividend_yield),
+      last_dividend_date = COALESCE(?, last_dividend_date),
+      updated_at      = CURRENT_TIMESTAMP
+  `).run(portfolioId, ticker, marketPrice, dividendYield, payDate,
+         marketPrice, dividendYield, payDate);
+}
+
+// Refresh prices for one portfolio using TMX
 app.post('/api/portfolios/:portfolioId/refresh-prices', async (req, res) => {
   try {
-    if (!ALPHA_KEY) {
-      return res.status(500).json({ error: 'Alpha Vantage API key not configured. Please add ALPHA_KEY to your .env file' });
-    }
-
-    console.log('Alpha Vantage API Key loaded:', ALPHA_KEY ? 'Yes' : 'No');
-
     const portfolioId = req.params.portfolioId;
-
-    // Get all unique tickers from portfolio holdings
-    const holdings = db.prepare(`
-      SELECT DISTINCT ticker
-      FROM transactions
-      WHERE portfolio_id = ?
+    const tickers = db.prepare(`
+      SELECT DISTINCT ticker FROM transactions
+      WHERE portfolio_id = ? AND ticker != 'CASH'
       GROUP BY ticker
-      HAVING SUM(CASE
-        WHEN type IN ('BUY', 'DIVIDEND_REINVEST') THEN quantity
-        WHEN type = 'SELL' THEN -quantity
-        ELSE 0
-      END) > 0
-    `).all(portfolioId);
+      HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
+                      WHEN type = 'SELL' THEN -quantity ELSE 0 END) > 0
+    `).all(portfolioId).map(r => r.ticker);
 
-    if (holdings.length === 0) {
-      return res.json({ message: 'No holdings to update', updated: 0 });
+    if (!tickers.length) return res.json({ message: 'No holdings to update', updated: 0 });
+
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const today = new Date(); today.setHours(0,0,0,0);
+    let updated = 0; const errors = [];
+
+    for (let i = 0; i < tickers.length; i++) {
+      const ticker = tickers[i];
+      try {
+        const q = await fetchTMXQuote(ticker);
+        if (!q) { errors.push({ ticker, error: 'No data' }); }
+        else {
+          const price = q.price != null ? parseFloat(q.price) : null;
+          // TMX returns dividendYield as 0–100 percentage (e.g. 5.5 = 5.5%)
+          const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
+          const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today
+                           ? q.dividendPayDate : null;
+          upsertStockInfo(portfolioId, ticker, price, divYield, payDate);
+          console.log(`${ticker}: $${price?.toFixed(2)} yield=${divYield}%`);
+          updated++;
+        }
+      } catch (e) { errors.push({ ticker, error: e.message }); }
+      if (i < tickers.length - 1) await wait(300);
     }
 
-    const tickers = holdings.map(h => h.ticker);
-    console.log(`Fetching prices for ${tickers.length} stocks using Alpha Vantage`);
-    console.log(`Note: Free tier limit is 25 requests/day, 5 requests/minute`);
+    res.json({ message: `Updated ${updated} of ${tickers.length} stocks`, updated,
+               total: tickers.length, errors: errors.length ? errors : undefined });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-    let updated = 0;
+// Refresh prices for ALL portfolios using TMX (fetches each unique ticker once)
+app.post('/api/refresh-all-prices', async (req, res) => {
+  try {
+    // All portfolio_id/ticker combos with current holdings
+    const holdings = db.prepare(`
+      SELECT DISTINCT portfolio_id, ticker FROM transactions
+      WHERE ticker != 'CASH'
+      GROUP BY portfolio_id, ticker
+      HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
+                      WHEN type = 'SELL' THEN -quantity ELSE 0 END) > 0
+    `).all();
+
+    if (!holdings.length) return res.json({ message: 'No holdings to update', updated: 0 });
+
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const today = new Date(); today.setHours(0,0,0,0);
     const errors = [];
 
-    // Helper function to wait between requests (rate limiting)
-    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    // Process each holding individually
-    for (let i = 0; i < holdings.length; i++) {
+    // Fetch each unique ticker from TMX once
+    const uniqueTickers = [...new Set(holdings.map(h => h.ticker))];
+    const quotes = {};
+    for (let i = 0; i < uniqueTickers.length; i++) {
+      const ticker = uniqueTickers[i];
       try {
-        const ticker = holdings[i].ticker;
-        console.log(`[${i + 1}/${holdings.length}] Fetching quote for ${ticker}...`);
-
-        // Alpha Vantage GLOBAL_QUOTE endpoint supports TSX stocks
-        const quoteUrl = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_KEY}`;
-        const quoteResponse = await fetch(quoteUrl);
-
-        if (!quoteResponse.ok) {
-          const errorText = await quoteResponse.text();
-          console.error(`Alpha Vantage API Response for ${ticker}:`, quoteResponse.status, errorText);
-          errors.push({ ticker, error: `API error (${quoteResponse.status})` });
-
-          // Wait 12 seconds between requests (5 per minute rate limit)
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        const quoteData = await quoteResponse.json();
-
-        // Check for API error messages
-        if (quoteData['Error Message']) {
-          errors.push({ ticker, error: 'Invalid ticker symbol' });
-          console.log(`${ticker}: Invalid symbol`);
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        if (quoteData['Note']) {
-          errors.push({ ticker, error: 'API rate limit reached' });
-          console.log(`${ticker}: Rate limit reached`);
-          break; // Stop processing if we hit rate limit
-        }
-
-        const quote = quoteData['Global Quote'];
-        if (!quote || !quote['05. price']) {
-          errors.push({ ticker, error: 'No quote data returned' });
-          console.log(`${ticker}: No data returned`);
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        const marketPrice = parseFloat(quote['05. price']);
-
-        if (!marketPrice || marketPrice <= 0) {
-          errors.push({ ticker, error: 'Invalid price data' });
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        console.log(`${ticker}: $${marketPrice.toFixed(2)}`);
-
-        // For now, skip dividend data fetching to conserve API calls
-        // Alpha Vantage has a separate endpoint for dividends that would use more API calls
-        let dividendData = null;
-
-        // Update stock_info
-        const stmt = db.prepare(`
-          INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_frequency, dividend_per_share, last_dividend_date, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
-            market_price = ?,
-            dividend_frequency = COALESCE(?, dividend_frequency),
-            dividend_per_share = COALESCE(?, dividend_per_share),
-            last_dividend_date = COALESCE(?, last_dividend_date),
-            updated_at = CURRENT_TIMESTAMP
-        `);
-
-        stmt.run(
-          portfolioId, ticker, marketPrice,
-          dividendData?.frequency, dividendData?.per_share, dividendData?.last_date,
-          marketPrice,
-          dividendData?.frequency, dividendData?.per_share, dividendData?.last_date
-        );
-
-        updated++;
-
-        // Wait 12 seconds between requests (5 per minute rate limit)
-        if (i < holdings.length - 1) {
-          console.log(`Waiting 12 seconds before next request...`);
-          await wait(12000);
-        }
-
-      } catch (error) {
-        errors.push({ ticker: holdings[i].ticker, error: error.message });
-        console.error(`Error processing ${holdings[i].ticker}:`, error);
-
-        // Wait even on error to respect rate limits
-        if (i < holdings.length - 1) await wait(12000);
+        quotes[ticker] = await fetchTMXQuote(ticker);
+        console.log(`${ticker}: ${JSON.stringify(quotes[ticker])}`);
+      } catch (e) {
+        errors.push({ ticker, error: e.message });
+        quotes[ticker] = null;
       }
+      if (i < uniqueTickers.length - 1) await wait(300);
     }
 
-    res.json({
-      message: `Updated ${updated} of ${holdings.length} stocks`,
-      updated: updated,
-      total: holdings.length,
-      errors: errors.length > 0 ? errors : undefined
-    });
+    // Write to every portfolio that holds each ticker
+    let updated = 0;
+    for (const { portfolio_id, ticker } of holdings) {
+      const q = quotes[ticker];
+      if (!q) continue;
+      const price    = q.price         != null ? parseFloat(q.price)         : null;
+      const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
+      const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today
+                       ? q.dividendPayDate : null;
+      upsertStockInfo(portfolio_id, ticker, price, divYield, payDate);
+      updated++;
+    }
 
+    res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueTickers.length} unique tickers)`,
+               updated, total: holdings.length, errors: errors.length ? errors : undefined });
   } catch (error) {
-    console.error('Error refreshing prices:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -278,12 +384,58 @@ app.get('/api/portfolios/:portfolioId/transactions', (req, res) => {
   }
 });
 
+// All portfolios cash/invested/market-value overview
+app.get('/api/overview', (req, res) => {
+  try {
+    const portfolios = db.prepare('SELECT * FROM portfolios ORDER BY display_order, id').all();
+
+    const cashRows = db.prepare(`
+      SELECT portfolio_id,
+        SUM(CASE
+          WHEN type = 'CONTRIBUTION'                 THEN  total
+          WHEN type = 'WITHDRAWAL'                   THEN -total
+          WHEN type = 'DIVIDEND'                     THEN  total
+          WHEN type = 'SELL'                         THEN  total
+          WHEN type IN ('BUY','DIVIDEND_REINVEST')   THEN -total
+          ELSE 0 END) AS cash,
+        SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN total ELSE 0 END) AS cash_invested
+      FROM transactions GROUP BY portfolio_id
+    `).all();
+
+    const cashById = {};
+    cashRows.forEach(r => { cashById[r.portfolio_id] = r; });
+
+    const allHoldings = computeHoldings(queryHoldings(null));
+    const mktValById = {};
+    const pidByCode = {};
+    portfolios.forEach(p => { pidByCode[p.code] = p.id; });
+    allHoldings.forEach(h => {
+      const pid = pidByCode[h.portfolio_code];
+      if (pid) mktValById[pid] = (mktValById[pid] || 0) + h.market_value;
+    });
+
+    res.json(portfolios.map(p => ({
+      id:           p.id,
+      code:         p.code,
+      name:         p.name,
+      cash:         cashById[p.id]?.cash         || 0,
+      cash_invested:cashById[p.id]?.cash_invested || 0,
+      market_value: mktValById[p.id]             || 0
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Add a new transaction
 app.post('/api/transactions', (req, res) => {
   try {
-    const { portfolio_id, ticker, type, quantity, price, total, date } = req.body;
+    const { portfolio_id, ticker, type, quantity, price, total, date, commission } = req.body;
 
-    if (!portfolio_id || !ticker || !type || !date) {
+    const isCashFlow = type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
+    const finalTicker = (isCashFlow && !ticker) ? 'CASH' : ticker;
+
+    if (!portfolio_id || !finalTicker || !type || !date) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -293,11 +445,11 @@ app.post('/api/transactions', (req, res) => {
     const finalPrice = price !== undefined ? price : 0;
 
     const stmt = db.prepare(`
-      INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, commission, date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const result = stmt.run(portfolio_id, ticker.toUpperCase(), type.toUpperCase(), finalQuantity, finalPrice, finalTotal, date);
+    const result = stmt.run(portfolio_id, finalTicker.toUpperCase(), type.toUpperCase(), finalQuantity, finalPrice, finalTotal, commission || 0, date);
 
     res.json({
       id: result.lastInsertRowid,
@@ -307,6 +459,7 @@ app.post('/api/transactions', (req, res) => {
       quantity: finalQuantity,
       price: finalPrice,
       total: finalTotal,
+      commission: commission || 0,
       date
     });
   } catch (error) {
@@ -317,106 +470,18 @@ app.post('/api/transactions', (req, res) => {
 // Get portfolio summary (aggregated holdings)
 app.get('/api/portfolios/:portfolioId/summary', (req, res) => {
   try {
-    const holdings = db.prepare(`
-      SELECT
-        t.ticker,
-        -- Current shares (Buys + Reinvestments - Sells)
-        SUM(CASE
-          WHEN t.type IN ('BUY', 'DIVIDEND_REINVEST') THEN t.quantity
-          WHEN t.type = 'SELL' THEN -t.quantity
-          ELSE 0
-        END) as shares,
+    const rows = queryHoldings(req.params.portfolioId);
+    res.json(computeHoldings(rows));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-        -- Total shares bought (for average cost calculation)
-        SUM(CASE WHEN t.type IN ('BUY', 'DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END) as shares_bought,
-
-        -- Total shares sold
-        SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END) as shares_sold,
-
-        -- Buy Total (total amount invested)
-        SUM(CASE WHEN t.type IN ('BUY', 'DIVIDEND_REINVEST') THEN t.total ELSE 0 END) as buy_total,
-
-        -- Sale Total (total from sales)
-        SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) as sale_total,
-
-        -- Dividends Paid (total dividends received)
-        SUM(CASE WHEN t.type = 'DIVIDEND' THEN t.total ELSE 0 END) as dividends_paid,
-
-        -- Average buy price (weighted)
-        SUM(CASE WHEN t.type IN ('BUY', 'DIVIDEND_REINVEST') THEN t.total ELSE 0 END) /
-        NULLIF(SUM(CASE WHEN t.type IN ('BUY', 'DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END), 0) as buy_price,
-
-        -- Average sale price
-        SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) /
-        NULLIF(SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END), 0) as sale_price,
-
-        -- Stock info (market price and dividend data)
-        s.market_price,
-        s.dividend_frequency,
-        s.dividend_per_share,
-        s.last_dividend_date
-
-      FROM transactions t
-      LEFT JOIN stock_info s ON s.portfolio_id = t.portfolio_id AND s.ticker = t.ticker
-      WHERE t.portfolio_id = ?
-      GROUP BY t.ticker
-      HAVING shares > 0 OR shares_sold > 0
-    `).all(req.params.portfolioId);
-
-    const portfolio = holdings.map(holding => {
-      const shares = holding.shares || 0;
-      const buyPrice = holding.buy_price || 0;
-      const salePrice = holding.sale_price || 0;
-      const buyTotal = holding.buy_total || 0;
-      const saleTotal = holding.sale_total || 0;
-      const dividendsPaid = holding.dividends_paid || 0;
-
-      // Market price from stock_info table (default 0)
-      const marketPrice = holding.market_price || 0;
-      const marketValue = shares * marketPrice;
-
-      // Return calculation: (Current Value + Sales + Dividends) - Investment
-      const totalReturn = marketValue + saleTotal + dividendsPaid - buyTotal;
-      const returnPercent = buyTotal > 0 ? (totalReturn / buyTotal) * 100 : 0;
-
-      // Dividend calculations
-      const dividendPerShare = holding.dividend_per_share || 0;
-      const dividendFrequency = holding.dividend_frequency || '';
-
-      // Calculate annual payout based on frequency
-      let annualMultiplier = 0;
-      if (dividendFrequency === 'Monthly') annualMultiplier = 12;
-      else if (dividendFrequency === 'Quarterly') annualMultiplier = 4;
-      else if (dividendFrequency === 'Semi-Annual') annualMultiplier = 2;
-      else if (dividendFrequency === 'Annual') annualMultiplier = 1;
-
-      const nextPayout = shares * dividendPerShare;
-      const annualPayout = nextPayout * annualMultiplier;
-      const dividendYield = marketValue > 0 ? (annualPayout / marketValue) * 100 : 0;
-
-      return {
-        ticker: holding.ticker,
-        shares: shares,
-        buy_price: buyPrice,
-        market_price: marketPrice,
-        sale_price: salePrice,
-        buy_total: buyTotal,
-        market_value: marketValue,
-        sale_total: saleTotal,
-        dividends_paid: dividendsPaid,
-        return: totalReturn,
-        return_percent: returnPercent,
-        // Dividend fields
-        dividend_frequency: dividendFrequency,
-        dividend_per_share: dividendPerShare,
-        last_dividend_date: holding.last_dividend_date || '',
-        next_payout: nextPayout,
-        annual_payout: annualPayout,
-        dividend_yield: dividendYield
-      };
-    });
-
-    res.json(portfolio);
+// All portfolios combined summary
+app.get('/api/summary', (req, res) => {
+  try {
+    const rows = queryHoldings(null);
+    res.json(computeHoldings(rows));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

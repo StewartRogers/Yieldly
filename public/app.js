@@ -28,6 +28,8 @@ function setupNavigation() {
       // Show target page
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
+
+      if (targetPage === 'summary') { loadOverview(); loadSummary(); }
     });
   });
 }
@@ -36,9 +38,22 @@ function setupEventListeners() {
   // Set today's date as default
   document.getElementById('date').valueAsDate = new Date();
 
+  // Auto-calculate total when quantity or price changes
+  function recalcSharesTotal() {
+    const qty = parseFloat(document.getElementById('quantity').value) || 0;
+    const px = parseFloat(document.getElementById('price').value) || 0;
+    if (qty > 0 && px > 0) {
+      document.getElementById('shares-total').value = (qty * px).toFixed(2);
+    }
+  }
+  document.getElementById('quantity').addEventListener('input', recalcSharesTotal);
+  document.getElementById('price').addEventListener('input', recalcSharesTotal);
+
   // Transaction type change handler
   document.getElementById('type').addEventListener('change', (e) => {
-    const isDividend = e.target.value === 'DIVIDEND';
+    const type = e.target.value;
+    const isCashOnly = type === 'DIVIDEND' || type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
+    const isCashFlow = type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
     const sharesFields = document.getElementById('shares-fields');
     const dividendField = document.getElementById('dividend-field');
     const quantityInput = document.getElementById('quantity');
@@ -46,8 +61,11 @@ function setupEventListeners() {
     const totalInput = document.getElementById('total');
     const dateInput = document.getElementById('date');
     const dateDividendInput = document.getElementById('date-dividend');
+    const tickerGroup = document.getElementById('ticker-group');
+    const tickerInput = document.getElementById('ticker');
+    const amountLabel = document.getElementById('cash-amount-label');
 
-    if (isDividend) {
+    if (isCashOnly) {
       sharesFields.style.display = 'none';
       dividendField.style.display = 'grid';
       quantityInput.required = false;
@@ -55,7 +73,11 @@ function setupEventListeners() {
       totalInput.required = true;
       quantityInput.value = '';
       priceInput.value = '';
+      document.getElementById('shares-total').value = '';
       dateDividendInput.value = dateInput.value;
+      amountLabel.textContent = isCashFlow ? 'Amount' : 'Total Amount';
+      tickerGroup.style.display = isCashFlow ? 'none' : '';
+      tickerInput.required = !isCashFlow;
     } else {
       sharesFields.style.display = 'grid';
       dividendField.style.display = 'none';
@@ -64,6 +86,9 @@ function setupEventListeners() {
       totalInput.required = false;
       totalInput.value = '';
       dateInput.value = dateDividendInput.value || dateInput.value;
+      tickerGroup.style.display = '';
+      tickerInput.required = true;
+      amountLabel.textContent = 'Total Amount';
     }
   });
 
@@ -135,22 +160,27 @@ function setupEventListeners() {
     }
 
     const type = document.getElementById('type').value;
-    const isDividend = type === 'DIVIDEND';
+    const isCashOnly = type === 'DIVIDEND' || type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
+    const isCashFlow = type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
 
     let transaction = {
       portfolio_id: portfolioId,
-      ticker: document.getElementById('ticker').value.trim(),
+      ticker: isCashFlow ? 'CASH' : document.getElementById('ticker').value.trim().toUpperCase(),
       type: type,
-      date: isDividend ? document.getElementById('date-dividend').value : document.getElementById('date').value
+      date: isCashOnly ? document.getElementById('date-dividend').value : document.getElementById('date').value
     };
 
-    if (isDividend) {
+    if (isCashOnly) {
       transaction.quantity = 0;
       transaction.price = 0;
       transaction.total = parseFloat(document.getElementById('total').value);
     } else {
       transaction.quantity = parseFloat(document.getElementById('quantity').value);
       transaction.price = parseFloat(document.getElementById('price').value);
+      const enteredTotal = parseFloat(document.getElementById('shares-total').value);
+      if (enteredTotal > 0) transaction.total = enteredTotal;
+      const commission = parseFloat(document.getElementById('commission').value) || 0;
+      if (commission > 0) transaction.commission = commission;
     }
 
     try {
@@ -164,7 +194,10 @@ function setupEventListeners() {
         throw new Error('Failed to add transaction');
       }
 
+      // Preserve portfolio selection and reset only transaction fields
+      const savedPortfolioId = document.getElementById('transaction-portfolio-select').value;
       document.getElementById('transaction-form').reset();
+      document.getElementById('transaction-portfolio-select').value = savedPortfolioId;
       document.getElementById('date').valueAsDate = new Date();
       document.getElementById('shares-fields').style.display = 'grid';
       document.getElementById('dividend-field').style.display = 'none';
@@ -313,6 +346,108 @@ async function loadPortfolios() {
   }
 }
 
+async function loadOverview() {
+  const container = document.getElementById('overview-container');
+  try {
+    const response = await fetch('/api/overview');
+    const data = await response.json();
+
+    if (!data.length) { container.innerHTML = ''; return; }
+
+    const fmt = v => '$' + v.toFixed(2);
+    const totalCash    = data.reduce((s, p) => s + p.cash, 0);
+    const totalInvested= data.reduce((s, p) => s + p.cash_invested, 0);
+    const totalMkt     = data.reduce((s, p) => s + p.market_value, 0);
+
+    container.innerHTML = `
+      <div class="overview-table-wrap">
+        <table class="overview-table">
+          <thead><tr>
+            <th></th>
+            ${data.map(p => `<th title="${p.name}">${p.code}</th>`).join('')}
+            <th>Total</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <th>Cash Balance</th>
+              ${data.map(p => `<td class="${p.cash < 0 ? 'negative' : ''}">${fmt(p.cash)}</td>`).join('')}
+              <td class="${totalCash < 0 ? 'negative' : ''}">${fmt(totalCash)}</td>
+            </tr>
+            <tr>
+              <th>Cash Invested</th>
+              ${data.map(p => `<td>${fmt(p.cash_invested)}</td>`).join('')}
+              <td>${fmt(totalInvested)}</td>
+            </tr>
+            <tr>
+              <th>Market Value</th>
+              ${data.map(p => `<td>${p.market_value > 0 ? fmt(p.market_value) : '—'}</td>`).join('')}
+              <td>${totalMkt > 0 ? fmt(totalMkt) : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  } catch (error) {
+    container.innerHTML = `<p class="empty-state">Error loading overview.</p>`;
+  }
+}
+
+async function loadSummary() {
+  const tbody = document.getElementById('summary-tbody');
+  tbody.innerHTML = '<tr><td colspan="28" class="empty-state">Loading...</td></tr>';
+  try {
+    const response = await fetch('/api/summary');
+    const holdings = await response.json();
+
+    if (holdings.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="28" class="empty-state">No holdings yet.</td></tr>';
+      return;
+    }
+
+    const totalMktValue = holdings.reduce((s, h) => s + h.market_value, 0);
+
+    const fmt  = v => v ? '$' + v.toFixed(2) : '—';
+    const fmtN = v => v ? v.toFixed(4) : '—';
+    const fmtP = v => v ? v.toFixed(2) + '%' : '—';
+
+    tbody.innerHTML = holdings.map(h => {
+      const portShare = totalMktValue > 0 ? (h.market_value / totalMktValue * 100) : 0;
+      const retClass  = h.return >= 0 ? 'positive' : 'negative';
+      return `<tr>
+        <td>${h.portfolio_code}</td>
+        <td>${h.investment_type}</td>
+        <td class="ticker-cell">${h.ticker}</td>
+        <td>${fmtN(h.shares)}</td>
+        <td>${fmt(h.buy_price)}</td>
+        <td>${h.market_price > 0 ? fmt(h.market_price) : '—'}</td>
+        <td>${h.sale_price > 0 ? fmt(h.sale_price) : '—'}</td>
+        <td>${fmt(h.buy_total)}</td>
+        <td>${h.market_price > 0 ? fmt(h.market_value) : '—'}</td>
+        <td>${h.sale_total > 0 ? fmt(h.sale_total) : '—'}</td>
+        <td>${h.dividends_paid > 0 ? fmt(h.dividends_paid) : '—'}</td>
+        <td>${h.dividend_frequency || '—'}</td>
+        <td>${h.last_dividend_date || '—'}</td>
+        <td>${h.dividend_per_share > 0 ? fmt(h.dividend_per_share) : '—'}</td>
+        <td>${h.next_payout > 0 ? fmt(h.next_payout) : '—'}</td>
+        <td>${h.annual_payout > 0 ? fmt(h.annual_payout) : '—'}</td>
+        <td class="${retClass}">${h.market_price > 0 ? fmt(h.return) : '—'}</td>
+        <td class="${retClass}">${h.market_price > 0 ? fmtP(h.return_percent) : '—'}</td>
+        <td>${h.market_price > 0 && h.dividend_yield > 0 ? fmtP(h.dividend_yield) : '—'}</td>
+        <td>${h.buy_count}</td>
+        <td>${h.sell_count}</td>
+        <td>${h.buy_expense > 0 ? fmt(h.buy_expense) : '—'}</td>
+        <td>${h.sale_expense > 0 ? fmt(h.sale_expense) : '—'}</td>
+        <td>${h.sale_total > 0 ? fmt(h.proceeds) : '—'}</td>
+        <td>${fmt(h.acb)}</td>
+        <td>${h.total_expense > 0 ? fmt(h.total_expense) : '—'}</td>
+        <td>${h.sector || '—'}</td>
+        <td>${totalMktValue > 0 ? fmtP(portShare) : '—'}</td>
+      </tr>`;
+    }).join('');
+  } catch (error) {
+    tbody.innerHTML = `<tr><td colspan="28" class="empty-state">Error loading summary: ${error.message}</td></tr>`;
+  }
+}
+
 // Create portfolio tabs
 function createPortfolioTabs(portfolios) {
   const tabsContainer = document.getElementById('portfolio-tabs');
@@ -394,7 +529,7 @@ async function loadPortfolioHoldings(portfolioId) {
             <div class="ticker">${holding.ticker}</div>
             <div class="shares">${holding.shares.toFixed(2)} shares</div>
           </div>
-          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}')">
+          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">
             Edit
           </button>
         </div>
@@ -640,7 +775,7 @@ async function updatePortfolioOrder() {
 
 // ===== STOCK INFO MODAL =====
 
-function openStockInfoModal(portfolioId, ticker, marketPrice, dividendFreq, dividendPerShare, lastDivDate) {
+function openStockInfoModal(portfolioId, ticker, marketPrice, dividendFreq, dividendPerShare, lastDivDate, sector, investmentType) {
   document.getElementById('edit-portfolio-id').value = portfolioId;
   document.getElementById('edit-ticker').value = ticker;
   document.getElementById('edit-stock-title').textContent = `Stock: ${ticker}`;
@@ -648,6 +783,8 @@ function openStockInfoModal(portfolioId, ticker, marketPrice, dividendFreq, divi
   document.getElementById('edit-dividend-frequency').value = dividendFreq || '';
   document.getElementById('edit-dividend-per-share').value = dividendPerShare || '';
   document.getElementById('edit-last-dividend-date').value = lastDivDate || '';
+  document.getElementById('edit-sector').value = sector || '';
+  document.getElementById('edit-investment-type').value = investmentType || '';
 
   document.getElementById('stock-info-modal').style.display = 'flex';
 }
@@ -667,6 +804,8 @@ document.getElementById('stock-info-form').addEventListener('submit', async (e) 
   const dividendFrequency = document.getElementById('edit-dividend-frequency').value || null;
   const dividendPerShare = parseFloat(document.getElementById('edit-dividend-per-share').value) || null;
   const lastDividendDate = document.getElementById('edit-last-dividend-date').value || null;
+  const sector         = document.getElementById('edit-sector').value || null;
+  const investmentType = document.getElementById('edit-investment-type').value || null;
 
   try {
     const response = await fetch(`/api/portfolios/${portfolioId}/stocks/${ticker}`, {
@@ -676,7 +815,9 @@ document.getElementById('stock-info-form').addEventListener('submit', async (e) 
         market_price: marketPrice,
         dividend_frequency: dividendFrequency,
         dividend_per_share: dividendPerShare,
-        last_dividend_date: lastDividendDate
+        last_dividend_date: lastDividendDate,
+        sector: sector,
+        investment_type: investmentType
       })
     });
 
@@ -700,48 +841,56 @@ document.getElementById('stock-info-modal').addEventListener('click', (e) => {
   }
 });
 
-// ===== REFRESH PRICES FROM API =====
+// ===== REFRESH PRICES (TMX) =====
 
-document.getElementById('refresh-prices-btn').addEventListener('click', async () => {
-  if (!currentPortfolioId) {
-    alert('Please select a portfolio first');
-    return;
-  }
-
-  const refreshBtn = document.getElementById('refresh-prices-btn');
-  const originalText = refreshBtn.innerHTML;
-
+async function runRefresh(url, btn, statusEl, onSuccess) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Refreshing…';
+  if (statusEl) { statusEl.style.display = 'none'; }
   try {
-    // Show loading state
-    refreshBtn.disabled = true;
-    refreshBtn.innerHTML = '🔄 Refreshing<span class="spinner"></span>';
-
-    const response = await fetch(`/api/portfolios/${currentPortfolioId}/refresh-prices`, {
-      method: 'POST'
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to refresh prices');
+    const res = await fetch(url, { method: 'POST' });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    const result = await res.json();
+    if (onSuccess) await onSuccess(result);
+    let msg = `<strong>${result.message}</strong>`;
+    if (result.errors?.length) {
+      msg += `<br><details style="margin-top:.5rem"><summary>${result.errors.length} error(s)</summary>` +
+             result.errors.map(e => `${e.ticker}: ${e.error}`).join('<br>') + '</details>';
     }
-
-    const result = await response.json();
-
-    // Reload portfolio holdings to show updated prices
-    await loadPortfolioHoldings(currentPortfolioId);
-
-    // Show success message
-    let message = result.message;
-    if (result.errors && result.errors.length > 0) {
-      message += `\n\nErrors:\n${result.errors.map(e => `${e.ticker}: ${e.error}`).join('\n')}`;
+    if (statusEl) {
+      statusEl.className = 'import-status success';
+      statusEl.innerHTML = msg;
+      statusEl.style.display = 'block';
+    } else {
+      alert(result.message + (result.errors?.length ? `\n\nErrors: ${result.errors.map(e=>`${e.ticker}: ${e.error}`).join(', ')}` : ''));
     }
-    alert(message);
-
   } catch (error) {
-    console.error('Error refreshing prices:', error);
-    alert('Error refreshing prices: ' + error.message);
+    if (statusEl) {
+      statusEl.className = 'import-status error';
+      statusEl.innerHTML = `<strong>Error:</strong> ${error.message}`;
+      statusEl.style.display = 'block';
+    } else {
+      alert('Error refreshing prices: ' + error.message);
+    }
   } finally {
-    refreshBtn.disabled = false;
-    refreshBtn.innerHTML = originalText;
+    btn.disabled = false;
+    btn.innerHTML = original;
   }
+}
+
+// Per-portfolio refresh (Portfolios page)
+document.getElementById('refresh-prices-btn').addEventListener('click', () => {
+  if (!currentPortfolioId) { alert('Please select a portfolio first'); return; }
+  const btn = document.getElementById('refresh-prices-btn');
+  runRefresh(`/api/portfolios/${currentPortfolioId}/refresh-prices`, btn, null,
+    async () => { await loadPortfolioHoldings(currentPortfolioId); });
+});
+
+// Refresh all portfolios (Summary page)
+document.getElementById('refresh-all-btn').addEventListener('click', () => {
+  const btn = document.getElementById('refresh-all-btn');
+  const status = document.getElementById('refresh-all-status');
+  runRefresh('/api/refresh-all-prices', btn, status,
+    async () => { await loadOverview(); await loadSummary(); });
 });
