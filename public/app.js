@@ -841,48 +841,56 @@ document.getElementById('stock-info-modal').addEventListener('click', (e) => {
   }
 });
 
-// ===== REFRESH PRICES FROM API =====
+// ===== REFRESH PRICES (TMX) =====
 
-document.getElementById('refresh-prices-btn').addEventListener('click', async () => {
-  if (!currentPortfolioId) {
-    alert('Please select a portfolio first');
-    return;
-  }
-
-  const refreshBtn = document.getElementById('refresh-prices-btn');
-  const originalText = refreshBtn.innerHTML;
-
+async function runRefresh(url, btn, statusEl, onSuccess) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Refreshing…';
+  if (statusEl) { statusEl.style.display = 'none'; }
   try {
-    // Show loading state
-    refreshBtn.disabled = true;
-    refreshBtn.innerHTML = '🔄 Refreshing<span class="spinner"></span>';
-
-    const response = await fetch(`/api/portfolios/${currentPortfolioId}/refresh-prices`, {
-      method: 'POST'
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to refresh prices');
+    const res = await fetch(url, { method: 'POST' });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    const result = await res.json();
+    if (onSuccess) await onSuccess(result);
+    let msg = `<strong>${result.message}</strong>`;
+    if (result.errors?.length) {
+      msg += `<br><details style="margin-top:.5rem"><summary>${result.errors.length} error(s)</summary>` +
+             result.errors.map(e => `${e.ticker}: ${e.error}`).join('<br>') + '</details>';
     }
-
-    const result = await response.json();
-
-    // Reload portfolio holdings to show updated prices
-    await loadPortfolioHoldings(currentPortfolioId);
-
-    // Show success message
-    let message = result.message;
-    if (result.errors && result.errors.length > 0) {
-      message += `\n\nErrors:\n${result.errors.map(e => `${e.ticker}: ${e.error}`).join('\n')}`;
+    if (statusEl) {
+      statusEl.className = 'import-status success';
+      statusEl.innerHTML = msg;
+      statusEl.style.display = 'block';
+    } else {
+      alert(result.message + (result.errors?.length ? `\n\nErrors: ${result.errors.map(e=>`${e.ticker}: ${e.error}`).join(', ')}` : ''));
     }
-    alert(message);
-
   } catch (error) {
-    console.error('Error refreshing prices:', error);
-    alert('Error refreshing prices: ' + error.message);
+    if (statusEl) {
+      statusEl.className = 'import-status error';
+      statusEl.innerHTML = `<strong>Error:</strong> ${error.message}`;
+      statusEl.style.display = 'block';
+    } else {
+      alert('Error refreshing prices: ' + error.message);
+    }
   } finally {
-    refreshBtn.disabled = false;
-    refreshBtn.innerHTML = originalText;
+    btn.disabled = false;
+    btn.innerHTML = original;
   }
+}
+
+// Per-portfolio refresh (Portfolios page)
+document.getElementById('refresh-prices-btn').addEventListener('click', () => {
+  if (!currentPortfolioId) { alert('Please select a portfolio first'); return; }
+  const btn = document.getElementById('refresh-prices-btn');
+  runRefresh(`/api/portfolios/${currentPortfolioId}/refresh-prices`, btn, null,
+    async () => { await loadPortfolioHoldings(currentPortfolioId); });
+});
+
+// Refresh all portfolios (Summary page)
+document.getElementById('refresh-all-btn').addEventListener('click', () => {
+  const btn = document.getElementById('refresh-all-btn');
+  const status = document.getElementById('refresh-all-status');
+  runRefresh('/api/refresh-all-prices', btn, status,
+    async () => { await loadOverview(); await loadSummary(); });
 });

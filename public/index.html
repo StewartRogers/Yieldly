@@ -55,7 +55,13 @@
 
     <!-- ===== SUMMARY PAGE ===== -->
     <div id="page-summary" class="page-content">
-      <h1>Holdings Summary</h1>
+      <div class="page-header">
+        <h1>Holdings Summary</h1>
+        <div class="page-header-actions">
+          <button id="refresh-all-btn" class="btn-secondary">Refresh All Prices</button>
+        </div>
+      </div>
+      <div id="refresh-all-status" style="display:none; margin-bottom:1rem;"></div>
 
       <!-- Portfolio Overview (Cash / Cash Invested / Market Value per portfolio) -->
       <div id="overview-container" class="overview-section">
@@ -110,7 +116,7 @@
         <h1>Portfolio Holdings</h1>
         <div class="page-header-actions">
           <button id="refresh-prices-btn" class="btn-secondary" style="display: none;">
-            🔄 Refresh Prices
+            Refresh Prices
           </button>
           <button id="new-portfolio-btn" class="btn-link">+ New Portfolio</button>
         </div>
