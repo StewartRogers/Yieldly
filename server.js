@@ -212,147 +212,141 @@ app.put('/api/portfolios/:portfolioId/stocks/:ticker', (req, res) => {
   }
 });
 
-// Refresh prices from Alpha Vantage API
+// ===== TMX DATA HELPERS =====
+
+function normalizeTicker(ticker) {
+  return ticker.replace(/\.TO$/i, '').replace(/-/g, '.');
+}
+
+async function fetchTMXQuote(ticker) {
+  const symbol = normalizeTicker(ticker);
+  const query = `{
+    getQuoteBySymbol(symbol: "${symbol}", locale: "en") {
+      price
+      dividend
+      dividendPayDate
+    }
+  }`;
+  const response = await fetch('https://app-money.tmx.com/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Origin': 'https://money.tmx.com',
+      'Referer': 'https://money.tmx.com/'
+    },
+    body: JSON.stringify({ query })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  if (data.errors) throw new Error(data.errors[0]?.message || 'GraphQL error');
+  return data?.data?.getQuoteBySymbol ?? null;
+}
+
+function upsertStockInfo(portfolioId, ticker, marketPrice, dividendPerShare, payDate) {
+  db.prepare(`
+    INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_per_share, last_dividend_date, updated_at)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
+      market_price       = COALESCE(?, market_price),
+      dividend_per_share = COALESCE(?, dividend_per_share),
+      last_dividend_date = COALESCE(?, last_dividend_date),
+      updated_at         = CURRENT_TIMESTAMP
+  `).run(portfolioId, ticker, marketPrice, dividendPerShare, payDate,
+         marketPrice, dividendPerShare, payDate);
+}
+
+// Refresh prices for one portfolio using TMX
 app.post('/api/portfolios/:portfolioId/refresh-prices', async (req, res) => {
   try {
-    if (!ALPHA_KEY) {
-      return res.status(500).json({ error: 'Alpha Vantage API key not configured. Please add ALPHA_KEY to your .env file' });
-    }
-
-    console.log('Alpha Vantage API Key loaded:', ALPHA_KEY ? 'Yes' : 'No');
-
     const portfolioId = req.params.portfolioId;
-
-    // Get all unique tickers from portfolio holdings
-    const holdings = db.prepare(`
-      SELECT DISTINCT ticker
-      FROM transactions
-      WHERE portfolio_id = ?
+    const tickers = db.prepare(`
+      SELECT DISTINCT ticker FROM transactions
+      WHERE portfolio_id = ? AND ticker != 'CASH'
       GROUP BY ticker
-      HAVING SUM(CASE
-        WHEN type IN ('BUY', 'DIVIDEND_REINVEST') THEN quantity
-        WHEN type = 'SELL' THEN -quantity
-        ELSE 0
-      END) > 0
-    `).all(portfolioId);
+      HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
+                      WHEN type = 'SELL' THEN -quantity ELSE 0 END) > 0
+    `).all(portfolioId).map(r => r.ticker);
 
-    if (holdings.length === 0) {
-      return res.json({ message: 'No holdings to update', updated: 0 });
+    if (!tickers.length) return res.json({ message: 'No holdings to update', updated: 0 });
+
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const today = new Date(); today.setHours(0,0,0,0);
+    let updated = 0; const errors = [];
+
+    for (let i = 0; i < tickers.length; i++) {
+      const ticker = tickers[i];
+      try {
+        const q = await fetchTMXQuote(ticker);
+        if (!q) { errors.push({ ticker, error: 'No data' }); }
+        else {
+          const price   = q.price    != null ? parseFloat(q.price)    : null;
+          const divPS   = q.dividend != null ? parseFloat(q.dividend) : null;
+          const payDate = q.dividendPayDate && new Date(q.dividendPayDate) > today
+                          ? q.dividendPayDate : null;
+          upsertStockInfo(portfolioId, ticker, price, divPS, payDate);
+          console.log(`${ticker}: $${price?.toFixed(2)} div=${divPS}`);
+          updated++;
+        }
+      } catch (e) { errors.push({ ticker, error: e.message }); }
+      if (i < tickers.length - 1) await wait(300);
     }
 
-    const tickers = holdings.map(h => h.ticker);
-    console.log(`Fetching prices for ${tickers.length} stocks using Alpha Vantage`);
-    console.log(`Note: Free tier limit is 25 requests/day, 5 requests/minute`);
+    res.json({ message: `Updated ${updated} of ${tickers.length} stocks`, updated,
+               total: tickers.length, errors: errors.length ? errors : undefined });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-    let updated = 0;
+// Refresh prices for ALL portfolios using TMX (fetches each unique ticker once)
+app.post('/api/refresh-all-prices', async (req, res) => {
+  try {
+    // All portfolio_id/ticker combos with current holdings
+    const holdings = db.prepare(`
+      SELECT DISTINCT portfolio_id, ticker FROM transactions
+      WHERE ticker != 'CASH'
+      GROUP BY portfolio_id, ticker
+      HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
+                      WHEN type = 'SELL' THEN -quantity ELSE 0 END) > 0
+    `).all();
+
+    if (!holdings.length) return res.json({ message: 'No holdings to update', updated: 0 });
+
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const today = new Date(); today.setHours(0,0,0,0);
     const errors = [];
 
-    // Helper function to wait between requests (rate limiting)
-    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    // Process each holding individually
-    for (let i = 0; i < holdings.length; i++) {
+    // Fetch each unique ticker from TMX once
+    const uniqueTickers = [...new Set(holdings.map(h => h.ticker))];
+    const quotes = {};
+    for (let i = 0; i < uniqueTickers.length; i++) {
+      const ticker = uniqueTickers[i];
       try {
-        const ticker = holdings[i].ticker;
-        console.log(`[${i + 1}/${holdings.length}] Fetching quote for ${ticker}...`);
-
-        // Alpha Vantage GLOBAL_QUOTE endpoint supports TSX stocks
-        const quoteUrl = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_KEY}`;
-        const quoteResponse = await fetch(quoteUrl);
-
-        if (!quoteResponse.ok) {
-          const errorText = await quoteResponse.text();
-          console.error(`Alpha Vantage API Response for ${ticker}:`, quoteResponse.status, errorText);
-          errors.push({ ticker, error: `API error (${quoteResponse.status})` });
-
-          // Wait 12 seconds between requests (5 per minute rate limit)
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        const quoteData = await quoteResponse.json();
-
-        // Check for API error messages
-        if (quoteData['Error Message']) {
-          errors.push({ ticker, error: 'Invalid ticker symbol' });
-          console.log(`${ticker}: Invalid symbol`);
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        if (quoteData['Note']) {
-          errors.push({ ticker, error: 'API rate limit reached' });
-          console.log(`${ticker}: Rate limit reached`);
-          break; // Stop processing if we hit rate limit
-        }
-
-        const quote = quoteData['Global Quote'];
-        if (!quote || !quote['05. price']) {
-          errors.push({ ticker, error: 'No quote data returned' });
-          console.log(`${ticker}: No data returned`);
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        const marketPrice = parseFloat(quote['05. price']);
-
-        if (!marketPrice || marketPrice <= 0) {
-          errors.push({ ticker, error: 'Invalid price data' });
-          if (i < holdings.length - 1) await wait(12000);
-          continue;
-        }
-
-        console.log(`${ticker}: $${marketPrice.toFixed(2)}`);
-
-        // For now, skip dividend data fetching to conserve API calls
-        // Alpha Vantage has a separate endpoint for dividends that would use more API calls
-        let dividendData = null;
-
-        // Update stock_info
-        const stmt = db.prepare(`
-          INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_frequency, dividend_per_share, last_dividend_date, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
-            market_price = ?,
-            dividend_frequency = COALESCE(?, dividend_frequency),
-            dividend_per_share = COALESCE(?, dividend_per_share),
-            last_dividend_date = COALESCE(?, last_dividend_date),
-            updated_at = CURRENT_TIMESTAMP
-        `);
-
-        stmt.run(
-          portfolioId, ticker, marketPrice,
-          dividendData?.frequency, dividendData?.per_share, dividendData?.last_date,
-          marketPrice,
-          dividendData?.frequency, dividendData?.per_share, dividendData?.last_date
-        );
-
-        updated++;
-
-        // Wait 12 seconds between requests (5 per minute rate limit)
-        if (i < holdings.length - 1) {
-          console.log(`Waiting 12 seconds before next request...`);
-          await wait(12000);
-        }
-
-      } catch (error) {
-        errors.push({ ticker: holdings[i].ticker, error: error.message });
-        console.error(`Error processing ${holdings[i].ticker}:`, error);
-
-        // Wait even on error to respect rate limits
-        if (i < holdings.length - 1) await wait(12000);
+        quotes[ticker] = await fetchTMXQuote(ticker);
+        console.log(`${ticker}: ${JSON.stringify(quotes[ticker])}`);
+      } catch (e) {
+        errors.push({ ticker, error: e.message });
+        quotes[ticker] = null;
       }
+      if (i < uniqueTickers.length - 1) await wait(300);
     }
 
-    res.json({
-      message: `Updated ${updated} of ${holdings.length} stocks`,
-      updated: updated,
-      total: holdings.length,
-      errors: errors.length > 0 ? errors : undefined
-    });
+    // Write to every portfolio that holds each ticker
+    let updated = 0;
+    for (const { portfolio_id, ticker } of holdings) {
+      const q = quotes[ticker];
+      if (!q) continue;
+      const price   = q.price    != null ? parseFloat(q.price)    : null;
+      const divPS   = q.dividend != null ? parseFloat(q.dividend) : null;
+      const payDate = q.dividendPayDate && new Date(q.dividendPayDate) > today
+                      ? q.dividendPayDate : null;
+      upsertStockInfo(portfolio_id, ticker, price, divPS, payDate);
+      updated++;
+    }
 
+    res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueTickers.length} unique tickers)`,
+               updated, total: holdings.length, errors: errors.length ? errors : undefined });
   } catch (error) {
-    console.error('Error refreshing prices:', error);
     res.status(500).json({ error: error.message });
   }
 });
