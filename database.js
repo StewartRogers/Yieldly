@@ -158,6 +158,35 @@ if (investmentTypeExists.count === 0) {
   db.exec(`ALTER TABLE stock_info ADD COLUMN investment_type TEXT`);
 }
 
+// Migration: Add CONTRIBUTION and WITHDRAWAL transaction types
+const txTypeSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`).get();
+if (txTypeSql && !txTypeSql.sql.includes('CONTRIBUTION')) {
+  console.log('Migrating transactions to add CONTRIBUTION/WITHDRAWAL types...');
+  db.pragma('foreign_keys = OFF');
+  db.exec(`
+    CREATE TABLE transactions_new (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      portfolio_id INTEGER NOT NULL,
+      ticker       TEXT NOT NULL DEFAULT 'CASH',
+      type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL')),
+      quantity     REAL NOT NULL DEFAULT 0,
+      price        REAL NOT NULL DEFAULT 0,
+      total        REAL NOT NULL DEFAULT 0,
+      commission   REAL DEFAULT 0,
+      date         TEXT NOT NULL,
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
+    );
+    INSERT INTO transactions_new (id, portfolio_id, ticker, type, quantity, price, total, commission, date, created_at)
+    SELECT id, portfolio_id, ticker, type, quantity, price, total, COALESCE(commission,0), date, created_at
+    FROM transactions;
+    DROP TABLE transactions;
+    ALTER TABLE transactions_new RENAME TO transactions;
+  `);
+  db.pragma('foreign_keys = ON');
+  console.log('Migration complete: CONTRIBUTION/WITHDRAWAL types added.');
+}
+
 console.log('Database initialized at:', dbPath);
 
 module.exports = db;
