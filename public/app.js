@@ -29,7 +29,7 @@ function setupNavigation() {
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
 
-      if (targetPage === 'summary') loadSummary();
+      if (targetPage === 'summary') { loadOverview(); loadSummary(); }
     });
   });
 }
@@ -51,7 +51,9 @@ function setupEventListeners() {
 
   // Transaction type change handler
   document.getElementById('type').addEventListener('change', (e) => {
-    const isDividend = e.target.value === 'DIVIDEND';
+    const type = e.target.value;
+    const isCashOnly = type === 'DIVIDEND' || type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
+    const isCashFlow = type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
     const sharesFields = document.getElementById('shares-fields');
     const dividendField = document.getElementById('dividend-field');
     const quantityInput = document.getElementById('quantity');
@@ -59,8 +61,11 @@ function setupEventListeners() {
     const totalInput = document.getElementById('total');
     const dateInput = document.getElementById('date');
     const dateDividendInput = document.getElementById('date-dividend');
+    const tickerGroup = document.getElementById('ticker-group');
+    const tickerInput = document.getElementById('ticker');
+    const amountLabel = document.getElementById('cash-amount-label');
 
-    if (isDividend) {
+    if (isCashOnly) {
       sharesFields.style.display = 'none';
       dividendField.style.display = 'grid';
       quantityInput.required = false;
@@ -70,6 +75,9 @@ function setupEventListeners() {
       priceInput.value = '';
       document.getElementById('shares-total').value = '';
       dateDividendInput.value = dateInput.value;
+      amountLabel.textContent = isCashFlow ? 'Amount' : 'Total Amount';
+      tickerGroup.style.display = isCashFlow ? 'none' : '';
+      tickerInput.required = !isCashFlow;
     } else {
       sharesFields.style.display = 'grid';
       dividendField.style.display = 'none';
@@ -78,6 +86,9 @@ function setupEventListeners() {
       totalInput.required = false;
       totalInput.value = '';
       dateInput.value = dateDividendInput.value || dateInput.value;
+      tickerGroup.style.display = '';
+      tickerInput.required = true;
+      amountLabel.textContent = 'Total Amount';
     }
   });
 
@@ -149,16 +160,17 @@ function setupEventListeners() {
     }
 
     const type = document.getElementById('type').value;
-    const isDividend = type === 'DIVIDEND';
+    const isCashOnly = type === 'DIVIDEND' || type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
+    const isCashFlow = type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
 
     let transaction = {
       portfolio_id: portfolioId,
-      ticker: document.getElementById('ticker').value.trim(),
+      ticker: isCashFlow ? 'CASH' : document.getElementById('ticker').value.trim().toUpperCase(),
       type: type,
-      date: isDividend ? document.getElementById('date-dividend').value : document.getElementById('date').value
+      date: isCashOnly ? document.getElementById('date-dividend').value : document.getElementById('date').value
     };
 
-    if (isDividend) {
+    if (isCashOnly) {
       transaction.quantity = 0;
       transaction.price = 0;
       transaction.total = parseFloat(document.getElementById('total').value);
@@ -331,6 +343,51 @@ async function loadPortfolios() {
     createPortfolioTabs(portfolios);
   } catch (error) {
     console.error('Error loading portfolios:', error);
+  }
+}
+
+async function loadOverview() {
+  const container = document.getElementById('overview-container');
+  try {
+    const response = await fetch('/api/overview');
+    const data = await response.json();
+
+    if (!data.length) { container.innerHTML = ''; return; }
+
+    const fmt = v => '$' + v.toFixed(2);
+    const totalCash    = data.reduce((s, p) => s + p.cash, 0);
+    const totalInvested= data.reduce((s, p) => s + p.cash_invested, 0);
+    const totalMkt     = data.reduce((s, p) => s + p.market_value, 0);
+
+    container.innerHTML = `
+      <div class="overview-table-wrap">
+        <table class="overview-table">
+          <thead><tr>
+            <th></th>
+            ${data.map(p => `<th title="${p.name}">${p.code}</th>`).join('')}
+            <th>Total</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <th>Cash Balance</th>
+              ${data.map(p => `<td class="${p.cash < 0 ? 'negative' : ''}">${fmt(p.cash)}</td>`).join('')}
+              <td class="${totalCash < 0 ? 'negative' : ''}">${fmt(totalCash)}</td>
+            </tr>
+            <tr>
+              <th>Cash Invested</th>
+              ${data.map(p => `<td>${fmt(p.cash_invested)}</td>`).join('')}
+              <td>${fmt(totalInvested)}</td>
+            </tr>
+            <tr>
+              <th>Market Value</th>
+              ${data.map(p => `<td>${p.market_value > 0 ? fmt(p.market_value) : '—'}</td>`).join('')}
+              <td>${totalMkt > 0 ? fmt(totalMkt) : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  } catch (error) {
+    container.innerHTML = `<p class="empty-state">Error loading overview.</p>`;
   }
 }
 

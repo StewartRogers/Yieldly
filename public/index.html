@@ -56,6 +56,13 @@
     <!-- ===== SUMMARY PAGE ===== -->
     <div id="page-summary" class="page-content">
       <h1>Holdings Summary</h1>
+
+      <!-- Portfolio Overview (Cash / Cash Invested / Market Value per portfolio) -->
+      <div id="overview-container" class="overview-section">
+        <p class="empty-state">Loading...</p>
+      </div>
+
+      <h2 style="margin-top:2rem;">Holdings</h2>
       <div class="summary-table-wrap">
         <table class="summary-table" id="summary-table">
           <thead>
@@ -227,9 +234,9 @@
                 <option value="">Select a portfolio...</option>
               </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="ticker-group">
               <label for="ticker">Ticker Symbol</label>
-              <input type="text" id="ticker" placeholder="AAPL" required>
+              <input type="text" id="ticker" placeholder="AAPL">
             </div>
             <div class="form-group">
               <label for="type">Type</label>
@@ -238,6 +245,8 @@
                 <option value="SELL">Sell</option>
                 <option value="DIVIDEND">Dividend</option>
                 <option value="DIVIDEND_REINVEST">Dividend Reinvestment</option>
+                <option value="CONTRIBUTION">Contribution</option>
+                <option value="WITHDRAWAL">Withdrawal</option>
               </select>
             </div>
           </div>
@@ -265,11 +274,11 @@
           </div>
           <div id="dividend-field" class="form-row" style="display: none;">
             <div class="form-group">
-              <label for="total">Total Amount</label>
+              <label for="total" id="cash-amount-label">Total Amount</label>
               <input type="number" id="total" step="0.01" placeholder="70.00">
             </div>
             <div class="form-group">
-              <label for="date">Date</label>
+              <label for="date-dividend">Date</label>
               <input type="date" id="date-dividend" required>
             </div>
           </div>

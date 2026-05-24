@@ -866,3 +866,55 @@ h2 {
 .summary-table .positive { color: #16a34a; }
 .summary-table .negative { color: #dc2626; }
 .summary-table .ticker-cell { font-family: monospace; font-size: 0.85rem; }
+
+/* ===== PORTFOLIO OVERVIEW TABLE ===== */
+.overview-section {
+  margin-bottom: 1.5rem;
+}
+
+.overview-table-wrap {
+  display: inline-block;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.overview-table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.overview-table th,
+.overview-table td {
+  padding: 0.6rem 1.25rem;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.overview-table thead th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.overview-table tbody th {
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  background: #f8fafc;
+  border-right: 2px solid #e2e8f0;
+  min-width: 130px;
+}
+
+.overview-table tbody tr:last-child th,
+.overview-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.overview-table td { color: #374151; }
+.overview-table .negative { color: #dc2626; }

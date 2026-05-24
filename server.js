@@ -375,12 +375,58 @@ app.get('/api/portfolios/:portfolioId/transactions', (req, res) => {
   }
 });
 
+// All portfolios cash/invested/market-value overview
+app.get('/api/overview', (req, res) => {
+  try {
+    const portfolios = db.prepare('SELECT * FROM portfolios ORDER BY display_order, id').all();
+
+    const cashRows = db.prepare(`
+      SELECT portfolio_id,
+        SUM(CASE
+          WHEN type = 'CONTRIBUTION'                 THEN  total
+          WHEN type = 'WITHDRAWAL'                   THEN -total
+          WHEN type = 'DIVIDEND'                     THEN  total
+          WHEN type = 'SELL'                         THEN  total
+          WHEN type IN ('BUY','DIVIDEND_REINVEST')   THEN -total
+          ELSE 0 END) AS cash,
+        SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN total ELSE 0 END) AS cash_invested
+      FROM transactions GROUP BY portfolio_id
+    `).all();
+
+    const cashById = {};
+    cashRows.forEach(r => { cashById[r.portfolio_id] = r; });
+
+    const allHoldings = computeHoldings(queryHoldings(null));
+    const mktValById = {};
+    const pidByCode = {};
+    portfolios.forEach(p => { pidByCode[p.code] = p.id; });
+    allHoldings.forEach(h => {
+      const pid = pidByCode[h.portfolio_code];
+      if (pid) mktValById[pid] = (mktValById[pid] || 0) + h.market_value;
+    });
+
+    res.json(portfolios.map(p => ({
+      id:           p.id,
+      code:         p.code,
+      name:         p.name,
+      cash:         cashById[p.id]?.cash         || 0,
+      cash_invested:cashById[p.id]?.cash_invested || 0,
+      market_value: mktValById[p.id]             || 0
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Add a new transaction
 app.post('/api/transactions', (req, res) => {
   try {
     const { portfolio_id, ticker, type, quantity, price, total, date, commission } = req.body;
 
-    if (!portfolio_id || !ticker || !type || !date) {
+    const isCashFlow = type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
+    const finalTicker = (isCashFlow && !ticker) ? 'CASH' : ticker;
+
+    if (!portfolio_id || !finalTicker || !type || !date) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -394,7 +440,7 @@ app.post('/api/transactions', (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const result = stmt.run(portfolio_id, ticker.toUpperCase(), type.toUpperCase(), finalQuantity, finalPrice, finalTotal, commission || 0, date);
+    const result = stmt.run(portfolio_id, finalTicker.toUpperCase(), type.toUpperCase(), finalQuantity, finalPrice, finalTotal, commission || 0, date);
 
     res.json({
       id: result.lastInsertRowid,
