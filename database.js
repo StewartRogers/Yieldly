@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
 const dbPath = path.join(__dirname, 'yieldly.db');
 const db = new Database(dbPath);
@@ -195,6 +196,23 @@ if (txTypeSql && !txTypeSql.sql.includes('CONTRIBUTION')) {
   `);
   db.pragma('foreign_keys = ON');
   console.log('Migration complete: CONTRIBUTION/WITHDRAWAL types added.');
+}
+
+// Auto-restore portfolios from backup if the DB is fresh (empty portfolios table)
+const portfolioBackupPath = path.join(__dirname, 'portfolios.json');
+const portfolioCount = db.prepare('SELECT COUNT(*) as count FROM portfolios').get();
+if (portfolioCount.count === 0 && fs.existsSync(portfolioBackupPath)) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(portfolioBackupPath, 'utf8'));
+    const insert = db.prepare('INSERT INTO portfolios (name, code, display_order) VALUES (?, ?, ?)');
+    const insertAll = db.transaction(rows => {
+      for (const p of rows) insert.run(p.name, p.code, p.display_order || 0);
+    });
+    insertAll(saved);
+    console.log(`Restored ${saved.length} portfolios from portfolios.json`);
+  } catch (e) {
+    console.error('Failed to restore portfolios from backup:', e.message);
+  }
 }
 
 console.log('Database initialized at:', dbPath);
