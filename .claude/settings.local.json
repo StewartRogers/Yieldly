@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const db = require\\('./database'\\); const rows = db.prepare\\('SELECT * FROM portfolios ORDER BY display_order'\\).all\\(\\); console.log\\(JSON.stringify\\(rows, null, 2\\)\\);\")"
+    ]
+  }
+}

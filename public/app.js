@@ -1,3 +1,6 @@
+const fmtCurrency = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtCurrencyOr = v => (v && v !== 0) ? fmtCurrency(v) : '—';
+
 let currentPortfolioId = null;
 let currentPage = 1;
 const TRANSACTIONS_PER_PAGE = 20;
@@ -354,7 +357,7 @@ async function loadOverview() {
 
     if (!data.length) { container.innerHTML = ''; return; }
 
-    const fmt = v => '$' + v.toFixed(2);
+    const fmt = fmtCurrency;
     const totalCash    = data.reduce((s, p) => s + p.cash, 0);
     const totalInvested= data.reduce((s, p) => s + p.cash_invested, 0);
     const totalMkt     = data.reduce((s, p) => s + p.market_value, 0);
@@ -405,7 +408,7 @@ async function loadSummary() {
 
     const totalMktValue = holdings.reduce((s, h) => s + h.market_value, 0);
 
-    const fmt  = v => v ? '$' + v.toFixed(2) : '—';
+    const fmt  = fmtCurrencyOr;
     const fmtN = v => v ? v.toFixed(4) : '—';
     const fmtP = v => v ? v.toFixed(2) + '%' : '—';
 
@@ -537,39 +540,39 @@ async function loadPortfolioHoldings(portfolioId) {
         <div class="holding-details">
           <div class="detail-row">
             <span class="label">Buy Price:</span>
-            <span class="value">$${holding.buy_price.toFixed(2)}</span>
+            <span class="value">${fmtCurrency(holding.buy_price)}</span>
           </div>
           <div class="detail-row">
             <span class="label">Market Price:</span>
             <span class="value ${holding.market_price > 0 ? '' : 'placeholder'}">
-              ${holding.market_price > 0 ? '$' + holding.market_price.toFixed(2) : 'Not set'}
+              ${holding.market_price > 0 ? fmtCurrency(holding.market_price) : 'Not set'}
             </span>
           </div>
           <div class="detail-row">
             <span class="label">Buy Total:</span>
-            <span class="value">$${holding.buy_total.toFixed(2)}</span>
+            <span class="value">${fmtCurrency(holding.buy_total)}</span>
           </div>
           <div class="detail-row">
             <span class="label">Market Value:</span>
             <span class="value ${holding.market_price > 0 ? '' : 'placeholder'}">
-              ${holding.market_price > 0 ? '$' + holding.market_value.toFixed(2) : 'N/A'}
+              ${holding.market_price > 0 ? fmtCurrency(holding.market_value) : 'N/A'}
             </span>
           </div>
           ${holding.sale_total > 0 ? `
             <div class="detail-row">
               <span class="label">Sale Total:</span>
-              <span class="value">$${holding.sale_total.toFixed(2)}</span>
+              <span class="value">${fmtCurrency(holding.sale_total)}</span>
             </div>
           ` : ''}
           <div class="detail-row">
             <span class="label">Dividends Paid:</span>
-            <span class="value">$${holding.dividends_paid.toFixed(2)}</span>
+            <span class="value">${fmtCurrency(holding.dividends_paid)}</span>
           </div>
           ${holding.market_price > 0 ? `
             <div class="detail-row highlight">
               <span class="label">Return:</span>
               <span class="value ${holding.return >= 0 ? 'positive' : 'negative'}">
-                $${holding.return.toFixed(2)} (${holding.return_percent.toFixed(2)}%)
+                ${fmtCurrency(holding.return)} (${holding.return_percent.toFixed(2)}%)
               </span>
             </div>
           ` : ''}
@@ -583,11 +586,11 @@ async function loadPortfolioHoldings(portfolioId) {
             </div>
             <div class="detail-row">
               <span class="label">Div Per Share:</span>
-              <span class="value">$${holding.dividend_per_share.toFixed(2)}</span>
+              <span class="value">${fmtCurrency(holding.dividend_per_share)}</span>
             </div>
             <div class="detail-row">
               <span class="label">Annual Payout:</span>
-              <span class="value">$${holding.annual_payout.toFixed(2)}</span>
+              <span class="value">${fmtCurrency(holding.annual_payout)}</span>
             </div>
             ${holding.market_price > 0 ? `
               <div class="detail-row">
@@ -641,8 +644,8 @@ function displayTransactions() {
         <div class="ticker">${t.ticker}</div>
         <div class="type ${typeClass}">${typeLabel}</div>
         <div>${t.quantity} shares</div>
-        <div>$${parseFloat(t.price).toFixed(2)}/share</div>
-        <div>Total: $${parseFloat(t.total).toFixed(2)}</div>
+        <div>${fmtCurrency(parseFloat(t.price))}/share</div>
+        <div>Total: ${fmtCurrency(parseFloat(t.total))}</div>
         <div>${new Date(t.date).toLocaleDateString()}</div>
         <button class="btn-delete" onclick="deleteTransaction(${t.id})">Delete</button>
       </div>
