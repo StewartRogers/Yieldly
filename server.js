@@ -42,7 +42,7 @@ function queryHoldings(portfolioId) {
     LEFT JOIN stock_info s ON s.portfolio_id = t.portfolio_id AND s.ticker = t.ticker
     ${whereClause}
     GROUP BY t.portfolio_id, t.ticker
-    HAVING shares > 0 OR shares_sold > 0
+    HAVING shares > 0
     ORDER BY p.display_order, p.code, t.ticker
   `).all();
 }
