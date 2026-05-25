@@ -95,6 +95,7 @@ function computeHoldings(rows) {
     const totalExpense= buyExpense + saleExpense;
     const proceeds    = saleTotal - saleExpense;
     const acb         = sharesBought > 0 ? (buyTotal + buyExpense) * (shares / sharesBought) : 0;
+    const acbPerShare = sharesBought > 0 ? (buyTotal + buyExpense) / sharesBought : 0;
     return {
       portfolio_code:    h.portfolio_code || '',
       portfolio_name:    h.portfolio_name || '',
@@ -102,7 +103,7 @@ function computeHoldings(rows) {
       investment_type:   h.investment_type || '',
       sector:            h.sector || '',
       shares,
-      buy_price:         h.buy_price  || 0,
+      buy_price:         acbPerShare,
       market_price:      marketPrice,
       sale_price:        h.sale_price || 0,
       buy_total:         buyTotal,
@@ -383,6 +384,21 @@ app.post('/api/refresh-all-prices', async (req, res) => {
 
 // ===== TRANSACTION MANAGEMENT =====
 
+// Get transactions for a specific ticker within a portfolio
+app.get('/api/portfolios/:portfolioId/transactions/ticker/:ticker', (req, res) => {
+  try {
+    const transactions = db.prepare(`
+      SELECT id, ticker, type, quantity, price, total, commission, date
+      FROM transactions
+      WHERE portfolio_id = ? AND ticker = ?
+      ORDER BY date ASC, created_at ASC
+    `).all(req.params.portfolioId, req.params.ticker.toUpperCase());
+    res.json(transactions);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get all transactions for a portfolio
 app.get('/api/portfolios/:portfolioId/transactions', (req, res) => {
   try {
@@ -541,18 +557,18 @@ app.post('/api/import/csv', (req, res) => {
       if (!line) continue;
 
       try {
-        // Parse CSV line: Date, Symbol, Portfolio, Type, Quantity, Share, Price, Total (+ optional Month, Year, ...)
-        const parts = line.split(',').map(p => p.trim());
+        // Parse CSV line: Date, Symbol, Portfolio, Type, Quantity, Share Price, Total (+ optional trailing columns)
+        const parts = parseCSVLine(line);
 
         console.log(`Line ${i + 1}: ${parts.length} parts:`, parts);
 
-        if (parts.length < 8) {
-          errors.push({ line: i + 1, error: `Invalid CSV format - expected at least 8 columns, got ${parts.length}`, data: line });
+        if (parts.length < 7) {
+          errors.push({ line: i + 1, error: `Invalid CSV format - expected at least 7 columns, got ${parts.length}`, data: line });
           continue;
         }
 
-        // Extract columns — position 5 ("Share") is skipped; Price is col 6, Total is col 7
-        const [dateStr, symbol, portfolioCode, typeCode, quantityStr, , priceStr, totalStr] = parts;
+        // Col 0: Date, 1: Symbol, 2: Portfolio, 3: Type, 4: Quantity, 5: Share Price, 6: Total
+        const [dateStr, symbol, portfolioCode, typeCode, quantityStr, priceStr, totalStr] = parts;
 
         // Find portfolio by code
         const cleanPortfolioCode = portfolioCode.toUpperCase().trim();
@@ -629,6 +645,25 @@ app.post('/api/import/csv', (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+function parseCSVLine(line) {
+  const fields = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
 
 // Helper function to parse date from DD-MMM-YY to YYYY-MM-DD
 function parseDate(dateStr) {
