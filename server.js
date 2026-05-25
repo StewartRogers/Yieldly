@@ -1,7 +1,19 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const db = require('./database');
+
+const PORTFOLIOS_BACKUP = path.join(__dirname, 'portfolios.json');
+
+function backupPortfolios() {
+  try {
+    const portfolios = db.prepare('SELECT name, code, display_order FROM portfolios ORDER BY display_order, id').all();
+    fs.writeFileSync(PORTFOLIOS_BACKUP, JSON.stringify(portfolios, null, 2));
+  } catch (e) {
+    console.error('Failed to backup portfolios:', e.message);
+  }
+}
 
 const app = express();
 const PORT = 3000;
@@ -146,6 +158,7 @@ app.post('/api/portfolios', (req, res) => {
     const stmt = db.prepare('INSERT INTO portfolios (name, code) VALUES (?, ?)');
     const result = stmt.run(name, code.toUpperCase());
 
+    backupPortfolios();
     res.json({
       id: result.lastInsertRowid,
       name,
@@ -171,6 +184,7 @@ app.put('/api/portfolios/:id/order', (req, res) => {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
+    backupPortfolios();
     res.json({ message: 'Portfolio order updated' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -187,6 +201,7 @@ app.delete('/api/portfolios/:id', (req, res) => {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
+    backupPortfolios();
     res.json({ message: 'Portfolio deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -641,4 +656,5 @@ function parseDate(dateStr) {
 // Start server
 app.listen(PORT, () => {
   console.log(`Yieldly server running at http://localhost:${PORT}`);
+  backupPortfolios(); // ensure portfolios.json is always in sync on startup
 });
