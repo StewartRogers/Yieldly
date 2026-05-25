@@ -554,7 +554,10 @@ async function loadPortfolioHoldings(portfolioId) {
         <td class="${holding.market_price > 0 ? retClass : ''}">${holding.market_price > 0 ? fmtCurrency(holding.return) : '—'}</td>
         <td class="${holding.market_price > 0 ? retClass : ''}">${holding.market_price > 0 ? fmtP(holding.return_percent) : '—'}</td>
         <td>${holding.market_price > 0 && holding.dividend_yield > 0 ? fmtP(holding.dividend_yield) : '—'}</td>
-        <td><button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">Edit</button></td>
+        <td>
+          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">Edit</button>
+          <button class="btn-secondary btn-sm" onclick="openHoldingTransactionsModal(${portfolioId}, '${holding.ticker}')">Txns</button>
+        </td>
       </tr>`;
     }).join('');
 
@@ -563,7 +566,7 @@ async function loadPortfolioHoldings(portfolioId) {
       <div class="portfolio-card">
         <div class="portfolio-card-header">
           <div class="ticker-header">
-            <div class="ticker">${holding.ticker}</div>
+            <div class="ticker ticker-link" onclick="openHoldingTransactionsModal(${portfolioId}, '${holding.ticker}')">${holding.ticker}</div>
             <div class="shares">${holding.shares.toFixed(2)} shares</div>
           </div>
           <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">
@@ -876,6 +879,65 @@ document.getElementById('stock-info-modal').addEventListener('click', (e) => {
   if (e.target.id === 'stock-info-modal') {
     closeStockInfoModal();
   }
+});
+
+// ===== HOLDING TRANSACTIONS MODAL =====
+
+async function openHoldingTransactionsModal(portfolioId, ticker) {
+  document.getElementById('holding-transactions-title').textContent = `${ticker} — Transactions`;
+  document.getElementById('holding-transactions-tbody').innerHTML = '<tr><td colspan="6" class="empty-state">Loading…</td></tr>';
+  document.getElementById('holding-transactions-summary').innerHTML = '';
+  document.getElementById('holding-transactions-modal').style.display = 'flex';
+
+  try {
+    const res = await fetch(`/api/portfolios/${portfolioId}/transactions/ticker/${ticker}`);
+    const txns = await res.json();
+
+    if (!txns.length) {
+      document.getElementById('holding-transactions-tbody').innerHTML =
+        '<tr><td colspan="6" class="empty-state">No transactions found.</td></tr>';
+      return;
+    }
+
+    const typeLabel = t => t.replace('_', ' ');
+    const typeClass = t => t.toLowerCase().replace('_', '-');
+
+    let totalShares = 0, totalCost = 0, totalCommission = 0;
+    document.getElementById('holding-transactions-tbody').innerHTML = txns.map(t => {
+      const isBuy  = t.type === 'BUY' || t.type === 'DIVIDEND_REINVEST';
+      const isSell = t.type === 'SELL';
+      if (isBuy)  { totalShares += t.quantity; totalCost += t.total; totalCommission += (t.commission || 0); }
+      if (isSell) { totalShares -= t.quantity; }
+      return `<tr>
+        <td>${t.date}</td>
+        <td><span class="type ${typeClass(t.type)}">${typeLabel(t.type)}</span></td>
+        <td>${t.quantity > 0 ? t.quantity.toFixed(4) : '—'}</td>
+        <td>${t.price > 0 ? fmtCurrency(t.price) : '—'}</td>
+        <td>${fmtCurrency(t.total)}</td>
+        <td>${t.commission > 0 ? fmtCurrency(t.commission) : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    const acbPerShare = totalShares > 0 ? (totalCost + totalCommission) / (totalShares + (totalShares < 0 ? 0 : 0)) : 0;
+    document.getElementById('holding-transactions-summary').innerHTML = `
+      <div class="tx-summary-row">
+        <span><strong>Net Shares:</strong> ${totalShares.toFixed(4)}</span>
+        <span><strong>Total Cost:</strong> ${fmtCurrency(totalCost)}</span>
+        <span><strong>Total Commission:</strong> ${totalCommission > 0 ? fmtCurrency(totalCommission) : '—'}</span>
+        <span><strong>ACB / Share:</strong> ${totalShares > 0 ? fmtCurrency((totalCost + totalCommission) / totalShares) : '—'}</span>
+      </div>`;
+  } catch (e) {
+    document.getElementById('holding-transactions-tbody').innerHTML =
+      `<tr><td colspan="6" class="empty-state">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function closeHoldingTransactionsModal() {
+  document.getElementById('holding-transactions-modal').style.display = 'none';
+}
+
+document.getElementById('holding-transactions-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'holding-transactions-modal') closeHoldingTransactionsModal();
 });
 
 // ===== REFRESH PRICES (TMX) =====
