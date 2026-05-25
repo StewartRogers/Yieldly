@@ -407,6 +407,71 @@ h2 {
   color: var(--text);
 }
 
+/* View toggle */
+.view-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.view-btn {
+  background: var(--card-bg);
+  color: var(--text-light);
+  border: none;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.view-btn.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* Holdings list table */
+.portfolio-list-wrap {
+  overflow-x: auto;
+}
+
+.holdings-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.holdings-list-table th,
+.holdings-list-table td {
+  padding: 0.55rem 0.75rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.holdings-list-table th:first-child,
+.holdings-list-table td:first-child {
+  text-align: left;
+}
+
+.holdings-list-table th {
+  color: var(--text-light);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--card-bg);
+}
+
+.holdings-list-table tbody tr:hover {
+  background: var(--hover-bg, rgba(0,0,0,0.03));
+}
+
+.holdings-list-table .ticker-cell {
+  font-weight: 700;
+  color: var(--primary);
+}
+
 /* Portfolio Grid */
 .portfolio-grid {
   display: grid;

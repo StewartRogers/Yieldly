@@ -2,6 +2,7 @@ const fmtCurrency = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-
 const fmtCurrencyOr = v => (v && v !== 0) ? fmtCurrency(v) : '—';
 
 let currentPortfolioId = null;
+let holdingsView = 'card';
 let currentPage = 1;
 const TRANSACTIONS_PER_PAGE = 20;
 let allTransactions = [];
@@ -32,7 +33,7 @@ function setupNavigation() {
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
 
-      if (targetPage === 'summary') { loadOverview(); loadSummary(); }
+      if (targetPage === 'summary') { loadOverview(); }
     });
   });
 }
@@ -510,21 +511,54 @@ function selectPortfolioTab(portfolioId) {
   loadPortfolioHoldings(portfolioId);
 }
 
+function setHoldingsView(view) {
+  holdingsView = view;
+  document.getElementById('portfolio-grid').style.display = view === 'card' ? '' : 'none';
+  document.getElementById('portfolio-list').style.display = view === 'list' ? '' : 'none';
+  document.getElementById('card-view-btn').classList.toggle('active', view === 'card');
+  document.getElementById('list-view-btn').classList.toggle('active', view === 'list');
+}
+
 // Load portfolio holdings
 async function loadPortfolioHoldings(portfolioId) {
   if (!portfolioId) return;
 
   try {
     const response = await fetch(`/api/portfolios/${portfolioId}/summary`);
-    const portfolio = await response.json();
+    const portfolio = (await response.json()).filter(h => h.shares > 0.00005);
 
     const grid = document.getElementById('portfolio-grid');
+    const listTbody = document.getElementById('holdings-list-tbody');
 
     if (portfolio.length === 0) {
       grid.innerHTML = '<p class="empty-state">No holdings yet. Add your first transaction!</p>';
+      listTbody.innerHTML = '<tr><td colspan="10" class="empty-state">No holdings yet.</td></tr>';
+      document.getElementById('view-toggle').style.display = 'none';
       return;
     }
 
+    document.getElementById('view-toggle').style.display = '';
+    setHoldingsView(holdingsView);
+
+    // List view
+    const fmtP = v => v ? v.toFixed(2) + '%' : '—';
+    listTbody.innerHTML = portfolio.map(holding => {
+      const retClass = holding.return >= 0 ? 'positive' : 'negative';
+      return `<tr>
+        <td class="ticker-cell">${holding.ticker}</td>
+        <td>${holding.shares.toFixed(4)}</td>
+        <td>${fmtCurrency(holding.buy_price)}</td>
+        <td>${holding.market_price > 0 ? fmtCurrency(holding.market_price) : '—'}</td>
+        <td>${fmtCurrencyOr(holding.dividends_paid)}</td>
+        <td>${holding.last_dividend_date || '—'}</td>
+        <td class="${holding.market_price > 0 ? retClass : ''}">${holding.market_price > 0 ? fmtCurrency(holding.return) : '—'}</td>
+        <td class="${holding.market_price > 0 ? retClass : ''}">${holding.market_price > 0 ? fmtP(holding.return_percent) : '—'}</td>
+        <td>${holding.market_price > 0 && holding.dividend_yield > 0 ? fmtP(holding.dividend_yield) : '—'}</td>
+        <td><button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">Edit</button></td>
+      </tr>`;
+    }).join('');
+
+    // Card view
     grid.innerHTML = portfolio.map(holding => `
       <div class="portfolio-card">
         <div class="portfolio-card-header">
@@ -895,5 +929,5 @@ document.getElementById('refresh-all-btn').addEventListener('click', () => {
   const btn = document.getElementById('refresh-all-btn');
   const status = document.getElementById('refresh-all-status');
   runRefresh('/api/refresh-all-prices', btn, status,
-    async () => { await loadOverview(); await loadSummary(); });
+    async () => { await loadOverview(); });
 });

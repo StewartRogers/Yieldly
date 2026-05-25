@@ -76,6 +76,10 @@
       <div class="page-header">
         <h1>Portfolio Holdings</h1>
         <div class="page-header-actions">
+          <div class="view-toggle" id="view-toggle" style="display:none;">
+            <button class="view-btn active" id="card-view-btn" onclick="setHoldingsView('card')">Cards</button>
+            <button class="view-btn" id="list-view-btn" onclick="setHoldingsView('list')">List</button>
+          </div>
           <button id="refresh-prices-btn" class="btn-secondary" style="display: none;">
             Refresh Prices
           </button>
@@ -111,6 +115,25 @@
         <section class="portfolio-summary">
           <div id="portfolio-grid" class="portfolio-grid">
             <p class="empty-state">Select a portfolio to view holdings</p>
+          </div>
+          <div id="portfolio-list" class="portfolio-list-wrap" style="display:none;">
+            <table class="holdings-list-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Shares</th>
+                  <th>Buy Price</th>
+                  <th>Mkt Price</th>
+                  <th>Dividends Paid</th>
+                  <th>Pay Date</th>
+                  <th>Return</th>
+                  <th>Return %</th>
+                  <th>Yield</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="holdings-list-tbody"></tbody>
+            </table>
           </div>
         </section>
       </div>
