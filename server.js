@@ -526,18 +526,18 @@ app.post('/api/import/csv', (req, res) => {
       if (!line) continue;
 
       try {
-        // Parse CSV line: Date, Symbol, Portfolio, Type, Quantity, Share Price, Total (ignore extra columns like Month, Year)
+        // Parse CSV line: Date, Symbol, Portfolio, Type, Quantity, Share, Price, Total (+ optional Month, Year, ...)
         const parts = line.split(',').map(p => p.trim());
 
         console.log(`Line ${i + 1}: ${parts.length} parts:`, parts);
 
-        if (parts.length < 7) {
-          errors.push({ line: i + 1, error: `Invalid CSV format - expected at least 7 columns, got ${parts.length}`, data: line });
+        if (parts.length < 8) {
+          errors.push({ line: i + 1, error: `Invalid CSV format - expected at least 8 columns, got ${parts.length}`, data: line });
           continue;
         }
 
-        // Extract first 7 columns, ignore any additional ones (Month, Year, etc.)
-        const [dateStr, symbol, portfolioCode, typeCode, quantityStr, priceStr, totalStr] = parts;
+        // Extract columns — position 5 ("Share") is skipped; Price is col 6, Total is col 7
+        const [dateStr, symbol, portfolioCode, typeCode, quantityStr, , priceStr, totalStr] = parts;
 
         // Find portfolio by code
         const cleanPortfolioCode = portfolioCode.toUpperCase().trim();
