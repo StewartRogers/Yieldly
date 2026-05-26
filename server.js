@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const db = require('./database');
+const { computeHoldings } = require('./lib/compute');
 
 const PORTFOLIOS_BACKUP = path.join(__dirname, 'portfolios.json');
 
@@ -59,77 +60,6 @@ function queryHoldings(portfolioId) {
   `).all();
 }
 
-function computeHoldings(rows) {
-  return rows.map(h => {
-    const shares      = h.shares      || 0;
-    const buyTotal    = h.buy_total   || 0;
-    const saleTotal   = h.sale_total  || 0;
-    const divPaid     = h.dividends_paid || 0;
-    const buyExpense  = h.buy_expense || 0;
-    const saleExpense = h.sale_expense || 0;
-    const sharesBought= h.shares_bought || 0;
-    const marketPrice = h.market_price  || 0;
-    const marketValue = shares * marketPrice;
-    const totalReturn = marketValue + saleTotal + divPaid - buyTotal;
-    const acbForPct   = sharesBought > 0 ? (buyTotal + buyExpense) * (shares / sharesBought) : 0;
-    const returnPct   = acbForPct > 0 ? (totalReturn / acbForPct) * 100 : 0;
-    const divFreq    = h.dividend_frequency || '';
-    const freqMap    = { Monthly: 12, Quarterly: 4, 'Semi-Annual': 2, Annual: 1 };
-    const multiplier = freqMap[divFreq] || 0;
-    const storedYield = h.dividend_yield;   // % from TMX (e.g. 5.5)
-    const storedPerShare = h.dividend_per_share || 0;
-
-    let annualPayout, nextPayout, divPerShare, divYield;
-    if (storedYield != null && storedYield > 0 && marketValue > 0) {
-      // Yield-first approach: Annual = MktVal × Yield%, Next = Annual ÷ Freq, PerShare = Next ÷ Shares
-      annualPayout = marketValue * storedYield / 100;
-      nextPayout   = multiplier > 0 ? annualPayout / multiplier : 0;
-      divPerShare  = (shares > 0 && multiplier > 0) ? nextPayout / shares : 0;
-      divYield     = storedYield;
-    } else {
-      // Fallback: per-share manually entered
-      nextPayout   = shares * storedPerShare;
-      annualPayout = nextPayout * multiplier;
-      divPerShare  = storedPerShare;
-      divYield     = marketValue > 0 ? (annualPayout / marketValue) * 100 : 0;
-    }
-    const totalExpense= buyExpense + saleExpense;
-    const proceeds    = saleTotal - saleExpense;
-    // ACB includes commission (correct for Canadian tax); Buy Price excludes it (matches user's sheet)
-    const acb         = sharesBought > 0 ? (buyTotal + buyExpense) * (shares / sharesBought) : 0;
-    const acbPerShare = sharesBought > 0 ? buyTotal / sharesBought : 0;
-    return {
-      portfolio_code:    h.portfolio_code || '',
-      portfolio_name:    h.portfolio_name || '',
-      ticker:            h.ticker,
-      investment_type:   h.investment_type || '',
-      sector:            h.sector || '',
-      shares,
-      buy_price:         acbPerShare,
-      market_price:      marketPrice,
-      sale_price:        h.sale_price || 0,
-      buy_total:         buyTotal,
-      market_value:      marketValue,
-      sale_total:        saleTotal,
-      dividends_paid:    divPaid,
-      return:            totalReturn,
-      return_percent:    returnPct,
-      dividend_frequency:  divFreq,
-      dividend_per_share:  divPerShare,
-      last_dividend_date:  h.last_dividend_date || '',
-      next_payout:   nextPayout,
-      annual_payout: annualPayout,
-      dividend_yield:    divYield,
-      buy_count:   h.buy_count  || 0,
-      sell_count:  h.sell_count || 0,
-      buy_expense:   buyExpense,
-      sale_expense:  saleExpense,
-      total_expense: totalExpense,
-      proceeds,
-      acb
-    };
-  });
-}
 
 // Middleware
 app.use(express.json({ limit: '10mb' }));
