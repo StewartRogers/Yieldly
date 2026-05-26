@@ -1,10 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
   --primary: #1E3A8A;
@@ -12,12 +12,14 @@
   --secondary: #3BB54A;
   --accent: #F4C542;
   --success: #3BB54A;
-  --danger: #ef4444;
+  --danger: #dc2626;
   --bg: #F9FAFB;
   --card-bg: #ffffff;
-  --text: #1E3A8A;
+  --text: #1e293b;
+  --text-heading: #1E3A8A;
   --text-light: #64748b;
   --border: #E5E7EB;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 body {
@@ -401,10 +403,14 @@ section {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+h1, h2, h3 {
+  color: var(--text-heading);
+}
+
 h2 {
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
-  color: var(--text);
+  color: var(--text-heading);
 }
 
 /* View toggle */
@@ -463,8 +469,19 @@ h2 {
   background: var(--card-bg);
 }
 
+.holdings-list-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--card-bg);
+  z-index: 2;
+}
+
+.holdings-list-table tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+
 .holdings-list-table tbody tr:hover {
-  background: var(--hover-bg, rgba(0,0,0,0.03));
+  background: var(--hover-bg, rgba(0,0,0,0.03)) !important;
 }
 
 .holdings-list-table .ticker-cell {
@@ -551,7 +568,7 @@ h2 {
 }
 
 .portfolio-card .detail-row .value.negative {
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .portfolio-card .detail-row.highlight {
@@ -605,7 +622,7 @@ h2 {
   color: white;
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
@@ -614,7 +631,7 @@ h2 {
 }
 
 .btn-primary:hover {
-  background: var(--accent);
+  background: #2d9c3f;
 }
 
 /* Transaction List */
@@ -953,25 +970,41 @@ h2 {
   z-index: 1;
 }
 
-.summary-table tbody td:nth-child(1) { left: 0;     min-width: 70px;  font-weight: 600; color: #6366f1; }
+.summary-table tbody td:nth-child(1) { left: 0;     min-width: 70px;  font-weight: 600; color: var(--primary); }
 .summary-table tbody td:nth-child(2) { left: 70px;  min-width: 40px; }
 .summary-table tbody td:nth-child(3) { left: 110px; min-width: 90px;  font-weight: 600; }
 
+.summary-table tbody tr:nth-child(even) td {
+  background-color: #f8fafc;
+}
+
 .summary-table tbody tr:hover td {
-  background: #f8fafc;
+  background: #f8fafc !important;
 }
 .summary-table tbody tr:hover td:nth-child(1),
 .summary-table tbody tr:hover td:nth-child(2),
 .summary-table tbody tr:hover td:nth-child(3) {
-  background: #f1f5f9;
+  background: #f1f5f9 !important;
 }
 
 .summary-table .positive { color: #16a34a; }
-.summary-table .negative { color: #dc2626; }
+.summary-table .negative { color: var(--danger); }
 .summary-table .ticker-cell { font-family: monospace; font-size: 0.85rem; }
 
 /* ===== PORTFOLIO OVERVIEW TABLE ===== */
 .overview-section {
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.summary-section {
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
   margin-bottom: 1.5rem;
 }
 
@@ -1020,4 +1053,16 @@ h2 {
 }
 
 .overview-table td { color: #374151; }
-.overview-table .negative { color: #dc2626; }
+.overview-table .negative { color: var(--danger); }
+
+.btn-set-cash {
+  font-size: 0.75rem; padding: 0.2rem 0.5rem;
+  background: var(--primary); color: #fff;
+  border: none; border-radius: 4px; cursor: pointer;
+}
+.btn-edit-cash {
+  font-size: 0.7rem; padding: 0.1rem 0.3rem; margin-left: 0.3rem;
+  background: none; border: 1px solid #d1d5db; border-radius: 3px;
+  cursor: pointer; color: #6b7280; vertical-align: middle;
+}
+.btn-edit-cash:hover { background: #f3f4f6; }
