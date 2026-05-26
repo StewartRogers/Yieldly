@@ -169,6 +169,15 @@ if (divYieldColExists.count === 0) {
   db.exec(`ALTER TABLE stock_info ADD COLUMN dividend_yield REAL`);
 }
 
+// Migration: Add cash_balance column to portfolios
+const cashBalColExists = db.prepare(`
+  SELECT COUNT(*) as count FROM pragma_table_info('portfolios')
+  WHERE name = 'cash_balance'
+`).get();
+if (cashBalColExists.count === 0) {
+  db.exec(`ALTER TABLE portfolios ADD COLUMN cash_balance REAL`);
+}
+
 // Migration: Add CONTRIBUTION and WITHDRAWAL transaction types
 const txTypeSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`).get();
 if (txTypeSql && !txTypeSql.sql.includes('CONTRIBUTION')) {

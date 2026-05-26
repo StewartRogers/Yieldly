@@ -71,7 +71,8 @@ function computeHoldings(rows) {
     const marketPrice = h.market_price  || 0;
     const marketValue = shares * marketPrice;
     const totalReturn = marketValue + saleTotal + divPaid - buyTotal;
-    const returnPct   = buyTotal > 0 ? (totalReturn / buyTotal) * 100 : 0;
+    const acbForPct   = sharesBought > 0 ? (buyTotal + buyExpense) * (shares / sharesBought) : 0;
+    const returnPct   = acbForPct > 0 ? (totalReturn / acbForPct) * 100 : 0;
     const divFreq    = h.dividend_frequency || '';
     const freqMap    = { Monthly: 12, Quarterly: 4, 'Semi-Annual': 2, Annual: 1 };
     const multiplier = freqMap[divFreq] || 0;
@@ -94,8 +95,9 @@ function computeHoldings(rows) {
     }
     const totalExpense= buyExpense + saleExpense;
     const proceeds    = saleTotal - saleExpense;
+    // ACB includes commission (correct for Canadian tax); Buy Price excludes it (matches user's sheet)
     const acb         = sharesBought > 0 ? (buyTotal + buyExpense) * (shares / sharesBought) : 0;
-    const acbPerShare = sharesBought > 0 ? (buyTotal + buyExpense) / sharesBought : 0;
+    const acbPerShare = sharesBought > 0 ? buyTotal / sharesBought : 0;
     return {
       portfolio_code:    h.portfolio_code || '',
       portfolio_name:    h.portfolio_name || '',
@@ -187,6 +189,20 @@ app.put('/api/portfolios/:id/order', (req, res) => {
 
     backupPortfolios();
     res.json({ message: 'Portfolio order updated' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Set (or clear) manual cash balance for a portfolio
+app.put('/api/portfolios/:id/cash-balance', (req, res) => {
+  try {
+    const { cash_balance } = req.body;
+    const value = cash_balance === null || cash_balance === '' ? null : parseFloat(cash_balance);
+    const result = db.prepare('UPDATE portfolios SET cash_balance = ? WHERE id = ?')
+                     .run(value, req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Portfolio not found' });
+    res.json({ message: 'Cash balance updated', cash_balance: value });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -420,42 +436,26 @@ app.get('/api/overview', (req, res) => {
   try {
     const portfolios = db.prepare('SELECT * FROM portfolios ORDER BY display_order, id').all();
 
-    const cashRows = db.prepare(`
-      SELECT portfolio_id,
-        SUM(CASE
-          WHEN type = 'CONTRIBUTION'                 THEN  total
-          WHEN type = 'WITHDRAWAL'                   THEN -total
-          WHEN type = 'DIVIDEND'                     THEN  total
-          WHEN type = 'SELL'                         THEN  total
-          WHEN type IN ('BUY','DIVIDEND_REINVEST')   THEN -total
-          ELSE 0 END) AS cash
-      FROM transactions GROUP BY portfolio_id
-    `).all();
-
-    const cashById = {};
-    cashRows.forEach(r => { cashById[r.portfolio_id] = r; });
-
-    // Only sum market_value and buy_total for positions with shares > 0
     const allHoldings = computeHoldings(queryHoldings(null));
-    const mktValById = {};
+    const mktValById  = {};
     const investedById = {};
-    const pidByCode = {};
+    const pidByCode   = {};
     portfolios.forEach(p => { pidByCode[p.code] = p.id; });
     allHoldings.forEach(h => {
       const pid = pidByCode[h.portfolio_code];
       if (pid) {
         mktValById[pid]   = (mktValById[pid]   || 0) + h.market_value;
-        investedById[pid] = (investedById[pid] || 0) + h.buy_total;
+        investedById[pid] = (investedById[pid] || 0) + h.acb;  // ACB = cost of current position
       }
     });
 
     res.json(portfolios.map(p => ({
-      id:           p.id,
-      code:         p.code,
-      name:         p.name,
-      cash:         cashById[p.id]?.cash || 0,
-      cash_invested:investedById[p.id]   || 0,
-      market_value: mktValById[p.id]     || 0
+      id:             p.id,
+      code:           p.code,
+      name:           p.name,
+      cash:           p.cash_balance ?? null,   // null = not set; UI shows edit prompt
+      cash_invested:  investedById[p.id] || 0,
+      market_value:   mktValById[p.id]   || 0
     })));
   } catch (error) {
     res.status(500).json({ error: error.message });

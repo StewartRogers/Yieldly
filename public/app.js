@@ -33,7 +33,7 @@ function setupNavigation() {
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
 
-      if (targetPage === 'summary') { loadOverview(); }
+      if (targetPage === 'summary') { loadOverview(); loadSummary(); }
     });
   });
 }
@@ -350,6 +350,25 @@ async function loadPortfolios() {
   }
 }
 
+async function setCashBalance(portfolioId, code, current) {
+  const input = prompt(
+    `Cash balance for ${code}:\n(Leave blank to clear and revert to computed)`,
+    current != null ? current : ''
+  );
+  if (input === null) return; // cancelled
+  const value = input.trim() === '' ? null : parseFloat(input.replace(/[$,\s]/g, ''));
+  if (input.trim() !== '' && isNaN(value)) { alert('Please enter a valid number.'); return; }
+  try {
+    const res = await fetch(`/api/portfolios/${portfolioId}/cash-balance`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cash_balance: value })
+    });
+    if (!res.ok) throw new Error((await res.json()).error);
+    await loadOverview();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
 async function loadOverview() {
   const container = document.getElementById('overview-container');
   try {
@@ -359,9 +378,20 @@ async function loadOverview() {
     if (!data.length) { container.innerHTML = ''; return; }
 
     const fmt = fmtCurrency;
-    const totalCash    = data.reduce((s, p) => s + p.cash, 0);
-    const totalInvested= data.reduce((s, p) => s + p.cash_invested, 0);
-    const totalMkt     = data.reduce((s, p) => s + p.market_value, 0);
+    const totalCash     = data.reduce((s, p) => s + (p.cash ?? 0), 0);
+    const totalInvested = data.reduce((s, p) => s + p.cash_invested, 0);
+    const totalMkt      = data.reduce((s, p) => s + p.market_value, 0);
+    const allCashSet    = data.every(p => p.cash !== null);
+
+    function cashCell(p) {
+      if (p.cash === null) {
+        return `<td><button class="btn-set-cash" onclick="setCashBalance(${p.id}, '${p.code}')">Set</button></td>`;
+      }
+      return `<td class="${p.cash < 0 ? 'negative' : ''}">
+        ${fmt(p.cash)}
+        <button class="btn-edit-cash" title="Edit" onclick="setCashBalance(${p.id}, '${p.code}', ${p.cash})">✎</button>
+      </td>`;
+    }
 
     container.innerHTML = `
       <div class="overview-table-wrap">
@@ -374,8 +404,8 @@ async function loadOverview() {
           <tbody>
             <tr>
               <th>Cash Balance</th>
-              ${data.map(p => `<td class="${p.cash < 0 ? 'negative' : ''}">${fmt(p.cash)}</td>`).join('')}
-              <td class="${totalCash < 0 ? 'negative' : ''}">${fmt(totalCash)}</td>
+              ${data.map(cashCell).join('')}
+              <td>${allCashSet ? fmt(totalCash) : '—'}</td>
             </tr>
             <tr>
               <th>Cash Invested</th>
