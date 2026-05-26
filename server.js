@@ -428,30 +428,34 @@ app.get('/api/overview', (req, res) => {
           WHEN type = 'DIVIDEND'                     THEN  total
           WHEN type = 'SELL'                         THEN  total
           WHEN type IN ('BUY','DIVIDEND_REINVEST')   THEN -total
-          ELSE 0 END) AS cash,
-        SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN total ELSE 0 END) AS cash_invested
+          ELSE 0 END) AS cash
       FROM transactions GROUP BY portfolio_id
     `).all();
 
     const cashById = {};
     cashRows.forEach(r => { cashById[r.portfolio_id] = r; });
 
+    // Only sum market_value and buy_total for positions with shares > 0
     const allHoldings = computeHoldings(queryHoldings(null));
     const mktValById = {};
+    const investedById = {};
     const pidByCode = {};
     portfolios.forEach(p => { pidByCode[p.code] = p.id; });
     allHoldings.forEach(h => {
       const pid = pidByCode[h.portfolio_code];
-      if (pid) mktValById[pid] = (mktValById[pid] || 0) + h.market_value;
+      if (pid) {
+        mktValById[pid]   = (mktValById[pid]   || 0) + h.market_value;
+        investedById[pid] = (investedById[pid] || 0) + h.buy_total;
+      }
     });
 
     res.json(portfolios.map(p => ({
       id:           p.id,
       code:         p.code,
       name:         p.name,
-      cash:         cashById[p.id]?.cash         || 0,
-      cash_invested:cashById[p.id]?.cash_invested || 0,
-      market_value: mktValById[p.id]             || 0
+      cash:         cashById[p.id]?.cash || 0,
+      cash_invested:investedById[p.id]   || 0,
+      market_value: mktValById[p.id]     || 0
     })));
   } catch (error) {
     res.status(500).json({ error: error.message });

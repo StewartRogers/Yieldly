@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e \"const db = require\\('./database'\\); const rows = db.prepare\\('SELECT * FROM portfolios ORDER BY display_order'\\).all\\(\\); console.log\\(JSON.stringify\\(rows, null, 2\\)\\);\")"
+      "Bash(node -e \"const db = require\\('./database'\\); const rows = db.prepare\\('SELECT * FROM portfolios ORDER BY display_order'\\).all\\(\\); console.log\\(JSON.stringify\\(rows, null, 2\\)\\);\")",
+      "PowerShell(Get-ChildItem \"c:\\\\DEV\\\\Yieldly\\\\\" | Where-Object { $_.Name -ne \"node_modules\" } | Select-Object Name, Extension)",
+      "Bash(dir /b \"c:\\\\DEV\\\\Yieldly\")"
     ]
   }
 }
