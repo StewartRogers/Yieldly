@@ -68,6 +68,13 @@
         <p class="empty-state">Loading...</p>
       </div>
 
+      <div class="summary-section">
+        <table class="summary-table" id="summary-table" style="display:none;">
+          <thead id="summary-thead"></thead>
+          <tbody id="summary-tbody"></tbody>
+        </table>
+        <p class="empty-state" id="summary-empty" style="display:none;">No holdings found.</p>
+      </div>
 
     </div>
 
@@ -96,7 +103,7 @@
           </div>
           <div class="form-group">
             <label for="portfolio-code">Portfolio Code</label>
-            <input type="text" id="portfolio-code" placeholder="e.g., RR" required>
+            <input type="text" id="portfolio-code" placeholder="e.g., RR" maxlength="5" required>
           </div>
         </div>
         <div class="form-actions">
@@ -252,7 +259,7 @@
             </div>
             <div class="form-group" id="ticker-group">
               <label for="ticker">Ticker Symbol</label>
-              <input type="text" id="ticker" placeholder="AAPL">
+              <input type="text" id="ticker" placeholder="XEI.TO">
             </div>
             <div class="form-group">
               <label for="type">Type</label>

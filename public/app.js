@@ -427,17 +427,38 @@ async function loadOverview() {
 
 async function loadSummary() {
   const tbody = document.getElementById('summary-tbody');
+  const table = document.getElementById('summary-table');
+  const emptyEl = document.getElementById('summary-empty');
   tbody.innerHTML = '<tr><td colspan="28" class="empty-state">Loading...</td></tr>';
+  table.style.display = 'table';
+  if (emptyEl) emptyEl.style.display = 'none';
   try {
     const response = await fetch('/api/summary');
     const holdings = await response.json();
 
     if (holdings.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="28" class="empty-state">No holdings yet.</td></tr>';
+      table.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = '';
+      tbody.innerHTML = '';
       return;
     }
 
     const totalMktValue = holdings.reduce((s, h) => s + h.market_value, 0);
+
+    const thead = document.getElementById('summary-thead');
+    if (thead && !thead.hasChildNodes()) {
+      thead.innerHTML = `<tr>
+        <th>Port</th><th>Type</th><th>Ticker</th><th>Shares</th>
+        <th>Buy Price</th><th>Mkt Price</th><th>Sale Price</th>
+        <th>Buy Total</th><th>Mkt Value</th><th>Sale Total</th>
+        <th>Divs Paid</th><th>Div Freq</th><th>Last Div Date</th>
+        <th>Div/Share</th><th>Next Payout</th><th>Annual Payout</th>
+        <th>Return</th><th>Return %</th><th>Yield</th>
+        <th>Buys</th><th>Sells</th><th>Buy Exp</th><th>Sale Exp</th>
+        <th>Proceeds</th><th>ACB</th><th>Total Exp</th>
+        <th>Sector</th><th>Port %</th>
+      </tr>`;
+    }
 
     const fmt  = fmtCurrencyOr;
     const fmtN = v => v ? v.toFixed(4) : '—';
@@ -1021,5 +1042,5 @@ document.getElementById('refresh-all-btn').addEventListener('click', () => {
   const btn = document.getElementById('refresh-all-btn');
   const status = document.getElementById('refresh-all-status');
   runRefresh('/api/refresh-all-prices', btn, status,
-    async () => { await loadOverview(); });
+    async () => { await loadOverview(); await loadSummary(); });
 });
