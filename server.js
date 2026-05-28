@@ -20,10 +20,7 @@ const app = express();
 const PORT = 3000;
 const ALPHA_KEY = process.env.ALPHA_KEY;
 
-// Build the holdings SQL query. When portfolioId is provided, filters to that portfolio.
-function queryHoldings(portfolioId) {
-  const whereClause = portfolioId ? `WHERE t.portfolio_id = ${portfolioId}` : '';
-  return db.prepare(`
+const HOLDINGS_SQL = `
     SELECT
       p.code  AS portfolio_code,
       p.name  AS portfolio_name,
@@ -52,12 +49,13 @@ function queryHoldings(portfolioId) {
       s.investment_type
     FROM transactions t
     JOIN portfolios p ON t.portfolio_id = p.id
-    LEFT JOIN stock_info s ON s.portfolio_id = t.portfolio_id AND s.ticker = t.ticker
-    ${whereClause}
-    GROUP BY t.portfolio_id, t.ticker
-    HAVING shares > 0
-    ORDER BY p.display_order, p.code, t.ticker
-  `).all();
+    LEFT JOIN stock_info s ON s.portfolio_id = t.portfolio_id AND s.ticker = t.ticker`;
+
+const holdingsAllStmt       = db.prepare(`${HOLDINGS_SQL} GROUP BY t.portfolio_id, t.ticker HAVING shares > 0 ORDER BY p.display_order, p.code, t.ticker`);
+const holdingsByPortfolioStmt = db.prepare(`${HOLDINGS_SQL} WHERE t.portfolio_id = ? GROUP BY t.portfolio_id, t.ticker HAVING shares > 0 ORDER BY p.display_order, p.code, t.ticker`);
+
+function queryHoldings(portfolioId) {
+  return portfolioId ? holdingsByPortfolioStmt.all(portfolioId) : holdingsAllStmt.all();
 }
 
 
@@ -196,6 +194,7 @@ function normalizeTicker(ticker) {
 
 async function fetchTMXQuote(ticker) {
   const symbol = normalizeTicker(ticker);
+  if (!/^[A-Z0-9.]{1,12}$/.test(symbol)) throw new Error(`Invalid ticker: ${symbol}`);
   const query = `{
     getQuoteBySymbol(symbol: "${symbol}", locale: "en") {
       price
