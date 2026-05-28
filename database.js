@@ -57,7 +57,6 @@ if (columnExists.count === 0) {
 
     // Recreate the transactions table with the new schema
     db.exec(`
-      -- Create new table with correct schema
       CREATE TABLE transactions_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         portfolio_id INTEGER NOT NULL,
@@ -70,13 +69,13 @@ if (columnExists.count === 0) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
       );
-
-      -- Copy old data to new table with default portfolio_id
+    `);
+    // Use a parameterized statement for the data migration to avoid string interpolation
+    db.prepare(`
       INSERT INTO transactions_new (id, portfolio_id, ticker, type, quantity, price, total, date, created_at)
-      SELECT id, ${portfolio.id}, ticker, type, quantity, price, total, date, created_at
-      FROM transactions;
-
-      -- Drop old table and rename new one
+      SELECT id, ?, ticker, type, quantity, price, total, date, created_at FROM transactions
+    `).run(portfolio.id);
+    db.exec(`
       DROP TABLE transactions;
       ALTER TABLE transactions_new RENAME TO transactions;
     `);
