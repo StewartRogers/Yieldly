@@ -16,6 +16,11 @@ function backupPortfolios() {
   }
 }
 
+function serverError(res, error) {
+  console.error(error);
+  res.status(500).json({ error: 'An internal error occurred' });
+}
+
 const app = express();
 const PORT = 3000;
 const ALPHA_KEY = process.env.ALPHA_KEY;
@@ -73,7 +78,7 @@ app.get('/api/portfolios', (req, res) => {
     const portfolios = db.prepare('SELECT * FROM portfolios ORDER BY display_order, id').all();
     res.json(portfolios);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -84,6 +89,12 @@ app.post('/api/portfolios', (req, res) => {
 
     if (!name || !code) {
       return res.status(400).json({ error: 'Name and code are required' });
+    }
+    if (typeof name !== 'string' || name.trim().length > 100) {
+      return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+    }
+    if (typeof code !== 'string' || !/^[A-Z0-9]{1,5}$/i.test(code.trim())) {
+      return res.status(400).json({ error: 'Code must be 1–5 alphanumeric characters' });
     }
 
     const stmt = db.prepare('INSERT INTO portfolios (name, code) VALUES (?, ?)');
@@ -99,7 +110,7 @@ app.post('/api/portfolios', (req, res) => {
     if (error.message.includes('UNIQUE constraint')) {
       res.status(400).json({ error: 'Portfolio code already exists' });
     } else {
-      res.status(500).json({ error: error.message });
+      serverError(res, error);
     }
   }
 });
@@ -118,7 +129,7 @@ app.put('/api/portfolios/:id/order', (req, res) => {
     backupPortfolios();
     res.json({ message: 'Portfolio order updated' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -132,7 +143,7 @@ app.put('/api/portfolios/:id/cash-balance', (req, res) => {
     if (result.changes === 0) return res.status(404).json({ error: 'Portfolio not found' });
     res.json({ message: 'Cash balance updated', cash_balance: value });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -149,7 +160,7 @@ app.delete('/api/portfolios/:id', (req, res) => {
     backupPortfolios();
     res.json({ message: 'Portfolio deleted' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -182,7 +193,7 @@ app.put('/api/portfolios/:portfolioId/stocks/:ticker', (req, res) => {
 
     res.json({ message: 'Stock info updated' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -270,7 +281,7 @@ app.post('/api/portfolios/:portfolioId/refresh-prices', async (req, res) => {
     res.json({ message: `Updated ${updated} of ${tickers.length} stocks`, updated,
                total: tickers.length, errors: errors.length ? errors : undefined });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -323,7 +334,7 @@ app.post('/api/refresh-all-prices', async (req, res) => {
     res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueTickers.length} unique tickers)`,
                updated, total: holdings.length, errors: errors.length ? errors : undefined });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -340,7 +351,7 @@ app.get('/api/portfolios/:portfolioId/transactions/ticker/:ticker', (req, res) =
     `).all(req.params.portfolioId, req.params.ticker.toUpperCase());
     res.json(transactions);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -356,7 +367,7 @@ app.get('/api/portfolios/:portfolioId/transactions', (req, res) => {
     `).all(req.params.portfolioId);
     res.json(transactions);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -387,7 +398,7 @@ app.get('/api/overview', (req, res) => {
       market_value:   mktValById[p.id]   || 0
     })));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -427,7 +438,7 @@ app.post('/api/transactions', (req, res) => {
       date
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -437,7 +448,7 @@ app.get('/api/portfolios/:portfolioId/summary', (req, res) => {
     const rows = queryHoldings(req.params.portfolioId);
     res.json(computeHoldings(rows));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -447,7 +458,7 @@ app.get('/api/summary', (req, res) => {
     const rows = queryHoldings(null);
     res.json(computeHoldings(rows));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -463,7 +474,7 @@ app.delete('/api/transactions/:id', (req, res) => {
 
     res.json({ message: 'Transaction deleted' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -575,7 +586,7 @@ app.post('/api/import/csv', (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
