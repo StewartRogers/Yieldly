@@ -1,6 +1,22 @@
 const fmtCurrency = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtCurrencyOr = v => (v && v !== 0) ? fmtCurrency(v) : '—';
 
+// Escape a value for safe insertion into HTML text content or attribute values.
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Escape a value for use as a single-quoted string arg inside an onclick HTML attribute.
+// Escapes JS metacharacters first, then HTML-encodes so the attribute stays well-formed.
+function escapeAttrJs(s) {
+  if (s == null) return '';
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+                  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 let currentPortfolioId = null;
 let holdingsView = 'card';
 let currentPage = 1;
@@ -384,12 +400,13 @@ async function loadOverview() {
     const allCashSet    = data.every(p => p.cash !== null);
 
     function cashCell(p) {
+      const safeCode = escapeAttrJs(p.code);
       if (p.cash === null) {
-        return `<td><button class="btn-set-cash" onclick="setCashBalance(${p.id}, '${p.code}')">Set</button></td>`;
+        return `<td><button class="btn-set-cash" onclick="setCashBalance(${p.id}, '${safeCode}')">Set</button></td>`;
       }
       return `<td class="${p.cash < 0 ? 'negative' : ''}">
         ${fmt(p.cash)}
-        <button class="btn-edit-cash" title="Edit" onclick="setCashBalance(${p.id}, '${p.code}', ${p.cash})">✎</button>
+        <button class="btn-edit-cash" title="Edit" onclick="setCashBalance(${p.id}, '${safeCode}', ${p.cash})">✎</button>
       </td>`;
     }
 
@@ -398,7 +415,7 @@ async function loadOverview() {
         <table class="overview-table">
           <thead><tr>
             <th></th>
-            ${data.map(p => `<th title="${p.name}">${p.code}</th>`).join('')}
+            ${data.map(p => `<th title="${escapeHtml(p.name)}">${escapeHtml(p.code)}</th>`).join('')}
             <th>Total</th>
           </tr></thead>
           <tbody>
@@ -468,9 +485,9 @@ async function loadSummary() {
       const portShare = totalMktValue > 0 ? (h.market_value / totalMktValue * 100) : 0;
       const retClass  = h.return >= 0 ? 'positive' : 'negative';
       return `<tr>
-        <td>${h.portfolio_code}</td>
-        <td>${h.investment_type}</td>
-        <td class="ticker-cell">${h.ticker}</td>
+        <td>${escapeHtml(h.portfolio_code)}</td>
+        <td>${escapeHtml(h.investment_type)}</td>
+        <td class="ticker-cell">${escapeHtml(h.ticker)}</td>
         <td>${fmtN(h.shares)}</td>
         <td>${fmt(h.buy_price)}</td>
         <td>${h.market_price > 0 ? fmt(h.market_price) : '—'}</td>
@@ -479,8 +496,8 @@ async function loadSummary() {
         <td>${h.market_price > 0 ? fmt(h.market_value) : '—'}</td>
         <td>${h.sale_total > 0 ? fmt(h.sale_total) : '—'}</td>
         <td>${h.dividends_paid > 0 ? fmt(h.dividends_paid) : '—'}</td>
-        <td>${h.dividend_frequency || '—'}</td>
-        <td>${h.last_dividend_date || '—'}</td>
+        <td>${escapeHtml(h.dividend_frequency) || '—'}</td>
+        <td>${escapeHtml(h.last_dividend_date) || '—'}</td>
         <td>${h.dividend_per_share > 0 ? fmt(h.dividend_per_share) : '—'}</td>
         <td>${h.next_payout > 0 ? fmt(h.next_payout) : '—'}</td>
         <td>${h.annual_payout > 0 ? fmt(h.annual_payout) : '—'}</td>
@@ -494,12 +511,12 @@ async function loadSummary() {
         <td>${h.sale_total > 0 ? fmt(h.proceeds) : '—'}</td>
         <td>${fmt(h.acb)}</td>
         <td>${h.total_expense > 0 ? fmt(h.total_expense) : '—'}</td>
-        <td>${h.sector || '—'}</td>
+        <td>${escapeHtml(h.sector) || '—'}</td>
         <td>${totalMktValue > 0 ? fmtP(portShare) : '—'}</td>
       </tr>`;
     }).join('');
   } catch (error) {
-    tbody.innerHTML = `<tr><td colspan="28" class="empty-state">Error loading summary: ${error.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="28" class="empty-state">Error loading summary.</td></tr>`;
   }
 }
 
@@ -595,32 +612,43 @@ async function loadPortfolioHoldings(portfolioId) {
     const fmtP = v => v ? v.toFixed(2) + '%' : '—';
     listTbody.innerHTML = portfolio.map(holding => {
       const retClass = holding.return >= 0 ? 'positive' : 'negative';
+      const eTicker  = escapeAttrJs(holding.ticker);
+      const eFreq    = escapeAttrJs(holding.dividend_frequency || '');
+      const eDate    = escapeAttrJs(holding.last_dividend_date || '');
+      const eSector  = escapeAttrJs(holding.sector || '');
+      const eType    = escapeAttrJs(holding.investment_type || '');
       return `<tr>
-        <td class="ticker-cell">${holding.ticker}</td>
+        <td class="ticker-cell">${escapeHtml(holding.ticker)}</td>
         <td>${holding.shares.toFixed(4)}</td>
         <td>${fmtCurrency(holding.buy_price)}</td>
         <td>${holding.market_price > 0 ? fmtCurrency(holding.market_price) : '—'}</td>
         <td>${fmtCurrencyOr(holding.dividends_paid)}</td>
-        <td>${holding.last_dividend_date || '—'}</td>
+        <td>${escapeHtml(holding.last_dividend_date) || '—'}</td>
         <td class="${holding.market_price > 0 ? retClass : ''}">${holding.market_price > 0 ? fmtCurrency(holding.return) : '—'}</td>
         <td class="${holding.market_price > 0 ? retClass : ''}">${holding.market_price > 0 ? fmtP(holding.return_percent) : '—'}</td>
         <td>${holding.market_price > 0 && holding.dividend_yield > 0 ? fmtP(holding.dividend_yield) : '—'}</td>
         <td>
-          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">Edit</button>
-          <button class="btn-secondary btn-sm" onclick="openHoldingTransactionsModal(${portfolioId}, '${holding.ticker}')">Txns</button>
+          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${eTicker}', ${holding.market_price || 0}, '${eFreq}', ${holding.dividend_per_share || 0}, '${eDate}', '${eSector}', '${eType}')">Edit</button>
+          <button class="btn-secondary btn-sm" onclick="openHoldingTransactionsModal(${portfolioId}, '${eTicker}')">Txns</button>
         </td>
       </tr>`;
     }).join('');
 
     // Card view
-    grid.innerHTML = portfolio.map(holding => `
+    grid.innerHTML = portfolio.map(holding => {
+      const eTicker  = escapeAttrJs(holding.ticker);
+      const eFreq    = escapeAttrJs(holding.dividend_frequency || '');
+      const eDate    = escapeAttrJs(holding.last_dividend_date || '');
+      const eSector  = escapeAttrJs(holding.sector || '');
+      const eType    = escapeAttrJs(holding.investment_type || '');
+      return `
       <div class="portfolio-card">
         <div class="portfolio-card-header">
           <div class="ticker-header">
-            <div class="ticker ticker-link" onclick="openHoldingTransactionsModal(${portfolioId}, '${holding.ticker}')">${holding.ticker}</div>
+            <div class="ticker ticker-link" onclick="openHoldingTransactionsModal(${portfolioId}, '${eTicker}')">${escapeHtml(holding.ticker)}</div>
             <div class="shares">${holding.shares.toFixed(2)} shares</div>
           </div>
-          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${holding.ticker}', ${holding.market_price || 0}, '${holding.dividend_frequency || ''}', ${holding.dividend_per_share || 0}, '${holding.last_dividend_date || ''}', '${holding.sector || ''}', '${holding.investment_type || ''}')">
+          <button class="btn-edit" onclick="openStockInfoModal(${portfolioId}, '${eTicker}', ${holding.market_price || 0}, '${eFreq}', ${holding.dividend_per_share || 0}, '${eDate}', '${eSector}', '${eType}')">
             Edit
           </button>
         </div>
@@ -670,7 +698,7 @@ async function loadPortfolioHoldings(portfolioId) {
           <div class="dividend-info">
             <div class="detail-row">
               <span class="label">Div Frequency:</span>
-              <span class="value">${holding.dividend_frequency}</span>
+              <span class="value">${escapeHtml(holding.dividend_frequency)}</span>
             </div>
             <div class="detail-row">
               <span class="label">Div Per Share:</span>
@@ -689,7 +717,8 @@ async function loadPortfolioHoldings(portfolioId) {
           </div>
         ` : ''}
       </div>
-    `).join('');
+    `;
+    }).join('');
   } catch (error) {
     console.error('Error loading portfolio:', error);
   }
@@ -729,8 +758,8 @@ function displayTransactions() {
 
     return `
       <div class="transaction-item ${typeClass}">
-        <div class="ticker">${t.ticker}</div>
-        <div class="type ${typeClass}">${typeLabel}</div>
+        <div class="ticker">${escapeHtml(t.ticker)}</div>
+        <div class="type ${typeClass}">${escapeHtml(typeLabel)}</div>
         <div>${t.quantity} shares</div>
         <div>${fmtCurrency(parseFloat(t.price))}/share</div>
         <div>Total: ${fmtCurrency(parseFloat(t.total))}</div>
@@ -961,7 +990,7 @@ async function openHoldingTransactionsModal(portfolioId, ticker) {
       if (isSell) { totalShares -= t.quantity; }
       return `<tr>
         <td>${t.date}</td>
-        <td><span class="type ${typeClass(t.type)}">${typeLabel(t.type)}</span></td>
+        <td><span class="type ${typeClass(t.type)}">${escapeHtml(typeLabel(t.type))}</span></td>
         <td>${t.quantity > 0 ? t.quantity.toFixed(4) : '—'}</td>
         <td>${t.price > 0 ? fmtCurrency(t.price) : '—'}</td>
         <td>${fmtCurrency(t.total)}</td>
@@ -1003,10 +1032,10 @@ async function runRefresh(url, btn, statusEl, onSuccess) {
     if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
     const result = await res.json();
     if (onSuccess) await onSuccess(result);
-    let msg = `<strong>${result.message}</strong>`;
+    let msg = `<strong>${escapeHtml(result.message)}</strong>`;
     if (result.errors?.length) {
       msg += `<br><details style="margin-top:.5rem"><summary>${result.errors.length} error(s)</summary>` +
-             result.errors.map(e => `${e.ticker}: ${e.error}`).join('<br>') + '</details>';
+             result.errors.map(e => `${escapeHtml(e.ticker)}: ${escapeHtml(e.error)}`).join('<br>') + '</details>';
     }
     if (statusEl) {
       statusEl.className = 'import-status success';

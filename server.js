@@ -90,8 +90,11 @@ app.post('/api/portfolios', (req, res) => {
     if (!name || !code) {
       return res.status(400).json({ error: 'Name and code are required' });
     }
-    if (typeof name !== 'string' || name.trim().length > 100) {
-      return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+    if (typeof name !== 'string' || name.trim().length === 0 || name.trim().length > 100) {
+      return res.status(400).json({ error: 'Name must be 1–100 characters' });
+    }
+    if (/[<>"']/.test(name)) {
+      return res.status(400).json({ error: 'Name must not contain < > " \' characters' });
     }
     if (typeof code !== 'string' || !/^[A-Z0-9]{1,5}$/i.test(code.trim())) {
       return res.status(400).json({ error: 'Code must be 1–5 alphanumeric characters' });
