@@ -49,7 +49,7 @@ function setupNavigation() {
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
 
-      if (targetPage === 'summary')   { loadOverview(); loadSummary(); }
+      if (targetPage === 'summary')   { loadOverview(); loadSummary(); loadMonthlyACB(); }
       if (targetPage === 'dividends') { loadDividends(); }
     });
   });
@@ -1022,6 +1022,55 @@ document.getElementById('holding-transactions-modal').addEventListener('click', 
 });
 
 // ===== DIVIDEND INCOME =====
+
+async function loadMonthlyACB() {
+  const container = document.getElementById('monthly-acb-container');
+  if (!container) return;
+  container.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const res = await fetch('/api/summary/monthly-acb');
+    const data = await res.json();
+    if (!data.length) {
+      container.innerHTML = '<p class="empty-state">No transaction data found.</p>';
+      return;
+    }
+    container.innerHTML = buildMonthlyACBTable(data);
+  } catch (e) {
+    container.innerHTML = '<p class="empty-state">Error loading data.</p>';
+  }
+}
+
+function buildMonthlyACBTable(data) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b);
+
+  const lookup = {};
+  data.forEach(d => {
+    if (!lookup[d.year]) lookup[d.year] = {};
+    lookup[d.year][d.month] = d.total_acb;
+  });
+
+  const bodyRows = MONTHS.map((label, i) => {
+    const m = i + 1;
+    return `<tr>
+      <th>${label}</th>
+      ${years.map(y => {
+        const v = lookup[y]?.[m];
+        return `<td>${v != null ? fmtCurrencyOr(v) : ''}</td>`;
+      }).join('')}
+    </tr>`;
+  }).join('');
+
+  return `<div class="div-table-wrap">
+    <table class="div-table">
+      <thead><tr>
+        <th></th>
+        ${years.map(y => `<th>${y}</th>`).join('')}
+      </tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+  </div>`;
+}
 
 async function loadDividends() {
   const container = document.getElementById('dividends-container');
