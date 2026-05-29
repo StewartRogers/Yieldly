@@ -344,6 +344,78 @@ app.post('/api/refresh-all-prices', async (req, res) => {
 // ===== DIVIDEND INCOME =====
 
 // Monthly dividend totals grouped by portfolio, year, month
+function computeMonthlyACB(txRows) {
+  if (!txRows.length) return [];
+
+  const state = new Map();
+
+  function getState(portfolioId, ticker) {
+    const key = `${portfolioId}:${ticker}`;
+    if (!state.has(key)) state.set(key, { sharesBought: 0, buyTotal: 0, buyExpense: 0, sharesSold: 0 });
+    return state.get(key);
+  }
+
+  function totalACB() {
+    let sum = 0;
+    for (const s of state.values()) {
+      const shares = s.sharesBought - s.sharesSold;
+      if (shares > 0 && s.sharesBought > 0) {
+        sum += (s.buyTotal + s.buyExpense) * (shares / s.sharesBought);
+      }
+    }
+    return Math.round(sum * 100) / 100;
+  }
+
+  const byMonth = new Map();
+  for (const tx of txRows) {
+    const key = tx.date.substring(0, 7);
+    if (!byMonth.has(key)) byMonth.set(key, []);
+    byMonth.get(key).push(tx);
+  }
+
+  const firstMonth = txRows[0].date.substring(0, 7);
+  const now = new Date();
+  const lastMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  const results = [];
+  let [y, m] = firstMonth.split('-').map(Number);
+  const [ey, em] = lastMonth.split('-').map(Number);
+
+  while (y < ey || (y === ey && m <= em)) {
+    const key = `${y}-${String(m).padStart(2, '0')}`;
+    for (const tx of (byMonth.get(key) || [])) {
+      if (tx.ticker === 'CASH') continue;
+      const s = getState(tx.portfolio_id, tx.ticker);
+      if (tx.type === 'BUY' || tx.type === 'DIVIDEND_REINVEST') {
+        s.sharesBought += tx.quantity || 0;
+        s.buyTotal     += tx.total    || 0;
+        s.buyExpense   += tx.commission || 0;
+      } else if (tx.type === 'SELL') {
+        s.sharesSold += tx.quantity || 0;
+      }
+    }
+    results.push({ year: y, month: m, total_acb: totalACB() });
+    if (++m > 12) { m = 1; y++; }
+  }
+
+  return results;
+}
+
+app.get('/api/summary/monthly-acb', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT portfolio_id, ticker, type, quantity, total,
+             COALESCE(commission, 0) AS commission, date
+      FROM transactions
+      WHERE type IN ('BUY', 'DIVIDEND_REINVEST', 'SELL')
+      ORDER BY date ASC, id ASC
+    `).all();
+    res.json(computeMonthlyACB(rows));
+  } catch (error) {
+    serverError(res, error);
+  }
+});
+
 app.get('/api/dividends/monthly', (req, res) => {
   try {
     const rows = db.prepare(`
