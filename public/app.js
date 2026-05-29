@@ -49,7 +49,8 @@ function setupNavigation() {
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
 
-      if (targetPage === 'summary') { loadOverview(); loadSummary(); }
+      if (targetPage === 'summary')   { loadOverview(); loadSummary(); }
+      if (targetPage === 'dividends') { loadDividends(); }
     });
   });
 }
@@ -1019,6 +1020,92 @@ function closeHoldingTransactionsModal() {
 document.getElementById('holding-transactions-modal').addEventListener('click', (e) => {
   if (e.target.id === 'holding-transactions-modal') closeHoldingTransactionsModal();
 });
+
+// ===== DIVIDEND INCOME =====
+
+async function loadDividends() {
+  const container = document.getElementById('dividends-container');
+  container.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const res = await fetch('/api/dividends/monthly');
+    const data = await res.json();
+
+    if (!data.length) {
+      container.innerHTML = '<p class="empty-state">No dividend transactions found.</p>';
+      return;
+    }
+
+    const rrspData = data.filter(d => d.portfolio_code === 'RR');
+    const tfsaData = data.filter(d => d.portfolio_code === 'T');
+
+    container.innerHTML = `
+      <div class="div-income-section">
+        <h2>All Portfolios</h2>
+        ${buildDividendTable(data)}
+      </div>
+      <div class="div-income-section">
+        <h2>RRSP</h2>
+        ${buildDividendTable(rrspData)}
+      </div>
+      <div class="div-income-section">
+        <h2>TFSA</h2>
+        ${buildDividendTable(tfsaData)}
+      </div>`;
+  } catch (e) {
+    container.innerHTML = '<p class="empty-state">Error loading dividend data.</p>';
+  }
+}
+
+function buildDividendTable(data) {
+  if (!data.length) return '<p class="empty-state">No dividend data for this portfolio.</p>';
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b);
+
+  // Build lookup: year -> month -> total (summed across portfolio codes)
+  const lookup = {};
+  data.forEach(d => {
+    if (!lookup[d.year]) lookup[d.year] = {};
+    lookup[d.year][d.month] = (lookup[d.year][d.month] || 0) + d.total;
+  });
+
+  const fmt = v => v > 0
+    ? '$' + v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '—';
+
+  const yearTotals = {};
+  years.forEach(y => {
+    yearTotals[y] = Object.values(lookup[y]).reduce((s, v) => s + v, 0);
+  });
+  const grandTotal = Object.values(yearTotals).reduce((s, v) => s + v, 0);
+
+  const bodyRows = MONTHS.map((label, i) => {
+    const m = i + 1;
+    const rowTotal = years.reduce((s, y) => s + (lookup[y]?.[m] || 0), 0);
+    return `<tr>
+      <th>${label}</th>
+      ${years.map(y => `<td>${fmt(lookup[y]?.[m] || 0)}</td>`).join('')}
+      <td class="div-total-col">${fmt(rowTotal)}</td>
+    </tr>`;
+  }).join('');
+
+  const totalRow = `<tr class="div-total-row">
+    <th>Total</th>
+    ${years.map(y => `<td>${fmt(yearTotals[y])}</td>`).join('')}
+    <td class="div-total-col">${fmtCurrency(grandTotal)}</td>
+  </tr>`;
+
+  return `<div class="div-table-wrap">
+    <table class="div-table">
+      <thead><tr>
+        <th></th>
+        ${years.map(y => `<th>${y}</th>`).join('')}
+        <th>Total</th>
+      </tr></thead>
+      <tbody>${bodyRows}${totalRow}</tbody>
+    </table>
+  </div>`;
+}
 
 // ===== REFRESH PRICES (TMX) =====
 
