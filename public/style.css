@@ -1071,3 +1071,77 @@ h2 {
   cursor: pointer; color: #6b7280; vertical-align: middle;
 }
 .btn-edit-cash:hover { background: #f3f4f6; }
+
+/* ===== DIVIDEND INCOME PAGE ===== */
+.div-income-section {
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.div-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-top: 1rem;
+}
+
+.div-table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  min-width: 100%;
+}
+
+.div-table th,
+.div-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.div-table thead th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.div-table tbody th {
+  text-align: left;
+  font-weight: 500;
+  color: #374151;
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+  min-width: 50px;
+}
+
+.div-table tbody tr:nth-child(even) td,
+.div-table tbody tr:nth-child(even) th {
+  background-color: #f8fafc;
+}
+
+.div-table tbody tr:hover td,
+.div-table tbody tr:hover th {
+  background: #f1f5f9 !important;
+}
+
+.div-table .div-total-col {
+  font-weight: 600;
+  border-left: 2px solid #e2e8f0;
+  background: #f8fafc !important;
+}
+
+.div-table .div-total-row th,
+.div-table .div-total-row td {
+  font-weight: 700;
+  border-top: 2px solid #e2e8f0;
+  border-bottom: none;
+  background: #f1f5f9 !important;
+}

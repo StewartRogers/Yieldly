@@ -341,6 +341,29 @@ app.post('/api/refresh-all-prices', async (req, res) => {
   }
 });
 
+// ===== DIVIDEND INCOME =====
+
+// Monthly dividend totals grouped by portfolio, year, month
+app.get('/api/dividends/monthly', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT
+        p.code  AS portfolio_code,
+        CAST(strftime('%Y', t.date) AS INTEGER) AS year,
+        CAST(strftime('%m', t.date) AS INTEGER) AS month,
+        SUM(t.total) AS total
+      FROM transactions t
+      JOIN portfolios p ON t.portfolio_id = p.id
+      WHERE t.type = 'DIVIDEND'
+      GROUP BY p.code, year, month
+      ORDER BY p.code, year, month
+    `).all();
+    res.json(rows);
+  } catch (error) {
+    serverError(res, error);
+  }
+});
+
 // ===== TRANSACTION MANAGEMENT =====
 
 // Get transactions for a specific ticker within a portfolio
