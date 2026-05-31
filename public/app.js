@@ -49,7 +49,7 @@ function setupNavigation() {
       pages.forEach(p => p.classList.remove('active'));
       document.getElementById(`page-${targetPage}`).classList.add('active');
 
-      if (targetPage === 'summary')   { loadOverview(); loadSummary(); loadMonthlyACB(); }
+      if (targetPage === 'summary')   { loadOverview(); loadMonthlyACB(); }
       if (targetPage === 'dividends') { loadDividends(); }
     });
   });
@@ -367,14 +367,34 @@ async function loadPortfolios() {
   }
 }
 
-async function setCashBalance(portfolioId, code, current) {
-  const input = prompt(
-    `Cash balance for ${code}:\n(Leave blank to clear and revert to computed)`,
-    current != null ? current : ''
-  );
-  if (input === null) return; // cancelled
-  const value = input.trim() === '' ? null : parseFloat(input.replace(/[$,\s]/g, ''));
-  if (input.trim() !== '' && isNaN(value)) { alert('Please enter a valid number.'); return; }
+function setCashBalance(portfolioId, code, current, btn) {
+  const td = btn.closest('td');
+  const currentVal = current != null ? current : '';
+  td.innerHTML = `
+    <form class="cash-inline-form" onsubmit="submitCashBalance(event, ${portfolioId}, this.closest('td'))">
+      <input type="number" class="cash-inline-input" value="${currentVal}"
+             placeholder="Amount" step="0.01">
+      <button type="submit" class="btn-set-cash">Save</button>
+      <button type="button" class="cash-cancel-btn" onclick="loadOverview()">✕</button>
+    </form>`;
+  const inp = td.querySelector('input');
+  inp.focus();
+  inp.select();
+}
+
+async function submitCashBalance(event, portfolioId, td) {
+  event.preventDefault();
+  const input = td.querySelector('input');
+  const raw = input.value.trim();
+  const value = raw === '' ? null : parseFloat(raw.replace(/[$,\s]/g, ''));
+  if (raw !== '' && isNaN(value)) {
+    input.setCustomValidity('Please enter a valid number.');
+    input.reportValidity();
+    return;
+  }
+  input.setCustomValidity('');
+  const saveBtn = td.querySelector('[type="submit"]');
+  saveBtn.disabled = true;
   try {
     const res = await fetch(`/api/portfolios/${portfolioId}/cash-balance`, {
       method: 'PUT',
@@ -383,7 +403,13 @@ async function setCashBalance(portfolioId, code, current) {
     });
     if (!res.ok) throw new Error((await res.json()).error);
     await loadOverview();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) {
+    saveBtn.disabled = false;
+    const errEl = td.querySelector('.cash-error') || document.createElement('span');
+    errEl.className = 'cash-error';
+    errEl.textContent = e.message;
+    td.querySelector('.cash-inline-form').appendChild(errEl);
+  }
 }
 
 async function loadOverview() {
@@ -395,19 +421,21 @@ async function loadOverview() {
     if (!data.length) { container.innerHTML = ''; return; }
 
     const fmt = fmtCurrency;
-    const totalCash     = data.reduce((s, p) => s + (p.cash ?? 0), 0);
-    const totalInvested = data.reduce((s, p) => s + p.cash_invested, 0);
-    const totalMkt      = data.reduce((s, p) => s + p.market_value, 0);
-    const allCashSet    = data.every(p => p.cash !== null);
+    const totalCash      = data.reduce((s, p) => s + (p.cash ?? 0), 0);
+    const totalInvested  = data.reduce((s, p) => s + p.cash_invested, 0);
+    const totalBuyTotal  = data.reduce((s, p) => s + p.buy_total, 0);
+    const totalSaleTotal = data.reduce((s, p) => s + p.sale_total, 0);
+    const totalMkt       = data.reduce((s, p) => s + p.market_value, 0);
+    const allCashSet     = data.every(p => p.cash !== null);
 
     function cashCell(p) {
       const safeCode = escapeAttrJs(p.code);
       if (p.cash === null) {
-        return `<td><button class="btn-set-cash" onclick="setCashBalance(${p.id}, '${safeCode}')">Set</button></td>`;
+        return `<td><button class="btn-set-cash" onclick="setCashBalance(${p.id}, '${safeCode}', null, this)">Set</button></td>`;
       }
       return `<td class="${p.cash < 0 ? 'negative' : ''}">
         ${fmt(p.cash)}
-        <button class="btn-edit-cash" title="Edit" onclick="setCashBalance(${p.id}, '${safeCode}', ${p.cash})">✎</button>
+        <button class="btn-edit-cash" title="Edit" onclick="setCashBalance(${p.id}, '${safeCode}', ${p.cash}, this)">✎</button>
       </td>`;
     }
 
@@ -426,6 +454,16 @@ async function loadOverview() {
               <td>${allCashSet ? fmt(totalCash) : '—'}</td>
             </tr>
             <tr>
+              <th>Buy Total</th>
+              ${data.map(p => `<td>${p.buy_total > 0 ? fmt(p.buy_total) : '—'}</td>`).join('')}
+              <td>${totalBuyTotal > 0 ? fmt(totalBuyTotal) : '—'}</td>
+            </tr>
+            <tr>
+              <th>Sale Total</th>
+              ${data.map(p => `<td>${p.sale_total > 0 ? fmt(p.sale_total) : '—'}</td>`).join('')}
+              <td>${totalSaleTotal > 0 ? fmt(totalSaleTotal) : '—'}</td>
+            </tr>
+            <tr>
               <th>Cash Invested</th>
               ${data.map(p => `<td>${fmt(p.cash_invested)}</td>`).join('')}
               <td>${fmt(totalInvested)}</td>
@@ -440,84 +478,6 @@ async function loadOverview() {
       </div>`;
   } catch (error) {
     container.innerHTML = `<p class="empty-state">Error loading overview.</p>`;
-  }
-}
-
-async function loadSummary() {
-  const tbody = document.getElementById('summary-tbody');
-  const table = document.getElementById('summary-table');
-  const emptyEl = document.getElementById('summary-empty');
-  tbody.innerHTML = '<tr><td colspan="28" class="empty-state">Loading...</td></tr>';
-  table.style.display = 'table';
-  if (emptyEl) emptyEl.style.display = 'none';
-  try {
-    const response = await fetch('/api/summary');
-    const holdings = await response.json();
-
-    if (holdings.length === 0) {
-      table.style.display = 'none';
-      if (emptyEl) emptyEl.style.display = '';
-      tbody.innerHTML = '';
-      return;
-    }
-
-    const totalMktValue = holdings.reduce((s, h) => s + h.market_value, 0);
-
-    const thead = document.getElementById('summary-thead');
-    if (thead && !thead.hasChildNodes()) {
-      thead.innerHTML = `<tr>
-        <th>Port</th><th>Type</th><th>Ticker</th><th>Shares</th>
-        <th>Buy Price</th><th>Mkt Price</th><th>Sale Price</th>
-        <th>Buy Total</th><th>Mkt Value</th><th>Sale Total</th>
-        <th>Divs Paid</th><th>Div Freq</th><th>Last Div Date</th>
-        <th>Div/Share</th><th>Next Payout</th><th>Annual Payout</th>
-        <th>Return</th><th>Return %</th><th>Yield</th>
-        <th>Buys</th><th>Sells</th><th>Buy Exp</th><th>Sale Exp</th>
-        <th>Proceeds</th><th>ACB</th><th>Total Exp</th>
-        <th>Sector</th><th>Port %</th>
-      </tr>`;
-    }
-
-    const fmt  = fmtCurrencyOr;
-    const fmtN = v => v ? v.toFixed(4) : '—';
-    const fmtP = v => v ? v.toFixed(2) + '%' : '—';
-
-    tbody.innerHTML = holdings.map(h => {
-      const portShare = totalMktValue > 0 ? (h.market_value / totalMktValue * 100) : 0;
-      const retClass  = h.return >= 0 ? 'positive' : 'negative';
-      return `<tr>
-        <td>${escapeHtml(h.portfolio_code)}</td>
-        <td>${escapeHtml(h.investment_type)}</td>
-        <td class="ticker-cell">${escapeHtml(h.ticker)}</td>
-        <td>${fmtN(h.shares)}</td>
-        <td>${fmt(h.buy_price)}</td>
-        <td>${h.market_price > 0 ? fmt(h.market_price) : '—'}</td>
-        <td>${h.sale_price > 0 ? fmt(h.sale_price) : '—'}</td>
-        <td>${fmt(h.buy_total)}</td>
-        <td>${h.market_price > 0 ? fmt(h.market_value) : '—'}</td>
-        <td>${h.sale_total > 0 ? fmt(h.sale_total) : '—'}</td>
-        <td>${h.dividends_paid > 0 ? fmt(h.dividends_paid) : '—'}</td>
-        <td>${escapeHtml(h.dividend_frequency) || '—'}</td>
-        <td>${escapeHtml(h.last_dividend_date) || '—'}</td>
-        <td>${h.dividend_per_share > 0 ? fmt(h.dividend_per_share) : '—'}</td>
-        <td>${h.next_payout > 0 ? fmt(h.next_payout) : '—'}</td>
-        <td>${h.annual_payout > 0 ? fmt(h.annual_payout) : '—'}</td>
-        <td class="${retClass}">${h.market_price > 0 ? fmt(h.return) : '—'}</td>
-        <td class="${retClass}">${h.market_price > 0 ? fmtP(h.return_percent) : '—'}</td>
-        <td>${h.market_price > 0 && h.dividend_yield > 0 ? fmtP(h.dividend_yield) : '—'}</td>
-        <td>${h.buy_count}</td>
-        <td>${h.sell_count}</td>
-        <td>${h.buy_expense > 0 ? fmt(h.buy_expense) : '—'}</td>
-        <td>${h.sale_expense > 0 ? fmt(h.sale_expense) : '—'}</td>
-        <td>${h.sale_total > 0 ? fmt(h.proceeds) : '—'}</td>
-        <td>${fmt(h.acb)}</td>
-        <td>${h.total_expense > 0 ? fmt(h.total_expense) : '—'}</td>
-        <td>${escapeHtml(h.sector) || '—'}</td>
-        <td>${totalMktValue > 0 ? fmtP(portShare) : '—'}</td>
-      </tr>`;
-    }).join('');
-  } catch (error) {
-    tbody.innerHTML = `<tr><td colspan="28" class="empty-state">Error loading summary.</td></tr>`;
   }
 }
 
@@ -623,6 +583,8 @@ async function loadPortfolioHoldings(portfolioId) {
         <td>${holding.shares.toFixed(4)}</td>
         <td>${fmtCurrency(holding.buy_price)}</td>
         <td>${holding.market_price > 0 ? fmtCurrency(holding.market_price) : '—'}</td>
+        <td>${fmtCurrency(holding.buy_total)}</td>
+        <td>${holding.sale_total > 0 ? fmtCurrency(holding.sale_total) : '—'}</td>
         <td>${fmtCurrencyOr(holding.dividends_paid)}</td>
         <td>${escapeHtml(holding.last_dividend_date) || '—'}</td>
         <td class="${holding.market_price > 0 ? retClass : ''}">${holding.market_price > 0 ? fmtCurrency(holding.return) : '—'}</td>
@@ -1042,7 +1004,7 @@ async function loadMonthlyACB() {
 
 function buildMonthlyACBTable(data) {
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b);
+  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b).slice(-5);
 
   const lookup = {};
   data.forEach(d => {
@@ -1084,22 +1046,20 @@ async function loadDividends() {
       return;
     }
 
-    const rrspData = data.filter(d => d.portfolio_code === 'RR');
-    const tfsaData = data.filter(d => d.portfolio_code === 'T');
+    const byCode = code => data.filter(d => d.portfolio_code === code);
 
-    container.innerHTML = `
-      <div class="div-income-section">
-        <h2>All Portfolios</h2>
-        ${buildDividendTable(data)}
-      </div>
-      <div class="div-income-section">
-        <h2>RRSP</h2>
-        ${buildDividendTable(rrspData)}
-      </div>
-      <div class="div-income-section">
-        <h2>TFSA</h2>
-        ${buildDividendTable(tfsaData)}
-      </div>`;
+    const sections = [
+      { label: 'All Portfolios', data },
+      { label: 'RRSP',          data: byCode('RR') },
+      { label: 'TFSA',          data: byCode('T')  },
+      { label: 'RE',            data: byCode('RE') },
+      { label: 'RF',            data: byCode('RF') },
+    ];
+
+    container.innerHTML = sections
+      .filter(s => s.data.length)
+      .map(s => `<div class="div-income-section"><h2>${s.label}</h2>${buildDividendTable(s.data)}</div>`)
+      .join('');
   } catch (e) {
     container.innerHTML = '<p class="empty-state">Error loading dividend data.</p>';
   }
@@ -1109,7 +1069,7 @@ function buildDividendTable(data) {
   if (!data.length) return '<p class="empty-state">No dividend data for this portfolio.</p>';
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b);
+  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b).slice(-5);
 
   // Build lookup: year -> month -> total (summed across portfolio codes)
   const lookup = {};
@@ -1126,22 +1086,36 @@ function buildDividendTable(data) {
   years.forEach(y => {
     yearTotals[y] = Object.values(lookup[y]).reduce((s, v) => s + v, 0);
   });
-  const grandTotal = Object.values(yearTotals).reduce((s, v) => s + v, 0);
+
+  const prevYear = years.length >= 2 ? years[years.length - 2] : null;
+  const currYear = years[years.length - 1];
+
+  function yoyCell(prev, curr) {
+    if (prev > 0 && curr > 0) {
+      const pct = ((curr - prev) / prev) * 100;
+      return `<td class="div-yoy ${pct >= 0 ? 'positive' : 'negative'}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</td>`;
+    }
+    if (curr > 0 && prev === 0) return `<td class="div-yoy positive">New</td>`;
+    return `<td class="div-yoy">—</td>`;
+  }
+
+  const yoyHeader = prevYear ? `<th>${prevYear}→${currYear}</th>` : '';
 
   const bodyRows = MONTHS.map((label, i) => {
     const m = i + 1;
-    const rowTotal = years.reduce((s, y) => s + (lookup[y]?.[m] || 0), 0);
+    const prev = prevYear ? (lookup[prevYear]?.[m] || 0) : 0;
+    const curr = lookup[currYear]?.[m] || 0;
     return `<tr>
       <th>${label}</th>
       ${years.map(y => `<td>${fmt(lookup[y]?.[m] || 0)}</td>`).join('')}
-      <td class="div-total-col">${fmt(rowTotal)}</td>
+      ${prevYear ? yoyCell(prev, curr) : ''}
     </tr>`;
   }).join('');
 
   const totalRow = `<tr class="div-total-row">
     <th>Total</th>
     ${years.map(y => `<td>${fmt(yearTotals[y])}</td>`).join('')}
-    <td class="div-total-col">${fmtCurrency(grandTotal)}</td>
+    ${prevYear ? yoyCell(yearTotals[prevYear] || 0, yearTotals[currYear] || 0) : ''}
   </tr>`;
 
   return `<div class="div-table-wrap">
@@ -1149,7 +1123,7 @@ function buildDividendTable(data) {
       <thead><tr>
         <th></th>
         ${years.map(y => `<th>${y}</th>`).join('')}
-        <th>Total</th>
+        ${yoyHeader}
       </tr></thead>
       <tbody>${bodyRows}${totalRow}</tbody>
     </table>
@@ -1207,5 +1181,5 @@ document.getElementById('refresh-all-btn').addEventListener('click', () => {
   const btn = document.getElementById('refresh-all-btn');
   const status = document.getElementById('refresh-all-status');
   runRefresh('/api/refresh-all-prices', btn, status,
-    async () => { await loadOverview(); await loadSummary(); });
+    async () => { await loadOverview(); });
 });

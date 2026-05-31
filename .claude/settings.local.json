@@ -3,7 +3,12 @@
     "allow": [
       "Bash(node -e \"const db = require\\('./database'\\); const rows = db.prepare\\('SELECT * FROM portfolios ORDER BY display_order'\\).all\\(\\); console.log\\(JSON.stringify\\(rows, null, 2\\)\\);\")",
       "PowerShell(Get-ChildItem \"c:\\\\DEV\\\\Yieldly\\\\\" | Where-Object { $_.Name -ne \"node_modules\" } | Select-Object Name, Extension)",
-      "Bash(dir /b \"c:\\\\DEV\\\\Yieldly\")"
+      "Bash(dir /b \"c:\\\\DEV\\\\Yieldly\")",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\DEV\\\\Yieldly\" -Recurse -Directory | Select-Object -First 30 | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\DEV\\\\Yieldly\" -Depth 2 | Where-Object { $_.PSIsContainer -and $_.Name -notmatch \"node_modules|\\\\.git\" } | ForEach-Object { $_.FullName })",
+      "Bash(find c:\\\\\\\\DEV\\\\\\\\Yieldly -maxdepth 2 -type f -name \"*.html\" -o -name \"*.vue\" -o -name \"*.jsx\" -o -name \"*.tsx\")",
+      "Bash(wc -l c:\\\\\\\\DEV\\\\\\\\Yieldly\\\\\\\\public\\\\\\\\app.js)",
+      "PowerShell(\\(Get-Content \"c:\\\\DEV\\\\Yieldly\\\\public\\\\app.js\" | Measure-Object -Line\\).Lines)"
     ]
   }
 }
