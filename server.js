@@ -475,15 +475,22 @@ app.get('/api/overview', (req, res) => {
     const portfolios = db.prepare('SELECT * FROM portfolios ORDER BY display_order, id').all();
 
     const allHoldings = computeHoldings(queryHoldings(null));
-    const mktValById  = {};
+    const mktValById   = {};
     const investedById = {};
-    const pidByCode   = {};
+    const buyTotalById = {};
+    const saleTotalById = {};
+    const pidByCode    = {};
     portfolios.forEach(p => { pidByCode[p.code] = p.id; });
     allHoldings.forEach(h => {
       const pid = pidByCode[h.portfolio_code];
       if (pid) {
-        mktValById[pid]   = (mktValById[pid]   || 0) + h.market_value;
-        investedById[pid] = (investedById[pid] || 0) + h.acb;  // ACB = cost of current position
+        mktValById[pid]    = (mktValById[pid]    || 0) + h.market_value;
+        buyTotalById[pid]  = (buyTotalById[pid]  || 0) + h.buy_total;
+        saleTotalById[pid] = (saleTotalById[pid] || 0) + h.sale_total;
+        // Cash invested: net cash deployed into currently-held positions (buy - sale for shares > 0)
+        if (h.shares > 0) {
+          investedById[pid] = (investedById[pid] || 0) + h.buy_total - h.sale_total;
+        }
       }
     });
 
@@ -491,9 +498,11 @@ app.get('/api/overview', (req, res) => {
       id:             p.id,
       code:           p.code,
       name:           p.name,
-      cash:           p.cash_balance ?? null,   // null = not set; UI shows edit prompt
-      cash_invested:  investedById[p.id] || 0,
-      market_value:   mktValById[p.id]   || 0
+      cash:           p.cash_balance ?? null,
+      cash_invested:  investedById[p.id]  || 0,
+      buy_total:      buyTotalById[p.id]  || 0,
+      sale_total:     saleTotalById[p.id] || 0,
+      market_value:   mktValById[p.id]    || 0
     })));
   } catch (error) {
     serverError(res, error);

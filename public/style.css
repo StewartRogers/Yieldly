@@ -1071,6 +1071,11 @@ h2 {
   cursor: pointer; color: #6b7280; vertical-align: middle;
 }
 .btn-edit-cash:hover { background: #f3f4f6; }
+.cash-inline-form { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
+.cash-inline-input { width: 90px; padding: 0.2rem 0.3rem; font-size: 0.8rem; border: 1px solid #d1d5db; border-radius: 3px; }
+.cash-cancel-btn { font-size: 0.75rem; padding: 0.2rem 0.4rem; background: none; border: 1px solid #d1d5db; border-radius: 3px; cursor: pointer; color: #6b7280; }
+.cash-cancel-btn:hover { background: #f3f4f6; }
+.cash-error { color: var(--danger); font-size: 0.7rem; width: 100%; }
 
 /* ===== DIVIDEND INCOME PAGE ===== */
 .div-income-section {
@@ -1136,6 +1141,12 @@ h2 {
   font-weight: 600;
   border-left: 2px solid #e2e8f0;
   background: #f8fafc !important;
+}
+.div-table .div-yoy {
+  border-left: 2px solid #e2e8f0;
+  font-weight: 600;
+  background: #f8fafc !important;
+  text-align: right;
 }
 
 .div-table .div-total-row th,
