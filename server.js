@@ -66,7 +66,13 @@ function queryHoldings(portfolioId) {
 
 // Middleware
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static('public'));
+
+// Serve React build in production, vanilla app in development
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'client', 'dist')));
+} else {
+  app.use(express.static('public'));
+}
 
 // API Routes
 
@@ -737,6 +743,13 @@ function parseDate(dateStr) {
   }
 
   return `${year}-${month}-${day}`;
+}
+
+// SPA fallback — must come after all API routes
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
+  });
 }
 
 // Start server

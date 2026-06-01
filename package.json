@@ -4,14 +4,24 @@
   "description": "Stock portfolio tracker",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "concurrently \"node server.js\" \"npm run dev --prefix client\"",
+    "build": "npm run build --prefix client",
+    "start:prod": "cross-env NODE_ENV=production node server.js"
   },
-  "keywords": ["stocks", "portfolio", "tracker"],
+  "keywords": [
+    "stocks",
+    "portfolio",
+    "tracker"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2",
     "better-sqlite3": "^9.2.2",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.1"
   }
 }
