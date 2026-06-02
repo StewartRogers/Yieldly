@@ -70,9 +70,9 @@ function KPIStrip({ data }) {
     <div className="grid grid-cols-2 gap-3 px-4 py-4 sm:grid-cols-4">
       {kpis.map(k => (
         <div key={k.label} className="rounded-lg border bg-card px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{k.label}</p>
-          <p className="text-2xl font-bold tabular-nums mt-1">{k.value}</p>
-          {k.sub && <p className="text-xs text-muted-foreground mt-0.5">{k.sub}</p>}
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground/70">{k.label}</p>
+          <p className="text-2xl font-semibold tabular-nums mt-1">{k.value}</p>
+          {k.sub && <p className="text-xs text-foreground/70 mt-1">{k.sub}</p>}
         </div>
       ))}
     </div>
@@ -188,21 +188,21 @@ export default function Dividends({ portfolios = [] }) {
       <Card>
         <CardHeader className="border-b">
           <CardTitle>
-            <span className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+            <span className="block text-xs font-semibold uppercase tracking-widest text-foreground/70 mb-1">
               Dividends Income
             </span>
             Monthly income by year
           </CardTitle>
           <CardDescription>
-            <div className="flex items-center gap-1.5 flex-wrap mt-2">
+            <div className="flex items-center gap-2 flex-wrap mt-2">
               {pills.map(p => (
                 <button
                   key={p.code}
                   onClick={() => setSelected(p.code)}
-                  className={`px-3 py-1 rounded-full text-sm font-medium border transition-colors ${
+                  className={`px-3 py-1 rounded-full text-sm font-medium border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                     selected === p.code
                       ? 'bg-primary text-white border-primary'
-                      : 'bg-card border-border text-muted-foreground hover:bg-muted'
+                      : 'bg-card border-border text-foreground/70 hover:bg-muted'
                   }`}
                 >
                   {p.label}

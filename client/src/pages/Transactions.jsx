@@ -39,15 +39,16 @@ function PageButtons({ page, totalPages, onChange }) {
               className="w-8 px-0 text-xs"
               onClick={() => onChange(p)}
             >{p}</Button>
-          : <span key={i} className="px-1 text-muted-foreground text-sm">…</span>
+          : <span key={i} className="px-1 text-foreground/70 text-sm">…</span>
       )}
       <Button variant="outline" size="sm" onClick={() => onChange(page + 1)} disabled={page === totalPages}>Next</Button>
     </div>
   )
 }
 
+const LABEL = 'text-xs font-medium uppercase tracking-wide text-foreground/70'
+
 export default function Transactions({ portfolios }) {
-  // Form state
   const [formPortfolioId, setFormPortfolioId] = useState('')
   const [type, setType]                       = useState('BUY')
   const [ticker, setTicker]                   = useState('')
@@ -57,7 +58,6 @@ export default function Transactions({ portfolios }) {
   const [commission, setCommission]           = useState('')
   const [date, setDate]                       = useState(new Date().toISOString().slice(0, 10))
 
-  // History state
   const [allTxns, setAllTxns]       = useState([])
   const [historyFilter, setFilter]  = useState('ALL')
   const [page, setPage]             = useState(1)
@@ -66,14 +66,12 @@ export default function Transactions({ portfolios }) {
   const isCashOnly = CASH_ONLY_TYPES.has(type)
   const isCashFlow = CASH_FLOW_TYPES.has(type)
 
-  // Auto-calculate total from qty × price
   useEffect(() => {
     const q = parseFloat(quantity) || 0
     const p = parseFloat(price) || 0
     if (!isCashOnly && q > 0 && p > 0) setTotal((q * p).toFixed(2))
   }, [quantity, price, isCashOnly])
 
-  // Load all transactions across all portfolios
   const loadAllTxns = () => {
     if (!portfolios?.length) return
     setLoading(true)
@@ -144,16 +142,17 @@ export default function Transactions({ portfolios }) {
 
   const handleFilterChange = (f) => { setFilter(f); setPage(1) }
 
+  // F4: Tailwind grid instead of inline style; F4 also adds mobile responsiveness
   return (
-    <div className="grid gap-6" style={{ gridTemplateColumns: 'minmax(0, 320px) 1fr' }}>
+    <div className="grid gap-6 grid-cols-1 lg:grid-cols-[minmax(0,320px)_1fr]">
 
-      {/* LEFT — Add Transaction form */}
-      <div className="rounded-xl border bg-muted/40 p-5 flex flex-col gap-4 self-start">
+      {/* LEFT — Add Transaction form (F7: p-4 not p-5) */}
+      <div className="rounded-xl border bg-muted/40 p-4 flex flex-col gap-4 self-start">
         <h2 className="text-base font-semibold">Add transaction</h2>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Portfolio</label>
+            <label className={LABEL}>Portfolio</label>
             <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
               <SelectTrigger className="h-9">
                 <SelectValue placeholder="Select…" />
@@ -167,7 +166,7 @@ export default function Transactions({ portfolios }) {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Type</label>
+            <label className={LABEL}>Type</label>
             <Select value={type} onValueChange={v => { setType(v); setTicker(''); setQuantity(''); setPrice(''); setTotal('') }}>
               <SelectTrigger className="h-9">
                 <SelectValue />
@@ -185,7 +184,7 @@ export default function Transactions({ portfolios }) {
 
           {!isCashOnly && !isCashFlow && (
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Ticker</label>
+              <label className={LABEL}>Ticker</label>
               <Input className="h-9" placeholder="XEI.TO" value={ticker}
                 onChange={e => setTicker(e.target.value)} required />
             </div>
@@ -195,23 +194,24 @@ export default function Transactions({ portfolios }) {
             <>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Quantity</label>
+                  <label className={LABEL}>Quantity</label>
                   <Input className="h-9" type="number" step="0.0001" placeholder="100" value={quantity}
                     onChange={e => setQuantity(e.target.value)} required />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Price / share</label>
+                  <label className={LABEL}>Price / share</label>
                   <Input className="h-9" type="number" step="0.01" placeholder="139.20" value={price}
                     onChange={e => setPrice(e.target.value)} required />
                 </div>
               </div>
 
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Total <span className="normal-case font-normal text-muted-foreground">(auto)</span>
+                <label className={LABEL}>
+                  Total <span className="normal-case font-normal text-foreground/70">(auto)</span>
                 </label>
+                {/* F1: tabIndex={-1} intentional skip target — read-only derived field */}
                 <Input
-                  className="h-9 bg-muted/60 text-muted-foreground cursor-default"
+                  className="h-9 bg-muted/60 text-foreground/70 cursor-default"
                   type="number" step="0.01"
                   value={total}
                   readOnly
@@ -221,12 +221,12 @@ export default function Transactions({ portfolios }) {
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Commission</label>
+                  <label className={LABEL}>Commission</label>
                   <Input className="h-9" type="number" step="0.01" placeholder="9.95" min="0" value={commission}
                     onChange={e => setCommission(e.target.value)} />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
+                  <label className={LABEL}>Date</label>
                   <Input className="h-9" type="date" value={date} onChange={e => setDate(e.target.value)} required />
                 </div>
               </div>
@@ -236,14 +236,14 @@ export default function Transactions({ portfolios }) {
           {isCashOnly && (
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <label className={LABEL}>
                   {isCashFlow ? 'Amount' : 'Total amount'}
                 </label>
                 <Input className="h-9" type="number" step="0.01" placeholder="0.00" value={total}
                   onChange={e => setTotal(e.target.value)} required />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
+                <label className={LABEL}>Date</label>
                 <Input className="h-9" type="date" value={date} onChange={e => setDate(e.target.value)} required />
               </div>
             </div>
@@ -252,8 +252,8 @@ export default function Transactions({ portfolios }) {
           <Button type="submit" className="w-full mt-1">+ Add transaction</Button>
         </form>
 
-        <p className="text-xs text-muted-foreground">
-          Type chips: Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal
+        <p className="text-xs text-foreground/70">
+          Types: Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal
         </p>
       </div>
 
@@ -264,19 +264,19 @@ export default function Transactions({ portfolios }) {
             <div>
               <CardTitle>Transaction history</CardTitle>
               {!loading && (
-                <p className="text-xs text-muted-foreground mt-0.5">
+                <p className="text-xs text-foreground/70 mt-1">
                   {filteredTxns.length} record{filteredTxns.length !== 1 ? 's' : ''}
                 </p>
               )}
             </div>
-            {/* Portfolio filter chips */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+            {/* F6: added focus-visible ring; F9: gap-2 not gap-1.5; F1: text-foreground/70 on inactive */}
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => handleFilterChange('ALL')}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                   historyFilter === 'ALL'
                     ? 'bg-primary text-white border-primary'
-                    : 'bg-card border-border text-muted-foreground hover:bg-muted'
+                    : 'bg-card border-border text-foreground/70 hover:bg-muted'
                 }`}
               >
                 All
@@ -285,10 +285,10 @@ export default function Transactions({ portfolios }) {
                 <button
                   key={p.id}
                   onClick={() => handleFilterChange(String(p.id))}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                     historyFilter === String(p.id)
                       ? 'bg-primary text-white border-primary'
-                      : 'bg-card border-border text-muted-foreground hover:bg-muted'
+                      : 'bg-card border-border text-foreground/70 hover:bg-muted'
                   }`}
                 >
                   {p.code}
@@ -299,9 +299,9 @@ export default function Transactions({ portfolios }) {
         </CardHeader>
 
         <CardContent className="p-0">
-          {loading && <p className="text-muted-foreground text-sm px-4 py-4">Loading…</p>}
+          {loading && <p className="text-foreground/70 text-sm px-4 py-4">Loading…</p>}
           {!loading && filteredTxns.length === 0 && (
-            <p className="text-muted-foreground text-sm px-4 py-4">No transactions yet.</p>
+            <p className="text-foreground/70 text-sm px-4 py-4">No transactions yet.</p>
           )}
           {!loading && filteredTxns.length > 0 && (
             <>
@@ -328,7 +328,7 @@ export default function Transactions({ portfolios }) {
                         <TableCell className="text-right tabular-nums">{t.quantity > 0 ? t.quantity : '—'}</TableCell>
                         <TableCell className="text-right tabular-nums">{parseFloat(t.price) > 0 ? fmtCurrency(parseFloat(t.price)) : '—'}</TableCell>
                         <TableCell className="text-right tabular-nums">{fmtCurrency(parseFloat(t.total))}</TableCell>
-                        <TableCell className="tabular-nums text-muted-foreground">{t.date}</TableCell>
+                        <TableCell className="tabular-nums text-foreground/70">{t.date}</TableCell>
                         <TableCell>
                           <Button
                             variant="ghost" size="sm"

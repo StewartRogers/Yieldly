@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 
 const CHAT_MESSAGES = [
   { role: 'user',      text: 'How did my dividends trend this year vs last?' },
@@ -22,7 +23,7 @@ export default function Home() {
       {/* Hero */}
       <Card>
         <CardContent className="pt-12 pb-12 flex flex-col items-center text-center gap-6">
-          <span className="inline-flex items-center rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
+          <span className="inline-flex items-center rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground/70">
             Your money, all in one ledger
           </span>
           <h1 className="text-4xl font-bold tracking-tight leading-tight">
@@ -50,7 +51,7 @@ export default function Home() {
         <CardContent className="py-8 flex flex-col gap-6">
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-semibold">AI Portfolio Assistant</h2>
-            <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+            <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
               Coming soon
             </span>
           </div>
@@ -63,15 +64,14 @@ export default function Home() {
               </div>
             ))}
             <div className="flex gap-2 mt-2">
-              <input
-                type="text"
-                className="flex-1 rounded-lg border bg-card px-4 py-2 text-sm text-muted-foreground cursor-not-allowed"
-                placeholder="Ask about your portfolio…"
+              <Input
                 disabled
+                placeholder="Ask about your portfolio…"
+                className="flex-1 cursor-not-allowed"
               />
               <Button disabled size="sm">Send</Button>
             </div>
-            <p className="text-xs text-center text-muted-foreground">
+            <p className="text-xs text-center text-foreground/70">
               Preview only — assistant is not live yet
             </p>
           </div>
@@ -81,7 +81,7 @@ export default function Home() {
             {FEATURE_HINTS.map(f => (
               <div
                 key={f.label}
-                className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+                className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-4 text-center text-sm text-foreground/70"
               >
                 <span className="text-xl">{f.icon}</span>
                 {f.label}
