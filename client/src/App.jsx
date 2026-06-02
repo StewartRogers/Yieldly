@@ -42,7 +42,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/summary" element={<Summary />} />
-          <Route path="/dividends" element={<Dividends />} />
+          <Route path="/dividends" element={<Dividends portfolios={portfolios} />} />
           <Route path="/portfolios" element={<Portfolios portfolios={portfolios} onPortfoliosChange={loadPortfolios} />} />
           <Route path="/transactions" element={<Transactions portfolios={portfolios} />} />
           <Route path="/import" element={<Import onImported={loadPortfolios} />} />

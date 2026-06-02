@@ -5,62 +5,113 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-const PER_PAGE = 20
 
-const CASH_ONLY_TYPES = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
-const CASH_FLOW_TYPES = new Set(['CONTRIBUTION', 'WITHDRAWAL'])
+const PER_PAGE = 20
+const CASH_ONLY_TYPES  = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
+const CASH_FLOW_TYPES  = new Set(['CONTRIBUTION', 'WITHDRAWAL'])
 
 function typeClass(t) { return t.toLowerCase().replace(/_/g, '-') }
 function typeLabel(t) { return t.replace(/_/g, ' ') }
 
+function PageButtons({ page, totalPages, onChange }) {
+  if (totalPages <= 1) return null
+
+  const pages = []
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i)
+  } else if (page <= 4) {
+    pages.push(1, 2, 3, 4, 5, '…', totalPages)
+  } else if (page >= totalPages - 3) {
+    pages.push(1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages)
+  } else {
+    pages.push(1, '…', page - 1, page, page + 1, '…', totalPages)
+  }
+
+  return (
+    <div className="flex items-center justify-center gap-1 p-3 border-t flex-wrap">
+      <Button variant="outline" size="sm" onClick={() => onChange(page - 1)} disabled={page === 1}>Prev</Button>
+      {pages.map((p, i) =>
+        typeof p === 'number'
+          ? <Button
+              key={i}
+              variant={p === page ? 'default' : 'outline'}
+              size="sm"
+              className="w-8 px-0 text-xs"
+              onClick={() => onChange(p)}
+            >{p}</Button>
+          : <span key={i} className="px-1 text-muted-foreground text-sm">…</span>
+      )}
+      <Button variant="outline" size="sm" onClick={() => onChange(page + 1)} disabled={page === totalPages}>Next</Button>
+    </div>
+  )
+}
+
 export default function Transactions({ portfolios }) {
-  const [portfolioId, setPortfolioId] = useState('')
-  const [allTxns, setAllTxns]         = useState([])
-  const [page, setPage]               = useState(1)
-  const [type, setType]               = useState('BUY')
-  const [ticker, setTicker]           = useState('')
-  const [quantity, setQuantity]       = useState('')
-  const [price, setPrice]             = useState('')
-  const [sharesTotal, setSharesTotal] = useState('')
-  const [commission, setCommission]   = useState('')
-  const [date, setDate]               = useState(new Date().toISOString().slice(0, 10))
-  const [total, setTotal]             = useState('')
-  const [dateDividend, setDateDividend] = useState(new Date().toISOString().slice(0, 10))
+  // Form state
+  const [formPortfolioId, setFormPortfolioId] = useState('')
+  const [type, setType]                       = useState('BUY')
+  const [ticker, setTicker]                   = useState('')
+  const [quantity, setQuantity]               = useState('')
+  const [price, setPrice]                     = useState('')
+  const [total, setTotal]                     = useState('')
+  const [commission, setCommission]           = useState('')
+  const [date, setDate]                       = useState(new Date().toISOString().slice(0, 10))
+
+  // History state
+  const [allTxns, setAllTxns]       = useState([])
+  const [historyFilter, setFilter]  = useState('ALL')
+  const [page, setPage]             = useState(1)
+  const [loading, setLoading]       = useState(false)
 
   const isCashOnly = CASH_ONLY_TYPES.has(type)
   const isCashFlow = CASH_FLOW_TYPES.has(type)
 
-  const loadTxns = (pid) => {
-    if (!pid) return
-    fetch(`/api/portfolios/${pid}/transactions`)
-      .then(r => r.json())
-      .then(data => { setAllTxns(data); setPage(1) })
+  // Auto-calculate total from qty × price
+  useEffect(() => {
+    const q = parseFloat(quantity) || 0
+    const p = parseFloat(price) || 0
+    if (!isCashOnly && q > 0 && p > 0) setTotal((q * p).toFixed(2))
+  }, [quantity, price, isCashOnly])
+
+  // Load all transactions across all portfolios
+  const loadAllTxns = () => {
+    if (!portfolios?.length) return
+    setLoading(true)
+    Promise.all(
+      portfolios.map(p =>
+        fetch(`/api/portfolios/${p.id}/transactions`)
+          .then(r => r.json())
+          .then(txns => txns.map(t => ({ ...t, _portfolioId: p.id, _portfolioCode: p.code })))
+      )
+    )
+      .then(results => {
+        const merged = results.flat().sort((a, b) =>
+          b.date !== a.date ? b.date.localeCompare(a.date) : b.id - a.id
+        )
+        setAllTxns(merged)
+        setPage(1)
+      })
       .catch(console.error)
+      .finally(() => setLoading(false))
   }
 
-  useEffect(() => { if (portfolioId) loadTxns(portfolioId) }, [portfolioId])
-
-  const recalc = (q, p) => {
-    const qty = parseFloat(q) || 0
-    const px  = parseFloat(p) || 0
-    if (qty > 0 && px > 0) setSharesTotal((qty * px).toFixed(2))
-  }
+  useEffect(() => { loadAllTxns() }, [portfolios])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!portfolioId) { alert('Select a portfolio'); return }
+    if (!formPortfolioId) { alert('Select a portfolio'); return }
     const txn = {
-      portfolio_id: parseInt(portfolioId),
+      portfolio_id: parseInt(formPortfolioId),
       ticker: isCashFlow ? 'CASH' : ticker.trim().toUpperCase(),
       type,
-      date: isCashOnly ? dateDividend : date,
+      date,
     }
     if (isCashOnly) {
       txn.quantity = 0; txn.price = 0; txn.total = parseFloat(total)
     } else {
       txn.quantity = parseFloat(quantity)
       txn.price    = parseFloat(price)
-      const t = parseFloat(sharesTotal)
+      const t = parseFloat(total)
       if (t > 0) txn.total = t
       const c = parseFloat(commission) || 0
       if (c > 0) txn.commission = c
@@ -72,126 +123,189 @@ export default function Transactions({ portfolios }) {
         body: JSON.stringify(txn)
       })
       if (!res.ok) throw new Error('Failed to add transaction')
-      setTicker(''); setQuantity(''); setPrice(''); setSharesTotal('')
-      setCommission(''); setTotal('')
-      setDate(new Date().toISOString().slice(0, 10))
-      loadTxns(portfolioId)
+      setTicker(''); setQuantity(''); setPrice(''); setTotal('')
+      setCommission(''); setDate(new Date().toISOString().slice(0, 10))
+      loadAllTxns()
     } catch (err) { alert(err.message) }
   }
 
   const deleteTxn = async (id) => {
     if (!confirm('Delete this transaction?')) return
-    try {
-      await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
-      loadTxns(portfolioId)
-    } catch (e) { alert(e.message) }
+    await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
+    loadAllTxns()
   }
 
-  const totalPages = Math.ceil(allTxns.length / PER_PAGE)
-  const pageTxns   = allTxns.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+  const filteredTxns = historyFilter === 'ALL'
+    ? allTxns
+    : allTxns.filter(t => t._portfolioId === parseInt(historyFilter))
+
+  const totalPages = Math.ceil(filteredTxns.length / PER_PAGE)
+  const pageTxns   = filteredTxns.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+
+  const handleFilterChange = (f) => { setFilter(f); setPage(1) }
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Transactions</h1>
+    <div className="grid gap-6" style={{ gridTemplateColumns: 'minmax(0, 320px) 1fr' }}>
 
-      <Card>
-        <CardHeader><CardTitle>Add Transaction</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium">Portfolio</label>
-                <Select value={portfolioId} onValueChange={setPortfolioId}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select a portfolio…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {portfolios.map(p => (
-                      <SelectItem key={p.id} value={String(p.id)}>{p.name} ({p.code})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {!isCashFlow && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">Ticker Symbol</label>
-                  <Input placeholder="XEI.TO" value={ticker}
-                    onChange={e => setTicker(e.target.value)} required={!isCashOnly} />
-                </div>
-              )}
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium">Type</label>
-                <Select value={type} onValueChange={setType}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="BUY">Buy</SelectItem>
-                    <SelectItem value="SELL">Sell</SelectItem>
-                    <SelectItem value="DIVIDEND">Dividend</SelectItem>
-                    <SelectItem value="DIVIDEND_REINVEST">Dividend Reinvestment</SelectItem>
-                    <SelectItem value="CONTRIBUTION">Contribution</SelectItem>
-                    <SelectItem value="WITHDRAWAL">Withdrawal</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+      {/* LEFT — Add Transaction form */}
+      <div className="rounded-xl border bg-muted/40 p-5 flex flex-col gap-4 self-start">
+        <h2 className="text-base font-semibold">Add transaction</h2>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Portfolio</label>
+            <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Select…" />
+              </SelectTrigger>
+              <SelectContent>
+                {portfolios?.map(p => (
+                  <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Type</label>
+            <Select value={type} onValueChange={v => { setType(v); setTicker(''); setQuantity(''); setPrice(''); setTotal('') }}>
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="BUY">Buy</SelectItem>
+                <SelectItem value="SELL">Sell</SelectItem>
+                <SelectItem value="DIVIDEND">Dividend</SelectItem>
+                <SelectItem value="DIVIDEND_REINVEST">Dividend Reinvest</SelectItem>
+                <SelectItem value="CONTRIBUTION">Contribution</SelectItem>
+                <SelectItem value="WITHDRAWAL">Withdrawal</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {!isCashOnly && !isCashFlow && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Ticker</label>
+              <Input className="h-9" placeholder="XEI.TO" value={ticker}
+                onChange={e => setTicker(e.target.value)} required />
             </div>
+          )}
 
-            {!isCashOnly && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {!isCashOnly && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">Quantity</label>
-                  <Input type="number" step="0.0001" placeholder="10" value={quantity}
-                    onChange={e => { setQuantity(e.target.value); recalc(e.target.value, price) }} required />
+                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Quantity</label>
+                  <Input className="h-9" type="number" step="0.0001" placeholder="100" value={quantity}
+                    onChange={e => setQuantity(e.target.value)} required />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">Price / Share</label>
-                  <Input type="number" step="0.01" placeholder="150.00" value={price}
-                    onChange={e => { setPrice(e.target.value); recalc(quantity, e.target.value) }} required />
+                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Price / share</label>
+                  <Input className="h-9" type="number" step="0.01" placeholder="139.20" value={price}
+                    onChange={e => setPrice(e.target.value)} required />
                 </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Total <span className="normal-case font-normal text-muted-foreground">(auto)</span>
+                </label>
+                <Input
+                  className="h-9 bg-muted/60 text-muted-foreground cursor-default"
+                  type="number" step="0.01"
+                  value={total}
+                  readOnly
+                  tabIndex={-1}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">Total</label>
-                  <Input type="number" step="0.01" placeholder="0.00" value={sharesTotal}
-                    onChange={e => setSharesTotal(e.target.value)} />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">Commission</label>
-                  <Input type="number" step="0.01" placeholder="0.00" min="0" value={commission}
+                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Commission</label>
+                  <Input className="h-9" type="number" step="0.01" placeholder="9.95" min="0" value={commission}
                     onChange={e => setCommission(e.target.value)} />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">Date</label>
-                  <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
+                  <Input className="h-9" type="date" value={date} onChange={e => setDate(e.target.value)} required />
                 </div>
               </div>
-            )}
+            </>
+          )}
 
-            {isCashOnly && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">{isCashFlow ? 'Amount' : 'Total Amount'}</label>
-                  <Input type="number" step="0.01" placeholder="0.00" value={total}
-                    onChange={e => setTotal(e.target.value)} required />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium">Date</label>
-                  <Input type="date" value={dateDividend} onChange={e => setDateDividend(e.target.value)} required />
-                </div>
+          {isCashOnly && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {isCashFlow ? 'Amount' : 'Total amount'}
+                </label>
+                <Input className="h-9" type="number" step="0.01" placeholder="0.00" value={total}
+                  onChange={e => setTotal(e.target.value)} required />
               </div>
-            )}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
+                <Input className="h-9" type="date" value={date} onChange={e => setDate(e.target.value)} required />
+              </div>
+            </div>
+          )}
 
-            <Button type="submit" className="w-fit">Add Transaction</Button>
-          </form>
-        </CardContent>
-      </Card>
+          <Button type="submit" className="w-full mt-1">+ Add transaction</Button>
+        </form>
 
+        <p className="text-xs text-muted-foreground">
+          Type chips: Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal
+        </p>
+      </div>
+
+      {/* RIGHT — Transaction History */}
       <Card>
-        <CardHeader><CardTitle>Transaction History</CardTitle></CardHeader>
+        <CardHeader className="border-b pb-3">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <CardTitle>Transaction history</CardTitle>
+              {!loading && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {filteredTxns.length} record{filteredTxns.length !== 1 ? 's' : ''}
+                </p>
+              )}
+            </div>
+            {/* Portfolio filter chips */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={() => handleFilterChange('ALL')}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  historyFilter === 'ALL'
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-card border-border text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                All
+              </button>
+              {portfolios?.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => handleFilterChange(String(p.id))}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    historyFilter === String(p.id)
+                      ? 'bg-primary text-white border-primary'
+                      : 'bg-card border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {p.code}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+
         <CardContent className="p-0">
-          {allTxns.length === 0
-            ? <p className="text-muted-foreground text-sm px-4 pb-4">No transactions yet.</p>
-            : (
-              <>
+          {loading && <p className="text-muted-foreground text-sm px-4 py-4">Loading…</p>}
+          {!loading && filteredTxns.length === 0 && (
+            <p className="text-muted-foreground text-sm px-4 py-4">No transactions yet.</p>
+          )}
+          {!loading && filteredTxns.length > 0 && (
+            <>
+              <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -200,8 +314,8 @@ export default function Transactions({ portfolios }) {
                       <TableHead className="text-right">Shares</TableHead>
                       <TableHead className="text-right">Price</TableHead>
                       <TableHead className="text-right">Total</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead></TableHead>
+                      <TableHead className="w-[110px]">Date</TableHead>
+                      <TableHead className="w-[40px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -214,25 +328,25 @@ export default function Transactions({ portfolios }) {
                         <TableCell className="text-right tabular-nums">{t.quantity > 0 ? t.quantity : '—'}</TableCell>
                         <TableCell className="text-right tabular-nums">{parseFloat(t.price) > 0 ? fmtCurrency(parseFloat(t.price)) : '—'}</TableCell>
                         <TableCell className="text-right tabular-nums">{fmtCurrency(parseFloat(t.total))}</TableCell>
-                        <TableCell>{new Date(t.date).toLocaleDateString()}</TableCell>
+                        <TableCell className="tabular-nums text-muted-foreground">{t.date}</TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
-                            onClick={() => deleteTxn(t.id)}>Delete</Button>
+                          <Button
+                            variant="ghost" size="sm"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => deleteTxn(t.id)}
+                            title="Delete"
+                          >
+                            ✕
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-center gap-4 p-4 border-t">
-                    <Button variant="outline" size="sm" onClick={() => setPage(p => p - 1)} disabled={page === 1}>Previous</Button>
-                    <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
-                    <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)} disabled={page === totalPages}>Next</Button>
-                  </div>
-                )}
-              </>
-            )
-          }
+              </div>
+              <PageButtons page={page} totalPages={totalPages} onChange={setPage} />
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
