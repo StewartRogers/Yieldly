@@ -110,8 +110,10 @@ Concrete snippets for the most common patterns. Each shows the correct approach;
 ## KPI strip
 
 ```jsx
-// ✅ Correct: 4-up grid, token colors, no decoration
+// ✅ Correct: 4-up grid, token colors, no decoration.
+// Plain <div> tiles derived from Card visual style — not <Card> components, so no shadow-sm is applied.
 <div className="grid grid-cols-2 gap-3 px-4 py-4 sm:grid-cols-4">
+  {/* pattern: KPI tile derived from Card visual style — no shadow-sm (not a <Card>) */}
   {kpis.map(k => (
     <div key={k.label} className="rounded-xl border border-border bg-card px-4 py-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{k.label}</p>
@@ -164,6 +166,124 @@ Concrete snippets for the most common patterns. Each shows the correct approach;
 <span className={value >= 0 ? 'positive' : 'negative'}>
   {fmtCurrency(value)}
 </span>
+```
+
+---
+
+## Dialog, Badge, and Select
+
+```jsx
+// Dialog
+// ✅ Correct: shadcn Dialog with allowed width and scroll
+<Dialog open={open} onOpenChange={setOpen}>
+  <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+    <DialogHeader><DialogTitle>Transactions — {ticker}</DialogTitle></DialogHeader>
+    {/* content */}
+  </DialogContent>
+</Dialog>
+
+// ❌ Wrong: custom fixed overlay bypasses shadcn (no focus trap, no Esc, no backdrop)
+<div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)' }}>
+  <div style={{ background: 'white', margin: '10% auto', width: 600 }}>{/* content */}</div>
+</div>
+
+// Badge
+// ✅ Correct: <Badge> for type labels; .type class for transaction-type color
+<Badge variant="secondary">ETF</Badge>
+<span className="type buy">Buy</span>
+
+// ❌ Wrong: Badge used as a clickable control; hardcoded background
+<Badge style={{ background: '#2563eb', cursor: 'pointer' }} onClick={handleFilter}>Buy</Badge>
+
+// Select
+// ✅ Correct: shadcn Select with width on trigger
+<Select value={type} onValueChange={setType}>
+  <SelectTrigger className="w-full h-9"><SelectValue /></SelectTrigger>
+  <SelectContent>
+    <SelectItem value="BUY">Buy</SelectItem>
+    <SelectItem value="SELL">Sell</SelectItem>
+  </SelectContent>
+</Select>
+
+// ❌ Wrong: native <select> loses all token styling and focus states
+<select value={type} onChange={e => setType(e.target.value)}>
+  <option value="BUY">Buy</option>
+</select>
+```
+
+---
+
+## Accessible token variant (`-aa`)
+
+When an existing token fails the 4.5:1 contrast threshold, create a `-aa` variant in `style.css` and use it instead.
+
+```css
+/* In client/src/style.css :root */
+/* --color-warning (#f59e0b) is 2.8:1 on white — fails WCAG AA */
+--color-warning-aa: #b45309; /* 4.8:1 on white — accessible variant */
+```
+
+```jsx
+// ✅ Correct: reference the -aa token; add the accessibility comment
+<span style={{ color: 'var(--color-warning-aa)' }}>
+  {/* accessibility: --color-warning fails 4.5:1 on white; using --color-warning-aa */}
+  ⚠ 2 errors
+</span>
+
+// ❌ Wrong: hardcoded hex, no comment, original failing token
+<span style={{ color: '#f59e0b' }}>⚠ 2 errors</span>
+```
+
+---
+
+## Motion and Animation
+
+```jsx
+// ✅ Correct: ≤ 150 ms, motion-safe, only color/opacity/transform
+<button className="transition-colors duration-150 motion-safe:hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+  Save
+</button>
+
+// ✅ Correct: motion-safe guards an opacity fade
+<div className="motion-safe:transition-opacity motion-safe:duration-150">
+  {content}
+</div>
+
+// ❌ Wrong: too slow, animates layout property, no motion-safe guard
+<button className="transition-all duration-500 hover:h-12 hover:px-8">
+  Save
+</button>
+
+// ❌ Wrong: animates max-height for an accordion without motion-safe
+<div className={`overflow-hidden transition-[max-height] duration-300 ${open ? 'max-h-96' : 'max-h-0'}`}>
+  {children}
+</div>
+```
+
+---
+
+## Fallback — novel or uncharted pattern
+
+```jsx
+// When no skill rule directly covers the component (e.g. a progress ring):
+// 1. Pick the nearest analogue (Badge → color/sizing; Card → surface/border)
+// 2. Apply its checklist rules
+// 3. Add a comment so future reviewers know this was a deliberate derivation
+
+// ✅ Correct
+<div
+  className="inline-flex items-center justify-center rounded-full border border-border bg-card w-12 h-12 text-sm font-semibold tabular-nums"
+  role="progressbar"
+  aria-valuenow={pct}
+>
+  {/* pattern: derived from Badge (sizing/color) — no skill rule covers progress rings */}
+  {pct}%
+</div>
+
+// ❌ Wrong — no comment, hardcoded color, arbitrary size
+<div style={{ width: 48, height: 48, borderRadius: '50%', color: '#16a34a' }}>
+  {pct}%
+</div>
 ```
 
 ---

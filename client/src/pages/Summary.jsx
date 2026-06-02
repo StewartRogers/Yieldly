@@ -106,7 +106,7 @@ function OverviewTable({ data, onRefresh }) {
                 <TableCell className="font-semibold">
                   {p.code}
                   {p.name && (
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">{p.name}</span>
+                    <span className="ml-2 text-xs font-normal text-foreground/70">{p.name}</span>
                   )}
                 </TableCell>
                 <CashCell portfolio={p} onRefresh={onRefresh} />
@@ -258,7 +258,7 @@ export default function Summary() {
       <h1 className="text-xl font-semibold">Summary</h1>
 
       {refreshMsg && (
-        <div className={`rounded-lg border px-4 py-3 text-sm ${refreshMsg.success ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+        <div className={`rounded-lg border px-4 py-3 text-sm ${refreshMsg.success ? 'status-success' : 'status-error'}`}>
           <strong>{refreshMsg.text}</strong>
           {refreshMsg.errors?.length > 0 && (
             <details className="mt-2">
@@ -272,7 +272,7 @@ export default function Summary() {
       <Card>
         <CardHeader className="border-b">
           <CardTitle>
-            <span className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+            <span className="block text-xs font-semibold uppercase tracking-widest text-foreground/70 mb-1">
               Portfolio Overview
             </span>
             All accounts at a glance
@@ -280,7 +280,7 @@ export default function Summary() {
           <CardAction>
             <div className="flex items-center gap-3">
               {updatedAt && (
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                <span className="text-xs text-foreground/70 whitespace-nowrap">
                   prices updated {fmtUpdatedTime(updatedAt)}
                 </span>
               )}
@@ -306,7 +306,7 @@ export default function Summary() {
             </span>
             End-of-month ACB · all portfolios
           </CardTitle>
-          <CardDescription>Adjusted Cost Base history across all portfolios</CardDescription>
+          <CardDescription className="text-foreground/70">Adjusted Cost Base history across all portfolios</CardDescription>
         </CardHeader>
         <CardContent className="p-0 pt-4">
           {acb.length === 0

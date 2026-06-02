@@ -17,7 +17,7 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
       <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b">
         <div>
           <button
-            className="font-bold text-primary text-lg leading-none hover:underline focus:outline-primary"
+            className="font-bold text-primary text-lg leading-none hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             onClick={() => onShowTxns(holding.ticker)}
           >
             {holding.ticker}
@@ -25,14 +25,14 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
           {holding.investment_type && (
             <Badge variant="secondary" className="ml-2 text-xs align-middle">{holding.investment_type}</Badge>
           )}
-          <div className="text-xs text-muted-foreground mt-1">{holding.shares.toFixed(2)} shares</div>
+          <div className="text-xs text-foreground/70 mt-1">{holding.shares.toFixed(2)} shares</div>
         </div>
         <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => onEdit(holding)}>
           Edit
         </Button>
       </div>
 
-      <div className="px-4 py-3 flex flex-col gap-1.5 text-sm flex-1">
+      <div className="px-4 py-3 flex flex-col gap-2 text-sm flex-1">
         <div className="flex justify-between">
           <span className="text-muted-foreground">Buy price</span>
           <span className="tabular-nums">{fmtCurrency(holding.buy_price)}</span>
@@ -72,7 +72,7 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
       </div>
 
       {holding.dividend_frequency && (
-        <div className="px-4 py-2 border-t bg-muted/40 text-xs text-muted-foreground">
+        <div className="px-4 py-2 border-t bg-muted/40 text-xs text-foreground/70">
           {holding.dividend_frequency} · {fmtCurrency(holding.dividend_per_share)}/sh
           {holding.annual_payout > 0 && <> · {fmtCurrency(holding.annual_payout)}/yr</>}
         </div>
@@ -84,7 +84,7 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
             Return {fmtCurrency(holding.return)} ({holding.return_percent.toFixed(2)}%)
           </span>
         ) : (
-          <span className="text-sm text-muted-foreground">No market price</span>
+          <span className="text-sm text-foreground/70">No market price</span>
         )}
         <div className="flex gap-1">
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onShowTxns(holding.ticker)}>
@@ -207,7 +207,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
 
       {/* Row 1: Tabs + inline create form */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="portfolio-tabs flex-1" style={{ marginBottom: 0, border: 'none' }}>
+        <div className="portfolio-tabs borderless flex-1">
           {localPortfolios.length === 0
             ? <p className="text-muted-foreground text-sm py-2">No portfolios yet.</p>
             : localPortfolios.map(p => (
@@ -253,7 +253,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
       {/* Row 2: Context info + view toggle + refresh */}
       {selectedPortfolio && (
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm text-foreground/70">
             <span className="font-medium text-foreground">{selectedPortfolio.code}</span>
             {selectedPortfolio.name && <> · {selectedPortfolio.name}</>}
             {' · '}{holdings.length} holding{holdings.length !== 1 ? 's' : ''}

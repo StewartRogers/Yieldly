@@ -428,6 +428,15 @@ body {
   display: block;
 }
 
+/* ===== SEMANTIC STATUS PANELS ===== */
+/* Use with: rounded-lg border px-4 py-3 text-sm (layout in Tailwind, colors here) */
+.status-success { border-color: #bbf7d0; background: #dcfce7; color: #14532d; }
+.status-error   { border-color: #fecaca; background: #fee2e2; color: #7f1d1d; }
+.status-warning { border-color: #fde68a; background: #fef9c3; color: #854d0e; }
+
+/* ===== PORTFOLIO TABS MODIFIER ===== */
+.portfolio-tabs.borderless { margin-bottom: 0; border: none; }
+
 /* ===== SECTION / CARD ===== */
 .main-content {
   display: grid;
