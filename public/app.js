@@ -296,7 +296,7 @@ function setupEventListeners() {
           Errors: ${result.errors}<br>
           <details style="margin-top: 0.5rem;">
             <summary>View error details</summary>
-            <pre style="margin-top: 0.5rem; font-size: 0.85rem; white-space: pre-wrap;">${JSON.stringify(result.details.errors, null, 2)}</pre>
+            <pre style="margin-top: 0.5rem; font-size: 0.85rem; white-space: pre-wrap;">${escapeHtml(JSON.stringify(result.details.errors, null, 2))}</pre>
           </details>
           <button onclick="this.parentElement.style.display='none'" style="margin-top: 0.5rem; padding: 0.25rem 0.5rem; cursor: pointer;">Dismiss</button>
         `;
