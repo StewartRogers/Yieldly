@@ -1392,7 +1392,160 @@ h2 {
 .cash-cancel-btn:hover { background: var(--bg-muted); }
 .cash-error { color: var(--color-error); font-size: 0.7rem; width: 100%; }
 
-/* ===== DIVIDEND INCOME PAGE ===== */
+/* ===== DIVIDENDS PAGE ===== */
+
+/* "last 5 years" indicator top-right of header */
+.div-last5-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 6px;
+}
+
+/* Portfolio filter pill row */
+.div-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+
+.div-filter-pill {
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  line-height: 1.5;
+}
+
+.div-filter-pill:hover {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+}
+
+.div-filter-pill:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.div-filter-pill--active {
+  background: var(--text-primary);
+  color: #fff;
+  border-color: var(--text-primary);
+}
+
+.div-filter-pill--active:hover {
+  background: var(--text-primary);
+  color: #fff;
+}
+
+/* KPI strip — 4 tiles in a row */
+.div-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.div-kpi-tile {
+  padding: 16px 20px;
+  border-right: 1px solid var(--border-color);
+}
+
+.div-kpi-tile:last-child {
+  border-right: none;
+}
+
+.div-kpi-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.div-kpi-value {
+  font-size: 1.625rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.div-kpi-sub {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+/* Dividend matrix table */
+.div-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.div-th {
+  padding: 10px 20px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: var(--bg-muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.div-td {
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.div-matrix-row:last-child .div-td {
+  border-bottom: none;
+}
+
+.div-matrix-row:hover .div-td {
+  background: var(--bg-muted);
+}
+
+/* YoY column: left border to separate it visually */
+.div-yoy-col {
+  border-left: 1px solid var(--border-color) !important;
+}
+
+/* Annual total row */
+.div-total-row .div-td {
+  font-weight: 700;
+  background: var(--bg-muted);
+  border-top: 2px solid var(--border-color);
+  border-bottom: none;
+}
+
+@media (max-width: 640px) {
+  .div-kpi-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .div-kpi-tile:nth-child(2) {
+    border-right: none;
+  }
+}
+
+/* ===== DIVIDEND INCOME PAGE (legacy) ===== */
 .div-income-section {
   background: var(--bg-surface);
   border-radius: var(--radius-lg);
