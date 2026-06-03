@@ -1055,23 +1055,126 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .container {
+  .app-page {
     padding: 16px;
   }
 
-  .nav-container {
-    padding: 12px 16px;
-    flex-direction: column;
-    gap: 12px;
+  .app-nav-inner {
+    padding: 0 16px;
+    height: auto;
+    flex-wrap: wrap;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    gap: 8px;
   }
 
-  .nav-menu {
+  .app-nav-links {
     flex-wrap: wrap;
-    justify-content: center;
+    height: auto;
   }
 }
 
-/* ===== SUMMARY TABLE ===== */
+/* ===== SUMMARY PAGE ===== */
+
+/* Eyebrow label above section headings */
+.summary-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+/* Large display heading (Portfolio Overview card) */
+.summary-display-heading {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+/* Smaller section heading (ACB card) */
+.summary-section-heading {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+/* Shared table header cell */
+.summary-th {
+  padding: 10px 20px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: var(--bg-muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Shared table body cell */
+.summary-td {
+  padding: 11px 20px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+  color: var(--text-primary);
+}
+
+/* Portfolio Overview table */
+.summary-overview-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.summary-overview-table .summary-row:last-child .summary-td {
+  border-bottom: none;
+}
+
+.summary-overview-table .summary-row:hover .summary-td {
+  background: var(--bg-muted);
+}
+
+/* Portfolio name cell */
+.summary-portfolio-name {
+  font-weight: 600;
+  min-width: 140px;
+}
+
+/* Grand total row */
+.summary-total-row .summary-td {
+  font-weight: 700;
+  background: var(--bg-muted);
+  border-top: 2px solid var(--border-color);
+  border-bottom: none;
+}
+
+.summary-total-label {
+  color: var(--text-primary);
+}
+
+/* ACB table */
+.summary-acb-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.summary-acb-table .summary-row:last-child .summary-td {
+  border-bottom: none;
+}
+
+.summary-acb-table .summary-row:hover .summary-td {
+  background: var(--bg-muted);
+}
+
+.acb-label-col {
+  min-width: 76px;
+}
+
+/* ===== SUMMARY TABLE (legacy) ===== */
 .summary-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
