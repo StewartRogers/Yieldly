@@ -1,4 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Self-hosted fonts — no Google Fonts request */
+@import "@fontsource-variable/hanken-grotesk";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
 @import "tailwindcss";
 @import "./style.css";
 @import "tw-animate-css";
@@ -7,9 +12,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-sans: 'Inter', system-ui, sans-serif;
-    --font-heading: var(--font-sans);
-    --radius-sm: 6px;
+    --font-sans: var(--font-body);
+    --font-heading: var(--font-display);
+    --radius-sm: 8px;
     --radius-md: 8px;
     --radius-lg: 12px;
     --radius-xl: 16px;
@@ -43,33 +48,34 @@
 }
 
 :root {
-    --background: #f6f7f9;
-    --foreground: #0f172a;
-    --card: #ffffff;
-    --card-foreground: #0f172a;
-    --popover: #ffffff;
-    --popover-foreground: #0f172a;
-    --primary: #2563eb;
-    --primary-foreground: #ffffff;
-    --secondary: #f0f2f5;
-    --secondary-foreground: #0f172a;
-    --muted: #f0f2f5;
-    --muted-foreground: #64748b;
-    --accent: #f0f2f5;
-    --accent-foreground: #0f172a;
-    --destructive: #dc2626;
-    --border: rgba(15, 23, 42, 0.08);
-    --input: rgba(15, 23, 42, 0.10);
-    --ring: #2563eb;
+    /* Terminal Calm — dark theme */
+    --background: #0D1014;
+    --foreground: #E7EBF1;
+    --card: #161A21;
+    --card-foreground: #E7EBF1;
+    --popover: #161A21;
+    --popover-foreground: #E7EBF1;
+    --primary: #6EE7B7;
+    --primary-foreground: #06231B;
+    --secondary: #1C222B;
+    --secondary-foreground: #E7EBF1;
+    --muted: #1C222B;
+    --muted-foreground: #8B94A1;
+    --accent: #1C222B;
+    --accent-foreground: #E7EBF1;
+    --destructive: #F87171;
+    --border: #262D38;
+    --input: #0F1318;
+    --ring: #6EE7B7;
     --radius: 0.5rem;
-    --sidebar: #ffffff;
-    --sidebar-foreground: #0f172a;
-    --sidebar-primary: #2563eb;
-    --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #f0f2f5;
-    --sidebar-accent-foreground: #0f172a;
-    --sidebar-border: rgba(15, 23, 42, 0.08);
-    --sidebar-ring: #2563eb;
+    --sidebar: #161A21;
+    --sidebar-foreground: #E7EBF1;
+    --sidebar-primary: #6EE7B7;
+    --sidebar-primary-foreground: #06231B;
+    --sidebar-accent: #1C222B;
+    --sidebar-accent-foreground: #E7EBF1;
+    --sidebar-border: #262D38;
+    --sidebar-ring: #6EE7B7;
 }
 
 @layer base {
@@ -78,8 +84,13 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   html {
-    @apply font-sans;
+    font-family: var(--font-body);
   }
 }

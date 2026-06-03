@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
+import { RefreshCw, PenLine } from 'lucide-react'
 import { fmtCurrency, fmtCurrencyOr } from '../utils/format'
-import { Card, CardContent, CardHeader, CardAction } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const QUARTERS = ['Q1','Q2','Q3','Q4']
 const QUARTER_END_MONTHS = [3, 6, 9, 12]
 
-function fmtUpdatedTime(date) {
+function fmtTime(date) {
   return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })
 }
 
@@ -45,7 +45,7 @@ function CashCell({ portfolio, onRefresh }) {
 
   if (editing) {
     return (
-      <td className="summary-td text-right">
+      <td style={{ textAlign: 'right' }}>
         <form className="cash-inline-form" onSubmit={save}>
           <Input className="h-7 w-28 text-right tabular-nums" type="number" step="0.01"
             value={input} onChange={e => setInput(e.target.value)} placeholder="Amount" autoFocus />
@@ -59,20 +59,18 @@ function CashCell({ portfolio, onRefresh }) {
 
   if (portfolio.cash === null) {
     return (
-      <td className="summary-td text-right">
-        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={startEdit}>Set</Button>
+      <td style={{ textAlign: 'right' }}>
+        <button className="tc-btn sm" onClick={startEdit}>Set</button>
       </td>
     )
   }
 
   return (
-    <td
-      className={`summary-td text-right tabular-nums cursor-pointer select-none group/cash${portfolio.cash < 0 ? ' text-destructive' : ''}`}
-      onClick={startEdit}
-      title="Click to edit"
-    >
-      {fmtCurrency(portfolio.cash)}
-      <span className="ml-1 text-muted-foreground text-xs opacity-0 group-hover/cash:opacity-100 transition-opacity">✎</span>
+    <td style={{ textAlign: 'right' }} onClick={startEdit} title="Click to edit" className="cursor-pointer select-none">
+      <span className="editable num">
+        {fmtCurrency(portfolio.cash)}
+        <span className="pen"><PenLine size={10} /></span>
+      </span>
     </td>
   )
 }
@@ -86,55 +84,46 @@ function OverviewTable({ data, onRefresh }) {
   const totalMkt   = data.reduce((s, p) => s + p.market_value, 0)
 
   return (
-    <div>
-      <div className="overflow-x-auto">
-        <table className="summary-overview-table">
+    <>
+      <div className="tbl-wrap">
+        <table className="tbl">
           <thead>
             <tr>
-              <th className="summary-th text-left">Portfolio</th>
-              <th className="summary-th text-right">Cash Balance</th>
-              <th className="summary-th text-right">Buy Total</th>
-              <th className="summary-th text-right">Sale Total</th>
-              <th className="summary-th text-right">Cash Invested</th>
-              <th className="summary-th text-right">Market Value</th>
+              <th>Portfolio</th>
+              <th>Cash balance</th>
+              <th>Buy total</th>
+              <th>Sale total</th>
+              <th>Cash invested</th>
+              <th>Market value</th>
             </tr>
           </thead>
           <tbody>
             {data.map(p => (
-              <tr key={p.id} className="summary-row">
-                <td className="summary-td summary-portfolio-name">
-                  {p.name || p.code}
-                </td>
+              <tr key={p.id}>
+                <td>{p.name || p.code}</td>
                 <CashCell portfolio={p} onRefresh={onRefresh} />
-                <td className="summary-td text-right tabular-nums">{p.buy_total > 0 ? fmtCurrency(p.buy_total) : '—'}</td>
-                <td className="summary-td text-right tabular-nums">{p.sale_total > 0 ? fmtCurrency(p.sale_total) : '—'}</td>
-                <td className="summary-td text-right tabular-nums">{fmtCurrency(p.cash_invested)}</td>
-                <td className="summary-td text-right tabular-nums">{p.market_value > 0 ? fmtCurrency(p.market_value) : '—'}</td>
+                <td className="num">{p.buy_total > 0 ? fmtCurrency(p.buy_total) : '—'}</td>
+                <td className="num">{p.sale_total > 0 ? fmtCurrency(p.sale_total) : '—'}</td>
+                <td className="num">{fmtCurrency(p.cash_invested)}</td>
+                <td className="num">{p.market_value > 0 ? fmtCurrency(p.market_value) : '—'}</td>
               </tr>
             ))}
-            <tr className="summary-total-row">
-              <td className="summary-td summary-total-label">Grand total</td>
-              <td className="summary-td text-right tabular-nums">
-                {allCashSet ? fmtCurrency(totalCash) : '—'}
-              </td>
-              <td className="summary-td text-right tabular-nums">{totalBuy > 0 ? fmtCurrency(totalBuy) : '—'}</td>
-              <td className="summary-td text-right tabular-nums">{totalSale > 0 ? fmtCurrency(totalSale) : '—'}</td>
-              <td className="summary-td text-right tabular-nums">{fmtCurrency(totalInv)}</td>
-              <td className="summary-td text-right tabular-nums">{totalMkt > 0 ? fmtCurrency(totalMkt) : '—'}</td>
+            <tr className="total">
+              <td>Grand total</td>
+              <td className="num">{allCashSet ? fmtCurrency(totalCash) : '—'}</td>
+              <td className="num">{totalBuy > 0 ? fmtCurrency(totalBuy) : '—'}</td>
+              <td className="num">{totalSale > 0 ? fmtCurrency(totalSale) : '—'}</td>
+              <td className="num">{fmtCurrency(totalInv)}</td>
+              <td className="num">{totalMkt > 0 ? fmtCurrency(totalMkt) : '—'}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <p className="px-5 py-3 text-xs text-muted-foreground border-t border-border">
-        Cash Invested = Buy Total − Sale Total. Click a Cash Balance cell to edit inline.
-      </p>
-    </div>
+    </>
   )
 }
 
-function ACBTable({ data }) {
-  const [mode, setMode] = useState('month')
-
+function ACBTable({ data, mode, setMode }) {
   const now = new Date()
   const currentYear  = now.getFullYear()
   const currentMonth = now.getMonth() + 1
@@ -155,69 +144,56 @@ function ACBTable({ data }) {
     : QUARTERS.map((label, qi) => ({ label, endMonth: QUARTER_END_MONTHS[qi] }))
 
   return (
-    <div>
-      <div className="flex items-center justify-end gap-2 px-5 pb-4">
-        <div className="view-toggle">
-          <button
-            className={`view-btn${mode === 'month' ? ' active' : ''}`}
-            onClick={() => setMode('month')}
-          >
-            By month
-          </button>
-          <button
-            className={`view-btn${mode === 'quarter' ? ' active' : ''}`}
-            onClick={() => setMode('quarter')}
-          >
-            By quarter
-          </button>
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="summary-acb-table">
-          <thead>
-            <tr>
-              <th className="summary-th text-left acb-label-col sticky left-0 z-10 bg-muted">
-                {mode === 'month' ? 'Month' : 'Quarter'}
-              </th>
-              {years.map(y => (
-                <th key={y} className="summary-th text-right">{y}</th>
-              ))}
+    <div className="tbl-wrap">
+      <table className="tbl matrix">
+        <thead>
+          <tr>
+            <th>{mode === 'month' ? 'Month' : 'Quarter'}</th>
+            {years.map(y => <th key={y}>{y}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ label, endMonth }) => (
+            <tr key={label}>
+              <td>{label}</td>
+              {years.map(y => {
+                if (isFuture(y, endMonth)) {
+                  return <td key={y} className="num dim">—</td>
+                }
+                let v = lookup[y]?.[endMonth]
+                if (v == null && mode === 'quarter') {
+                  for (let m = endMonth - 1; m >= endMonth - 2; m--) {
+                    if (lookup[y]?.[m] != null) { v = lookup[y][m]; break }
+                  }
+                }
+                return (
+                  <td key={y} className="num">{v != null ? fmtCurrencyOr(v) : '—'}</td>
+                )
+              })}
             </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ label, endMonth }) => (
-              <tr key={label} className="summary-row">
-                <td className="summary-td acb-label-col font-medium text-muted-foreground sticky left-0 z-10 bg-card">
-                  {label}
+          ))}
+          <tr className="total">
+            <td>Dec close</td>
+            {years.map(y => {
+              const dec = lookup[y]?.[12]
+              const isThisYear = y === currentYear
+              return (
+                <td key={y} className={`num${dec == null ? ' dim' : ''}`}>
+                  {dec != null ? fmtCurrencyOr(dec) : isThisYear ? 'in progress' : '—'}
                 </td>
-                {years.map(y => {
-                  if (isFuture(y, endMonth)) {
-                    return <td key={y} className="summary-td text-right text-muted-foreground">—</td>
-                  }
-                  let v = lookup[y]?.[endMonth]
-                  if (v == null && mode === 'quarter') {
-                    for (let m = endMonth - 1; m >= endMonth - 2; m--) {
-                      if (lookup[y]?.[m] != null) { v = lookup[y][m]; break }
-                    }
-                  }
-                  return (
-                    <td key={y} className="summary-td text-right tabular-nums">
-                      {v != null ? fmtCurrencyOr(v) : '—'}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              )
+            })}
+          </tr>
+        </tbody>
+      </table>
     </div>
   )
 }
 
-export default function Summary() {
+export default function Summary({ pricesTick = 0 }) {
   const [overview, setOverview]     = useState([])
   const [acb, setAcb]               = useState([])
+  const [acbMode, setAcbMode]       = useState('month')
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState(null)
   const [updatedAt, setUpdatedAt]   = useState(null)
@@ -228,10 +204,16 @@ export default function Summary() {
       .then(data => { setOverview(data); setUpdatedAt(new Date()) })
       .catch(console.error)
 
+  /* Initial load + ACB (ACB data doesn't change on price refresh) */
   useEffect(() => {
     loadOverview()
     fetch('/api/summary/monthly-acb').then(r => r.json()).then(setAcb).catch(console.error)
   }, [])
+
+  /* Re-fetch market values when nav refresh fires */
+  useEffect(() => {
+    if (pricesTick > 0) loadOverview()
+  }, [pricesTick])
 
   const refreshAll = async () => {
     setRefreshing(true)
@@ -249,64 +231,142 @@ export default function Summary() {
     }
   }
 
+  /* derived totals */
+  const totalMkt      = overview.reduce((s, p) => s + p.market_value, 0)
+  const totalCash     = overview.reduce((s, p) => s + (p.cash ?? 0), 0)
+  const totalInvested = overview.reduce((s, p) => s + p.cash_invested, 0)
+  const totalValue    = totalMkt + totalCash
+  const allTimePL     = totalMkt - totalInvested
+  const allTimePct    = totalInvested > 0 ? (allTimePL / totalInvested) * 100 : 0
+  const cashAccounts  = overview.filter(p => p.cash != null).length
+  const isGain        = allTimePL >= 0
+
+  const fmtTotal = (n) => {
+    const s = Math.abs(n).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return s.includes('.') ? [s.slice(0, s.lastIndexOf('.')), s.slice(s.lastIndexOf('.'))] : [s, '.00']
+  }
+  const [totalWhole, totalCents] = fmtTotal(totalValue)
+
   return (
     <div className="flex flex-col gap-6">
 
       {refreshMsg && (
-        <div className={`rounded-lg border px-4 py-3 text-sm ${refreshMsg.success ? 'status-success' : 'status-error'}`}>
-          <strong>{refreshMsg.text}</strong>
-          {refreshMsg.errors?.length > 0 && (
-            <details className="mt-2">
-              <summary className="cursor-pointer">{refreshMsg.errors.length} error(s)</summary>
-              {refreshMsg.errors.map((e, i) => <div key={i}>{e.ticker}: {e.error}</div>)}
-            </details>
-          )}
+        <div className={`banner${refreshMsg.success ? ' ok' : ' warn'}`}>
+          <span style={{ fontSize: 18 }}>{refreshMsg.success ? '✓' : '✕'}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600 }}>{refreshMsg.text}</div>
+            {refreshMsg.errors?.length > 0 && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-sm">{refreshMsg.errors.length} error(s)</summary>
+                {refreshMsg.errors.map((e, i) => <div key={i} className="text-sm">{e.ticker}: {e.error}</div>)}
+              </details>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Portfolio Overview */}
-      <Card>
-        <CardHeader className="border-b px-5 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="summary-eyebrow">Portfolio Overview</p>
-              <h1 className="summary-display-heading">All accounts at a glance</h1>
-            </div>
-            <div className="flex items-center gap-3 flex-shrink-0 pt-1">
-              {updatedAt && (
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  prices updated {fmtUpdatedTime(updatedAt)}
+      {/* ── Hero total ── */}
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">
+            Total portfolio value{updatedAt ? ` · as of ${fmtTime(updatedAt)}` : ''}
+          </div>
+          {overview.length > 0 && (
+            <>
+              <div className="hero-total mt2">
+                <span className="num">${totalWhole}</span>
+                <span className="cents">{totalCents}</span>
+              </div>
+              <div className="deltas">
+                <span className={`tag-delta ${isGain ? 'up' : 'down'}`}>
+                  {isGain ? '▲' : '▼'}&nbsp;
+                  <span className="num">{isGain ? '+' : '−'}{fmtCurrency(Math.abs(allTimePL))}</span>
                 </span>
-              )}
-              <Button size="sm" onClick={refreshAll} disabled={refreshing}>
-                {refreshing ? 'Refreshing…' : '↻ Refresh All Prices'}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {overview.length === 0
-            ? <p className="text-muted-foreground text-sm px-5 py-4">Loading…</p>
-            : <OverviewTable data={overview} onRefresh={loadOverview} />
-          }
-        </CardContent>
-      </Card>
+                <span className={`tag-delta ${isGain ? 'up' : 'down'}`}>
+                  <span className="num">{isGain ? '+' : ''}{allTimePct.toFixed(1)}%</span>&nbsp;all-time
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+        <button
+          className="tc-btn primary"
+          onClick={refreshAll}
+          disabled={refreshing}
+          aria-label="Refresh all prices"
+        >
+          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          {refreshing ? 'Refreshing…' : 'Refresh All Prices'}
+        </button>
+      </div>
 
-      {/* ACB Matrix */}
-      <Card>
-        <CardHeader className="border-b px-5 py-4">
-          <div>
-            <p className="summary-eyebrow">Book Value of Holdings</p>
-            <h2 className="summary-section-heading">End-of-month ACB · all portfolios</h2>
+      {/* ── KPI strip ── */}
+      {overview.length > 0 && (
+        <div className="kpis grid-3">
+          <div className="kpi">
+            <div className="k">All-time return</div>
+            <div className={`v num ${isGain ? 'up' : 'down'}`}>
+              {isGain ? '+' : ''}{allTimePct.toFixed(1)}%
+            </div>
+            <div className="d">on invested capital</div>
           </div>
-        </CardHeader>
-        <CardContent className="p-0 pt-4">
-          {acb.length === 0
-            ? <p className="text-muted-foreground text-sm px-5 pb-4">Loading…</p>
-            : <ACBTable data={acb} />
-          }
-        </CardContent>
-      </Card>
+          <div className="kpi">
+            <div className="k">All-time P/L</div>
+            <div className={`v num ${isGain ? 'up' : 'down'}`}>
+              {isGain ? '+' : '−'}{fmtCurrency(Math.abs(allTimePL))}
+            </div>
+            <div className="d">market vs cost</div>
+          </div>
+          <div className="kpi">
+            <div className="k">Cash available</div>
+            <div className="v num">{totalCash > 0 ? fmtCurrency(totalCash) : '—'}</div>
+            <div className="d">across {cashAccounts} accounts</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Portfolio overview card ── */}
+      <div className="tc-card">
+        <div className="tc-card-head">
+          <div className="t">Portfolio overview</div>
+          <div className="a">
+            {overview.length} accounts
+            {updatedAt && <> · <span className="faint-txt">prices updated {fmtTime(updatedAt)}</span></>}
+          </div>
+        </div>
+        {overview.length === 0
+          ? <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
+          : <OverviewTable data={overview} onRefresh={loadOverview} />
+        }
+      </div>
+
+      <div className="row between">
+        <span className="note"><PenLine size={11} /> Tap a cash balance to edit inline</span>
+        <span className="note">Cash invested = Buy total − Sale total</span>
+      </div>
+
+      {/* ── ACB matrix ── */}
+      <div className="page-head mt6" style={{ marginBottom: 14 }}>
+        <div>
+          <div className="eyebrow">Book value of holdings</div>
+          <div className="page-title mt2">End-of-month ACB · all portfolios</div>
+        </div>
+        <div className="seg">
+          <button className={acbMode === 'month' ? 'active' : ''} onClick={() => setAcbMode('month')}>
+            By month
+          </button>
+          <button className={acbMode === 'quarter' ? 'active' : ''} onClick={() => setAcbMode('quarter')}>
+            By quarter
+          </button>
+        </div>
+      </div>
+
+      <div className="tc-card">
+        {acb.length === 0
+          ? <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
+          : <ACBTable data={acb} mode={acbMode} setMode={setAcbMode} />
+        }
+      </div>
     </div>
   )
 }
