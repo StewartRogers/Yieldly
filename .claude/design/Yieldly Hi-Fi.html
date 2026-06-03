@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Yieldly — Hi-Fi</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="yieldly-terminal.css">
+</head>
+<body>
+
+<!-- ===================== NAV ===================== -->
+<nav class="nav">
+  <div class="brand" data-go="home"><span class="mk">Y</span><span class="wm">Yieldly</span></div>
+  <div class="nav-links">
+    <button class="nav-link" data-go="home">Home</button>
+    <button class="nav-link active" data-go="summary">Summary</button>
+    <button class="nav-link" data-go="dividends">Dividends</button>
+    <button class="nav-link" data-go="portfolios">Portfolios</button>
+    <button class="nav-link" data-go="transactions">Transactions</button>
+    <button class="nav-link" data-go="import">Import Data</button>
+  </div>
+  <span class="sp"></span>
+  <button class="icon-btn" title="Refresh prices">↻</button>
+  <div class="avatar"></div>
+</nav>
+
+<main>
+
+  <!-- ===================== HOME ===================== -->
+  <section class="page" id="home" data-screen-label="Home">
+    <div class="hero">
+      <span class="kicker">● Your money, all in one ledger</span>
+      <h1>Track every share, dividend &amp; dollar.</h1>
+      <p>Live prices, adjusted cost base, and full dividend history across all your accounts — RRSP, TFSA, and beyond.</p>
+      <div class="cta">
+        <button class="btn primary" data-go="summary">View Summary →</button>
+        <button class="btn" data-go="portfolios">Open Portfolios</button>
+        <button class="btn ghost" data-go="import">Import Data</button>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <div class="assistant">
+        <div class="assistant-head">
+          <h2>AI Portfolio Assistant</h2>
+          <span class="badge" style="color:var(--accent);background:var(--accent-soft);border-color:var(--accent-line)"><span class="dot"></span> Coming soon</span>
+        </div>
+        <div class="chat">
+          <div class="col" style="gap:12px">
+            <div class="bubble me">How did my dividends trend this year vs last?</div>
+            <div class="bubble ai">Your trailing-12-month dividend income is up <b class="up">+14%</b>. Biggest contributor: <b>RY</b> in your RRSP, which added <span class="num">$212</span> over last year.</div>
+            <div class="bubble me">Which holding has the best return on cost?</div>
+            <div class="bubble ai"><b>BN</b> leads at <b class="up">+91.5%</b> on adjusted cost base, ahead of VFV at <span class="num up">+35.2%</span>.</div>
+          </div>
+          <div class="chat-input">
+            <div class="input" style="flex:1">Ask about your portfolio…</div>
+            <button class="btn primary">Send</button>
+          </div>
+          <div class="note" style="justify-content:center;margin-top:10px">Preview only — the assistant is not live yet</div>
+        </div>
+        <div class="feature-row">
+          <div class="f"><span class="fi">◷</span> Suggested example prompts</div>
+          <div class="f"><span class="fi">≋</span> Reads your live holdings</div>
+          <div class="f"><span class="fi">⚿</span> Stays on your device</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SUMMARY ===================== -->
+  <section class="page active" id="summary" data-screen-label="Summary">
+    <div class="wrap">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Total portfolio value · as of 4:00pm ET</div>
+          <div class="hero-total mt2"><span class="num">$248,431</span><span class="cents">.72</span></div>
+          <div class="deltas">
+            <span class="tag-delta up">▲ <span class="num">+$1,204.18</span></span>
+            <span class="tag-delta up"><span class="num">+0.49%</span> today</span>
+            <span class="muted" style="font-size:13.5px">All-time <span class="num up">+$62,880 (+33.9%)</span></span>
+          </div>
+        </div>
+        <button class="btn primary">↻ Refresh All Prices</button>
+      </div>
+
+      <div class="kpis grid-3 mt2" style="margin-bottom:22px">
+        <div class="kpi"><div class="k">Day change</div><div class="v up">+0.49%</div><div class="d">vs S&amp;P 500 &nbsp;<span class="num">+0.31%</span></div></div>
+        <div class="kpi"><div class="k">All-time P/L</div><div class="v up">+$62,880</div><div class="d"><span class="num">+33.9%</span> on cost</div></div>
+        <div class="kpi"><div class="k">Cash available</div><div class="v">$4,120.50</div><div class="d">across 4 accounts</div></div>
+      </div>
+
+      <!-- overview table -->
+      <div class="card">
+        <div class="card-head">
+          <div class="t">Portfolio overview</div>
+          <div class="a">4 accounts · 24 holdings · <span class="faint">prices updated 4:01pm ET</span></div>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Portfolio</th><th>Cash balance</th><th>Buy total</th><th>Sale total</th><th>Cash invested</th><th>Market value</th></tr></thead>
+            <tbody>
+              <tr><td>RRSP</td><td><span class="editable num">$2,140.00 <span class="pen">✎</span></span></td><td class="num">$118,400</td><td class="num">$12,900</td><td class="num">$105,500</td><td class="num">$141,280</td></tr>
+              <tr><td>TFSA</td><td><span class="editable num">$880.50 <span class="pen">✎</span></span></td><td class="num">$64,200</td><td class="num">$3,100</td><td class="num">$61,100</td><td class="num">$78,540</td></tr>
+              <tr><td>RE <span class="sub">· non-reg</span></td><td><span class="editable num">$640.00 <span class="pen">✎</span></span></td><td class="num">$22,800</td><td class="num">$6,400</td><td class="num">$16,400</td><td class="num">$19,920</td></tr>
+              <tr><td>RF <span class="sub">· roth-style</span></td><td><span class="editable num">$460.00 <span class="pen">✎</span></span></td><td class="num">$9,300</td><td class="num">$0</td><td class="num">$9,300</td><td class="num">$8,691</td></tr>
+              <tr class="total"><td>Grand total</td><td class="num">$4,120.50</td><td class="num">$214,700</td><td class="num">$22,400</td><td class="num">$192,300</td><td class="num">$248,431</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="row between mt3">
+        <span class="note">✎ &nbsp;Tap a cash balance to edit it inline</span>
+        <span class="note">Cash invested = Buy total − Sale total</span>
+      </div>
+
+      <!-- book value matrix -->
+      <div class="page-head mt6" style="margin-bottom:14px">
+        <div>
+          <div class="eyebrow">Book value of holdings</div>
+          <div class="page-title mt2">End-of-month ACB · all portfolios</div>
+        </div>
+        <div class="seg"><button class="active">By month</button><button>By quarter</button></div>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap">
+          <table class="tbl matrix">
+            <thead><tr><th>Month</th><th>2022</th><th>2023</th><th>2024</th><th>2025</th><th>2026</th></tr></thead>
+            <tbody>
+              <tr><td>Jan</td><td class="num">$94,100</td><td class="num">$118,400</td><td class="num">$142,900</td><td class="num">$168,200</td><td class="num">$188,400</td></tr>
+              <tr><td>Feb</td><td class="num">$95,800</td><td class="num">$120,100</td><td class="num">$144,700</td><td class="num">$170,900</td><td class="num">$190,100</td></tr>
+              <tr><td>Mar</td><td class="num">$97,200</td><td class="num">$122,600</td><td class="num">$147,300</td><td class="num">$172,400</td><td class="num">$192,300</td></tr>
+              <tr><td>Apr</td><td class="num">$99,000</td><td class="num">$124,900</td><td class="num">$149,800</td><td class="num">$175,100</td><td class="num dim">—</td></tr>
+              <tr><td>May</td><td class="num">$101,400</td><td class="num">$127,200</td><td class="num">$152,400</td><td class="num">$178,600</td><td class="num dim">—</td></tr>
+              <tr><td class="muted" style="font-family:var(--font-body);font-weight:400">Jun – Dec</td><td class="num dim" colspan="5" style="text-align:center">… expand to see every month …</td></tr>
+              <tr class="total"><td>Dec close</td><td class="num">$110,200</td><td class="num">$138,500</td><td class="num">$164,800</td><td class="num">$185,500</td><td class="num dim">in progress</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== DIVIDENDS ===================== -->
+  <section class="page" id="dividends" data-screen-label="Dividends">
+    <div class="wrap">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Dividend income</div>
+          <div class="page-title mt2">Monthly income by year</div>
+          <div class="page-sub">Trailing five years · all accounts</div>
+        </div>
+        <div class="pills" id="divPills">
+          <button class="pill active">All</button>
+          <button class="pill">RRSP</button>
+          <button class="pill">TFSA</button>
+          <button class="pill">RE</button>
+          <button class="pill">RF</button>
+        </div>
+      </div>
+
+      <div class="kpis grid-4" style="margin-bottom:22px">
+        <div class="kpi"><div class="k">This year (TTM)</div><div class="v">$6,318</div><div class="d up">▲ +14% vs prior</div></div>
+        <div class="kpi"><div class="k">Avg / month</div><div class="v">$526</div><div class="d">across all accounts</div></div>
+        <div class="kpi"><div class="k">Best month</div><div class="v">$841</div><div class="d">Mar 2026</div></div>
+        <div class="kpi"><div class="k">New streams</div><div class="v">3</div><div class="d">started this year</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="t">Income by month</div><div class="a">CAD · before withholding</div></div>
+        <div class="tbl-wrap">
+          <table class="tbl matrix">
+            <thead><tr><th>Month</th><th>2022</th><th>2023</th><th>2024</th><th>2025</th><th>2026</th><th>YoY</th></tr></thead>
+            <tbody>
+              <tr><td>Jan</td><td class="num">$288</td><td class="num">$320</td><td class="num">$360</td><td class="num">$402</td><td class="num">$455</td><td class="num up">+13%</td></tr>
+              <tr><td>Feb</td><td class="num">$210</td><td class="num">$244</td><td class="num">$268</td><td class="num">$300</td><td class="num">$352<span class="tag-new">NEW</span></td><td class="num up">+17%</td></tr>
+              <tr><td>Mar</td><td class="num">$540</td><td class="num">$612</td><td class="num">$690</td><td class="num">$760</td><td class="num">$841</td><td class="num up">+11%</td></tr>
+              <tr><td>Apr</td><td class="num">$300</td><td class="num">$330</td><td class="num">$372</td><td class="num">$410</td><td class="num">$468</td><td class="num up">+14%</td></tr>
+              <tr><td>May</td><td class="num">$262</td><td class="num">$288</td><td class="num">$318</td><td class="num">$352</td><td class="num">$390</td><td class="num up">+11%</td></tr>
+              <tr><td>Jun</td><td class="num">$520</td><td class="num">$590</td><td class="num">$662</td><td class="num">$735</td><td class="num">$812</td><td class="num up">+10%</td></tr>
+              <tr><td>Jul</td><td class="num">$284</td><td class="num">$316</td><td class="num">$352</td><td class="num">$388</td><td class="num">$430</td><td class="num up">+11%</td></tr>
+              <tr><td>Aug</td><td class="num">$248</td><td class="num">$272</td><td class="num">$300</td><td class="num">$334</td><td class="num">$300</td><td class="num down">−10%</td></tr>
+              <tr><td class="muted" style="font-family:var(--font-body);font-weight:400">Sep – Dec</td><td class="num dim" colspan="6" style="text-align:center">… rows continue …</td></tr>
+              <tr class="total"><td>Annual total</td><td class="num">$4,420</td><td class="num">$4,980</td><td class="num">$5,540</td><td class="num">$6,090</td><td class="num">$6,318</td><td class="num up">+14%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="row wrap-gap mt3" style="flex-wrap:wrap">
+        <span class="note"><span class="tag-new" style="margin:0">NEW</span> &nbsp;first payment from a newly-held position</span>
+        <span class="note"><span class="up">▲</span>/<span class="down">▼</span> &nbsp;year-over-year change vs the same month</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PORTFOLIOS ===================== -->
+  <section class="page" id="portfolios" data-screen-label="Portfolios">
+    <div class="wrap">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Holdings</div>
+          <div class="page-title mt2">Portfolios</div>
+        </div>
+        <div class="row">
+          <div class="input select" style="width:150px">New name…</div>
+          <div class="input" style="width:84px">Code</div>
+          <button class="btn primary">+ Create</button>
+        </div>
+      </div>
+
+      <div class="acct-tabs" id="acctTabs">
+        <button class="acct-tab active"><span class="grip">⠿</span> RRSP</button>
+        <button class="acct-tab"><span class="grip">⠿</span> TFSA</button>
+        <button class="acct-tab"><span class="grip">⠿</span> RE</button>
+        <button class="acct-tab"><span class="grip">⠿</span> RF</button>
+        <span class="note" style="margin-left:6px">drag to reorder — saved</span>
+      </div>
+
+      <div class="divider-row">
+        <div class="row">
+          <span class="eyebrow">View</span>
+          <div class="seg" id="viewSeg">
+            <button class="active" data-view="card">▦ Card</button>
+            <button data-view="list">≣ List</button>
+          </div>
+        </div>
+        <div class="row">
+          <span class="muted" style="font-size:13.5px">RRSP · 12 holdings · <span class="num">$141,280</span></span>
+          <button class="btn sm">↻ Refresh Prices</button>
+        </div>
+      </div>
+
+      <!-- CARD VIEW -->
+      <div id="cardView">
+        <div class="holds">
+          <!-- RY -->
+          <div class="hold">
+            <div class="top"><div><div class="tk">RY</div><div class="nm">Royal Bank of Canada</div></div><span class="badge type"><span class="dot"></span> Stock</span></div>
+            <div class="kv">
+              <span class="k">Shares</span><span class="v">180</span>
+              <span class="k">Buy price</span><span class="v">$112.40</span>
+              <span class="k">Market</span><span class="v">$139.20</span>
+              <span class="k">Mkt total</span><span class="v">$25,056</span>
+              <span class="k">Div paid</span><span class="v">$1,512</span>
+              <span class="k">Yield</span><span class="v">4.1%</span>
+              <span class="k">Freq · /sh</span><span class="v">Q · $1.05</span>
+              <span class="k">Annual</span><span class="v">$756</span>
+            </div>
+            <div class="ret"><span class="lbl">Total return</span><span class="val up">+$4,824 · +23.8%</span></div>
+            <div class="foot"><button class="btn sm block" data-modal="edit">Edit</button><button class="btn sm primary block" data-modal="txns">Transactions</button></div>
+          </div>
+          <!-- VFV -->
+          <div class="hold">
+            <div class="top"><div><div class="tk">VFV</div><div class="nm">Vanguard S&amp;P 500 (CAD)</div></div><span class="badge type"><span class="dot"></span> ETF</span></div>
+            <div class="kv">
+              <span class="k">Shares</span><span class="v">210</span>
+              <span class="k">Buy price</span><span class="v">$98.10</span>
+              <span class="k">Market</span><span class="v">$132.65</span>
+              <span class="k">Mkt total</span><span class="v">$27,856</span>
+              <span class="k">Div paid</span><span class="v">$402</span>
+              <span class="k">Yield</span><span class="v">1.2%</span>
+              <span class="k">Freq · /sh</span><span class="v">Q · $0.40</span>
+              <span class="k">Annual</span><span class="v">$336</span>
+            </div>
+            <div class="ret"><span class="lbl">Total return</span><span class="val up">+$7,255 · +35.2%</span></div>
+            <div class="foot"><button class="btn sm block" data-modal="edit">Edit</button><button class="btn sm primary block" data-modal="txns">Transactions</button></div>
+          </div>
+          <!-- ENB -->
+          <div class="hold">
+            <div class="top"><div><div class="tk">ENB</div><div class="nm">Enbridge Inc.</div></div><span class="badge type"><span class="dot"></span> Stock</span></div>
+            <div class="kv">
+              <span class="k">Shares</span><span class="v">320</span>
+              <span class="k">Buy price</span><span class="v">$52.80</span>
+              <span class="k">Market</span><span class="v">$49.10</span>
+              <span class="k">Mkt total</span><span class="v">$15,712</span>
+              <span class="k">Div paid</span><span class="v">$2,353</span>
+              <span class="k">Yield</span><span class="v">7.4%</span>
+              <span class="k">Freq · /sh</span><span class="v">Q · $0.92</span>
+              <span class="k">Annual</span><span class="v">$1,178</span>
+            </div>
+            <div class="ret"><span class="lbl">Total return</span><span class="val down">−$1,184 · −7.0%</span></div>
+            <div class="foot"><button class="btn sm block" data-modal="edit">Edit</button><button class="btn sm primary block" data-modal="txns">Transactions</button></div>
+          </div>
+          <!-- T -->
+          <div class="hold">
+            <div class="top"><div><div class="tk">T</div><div class="nm">TELUS Corp.</div></div><span class="badge type"><span class="dot"></span> Stock</span></div>
+            <div class="kv">
+              <span class="k">Shares</span><span class="v">400</span>
+              <span class="k">Buy price</span><span class="v">$26.10</span>
+              <span class="k">Market</span><span class="v">$22.40</span>
+              <span class="k">Mkt total</span><span class="v">$8,960</span>
+              <span class="k">Div paid</span><span class="v">$1,624</span>
+              <span class="k">Yield</span><span class="v">7.0%</span>
+              <span class="k">Freq · /sh</span><span class="v">Q · $0.39</span>
+              <span class="k">Annual</span><span class="v">$624</span>
+            </div>
+            <div class="ret"><span class="lbl">Total return</span><span class="val down">−$1,480 · −14.2%</span></div>
+            <div class="foot"><button class="btn sm block" data-modal="edit">Edit</button><button class="btn sm primary block" data-modal="txns">Transactions</button></div>
+          </div>
+          <!-- BN -->
+          <div class="hold">
+            <div class="top"><div><div class="tk">BN</div><div class="nm">Brookfield Corp.</div></div><span class="badge type"><span class="dot"></span> Stock</span></div>
+            <div class="kv">
+              <span class="k">Shares</span><span class="v">140</span>
+              <span class="k">Buy price</span><span class="v">$41.20</span>
+              <span class="k">Market</span><span class="v">$78.90</span>
+              <span class="k">Mkt total</span><span class="v">$11,046</span>
+              <span class="k">Div paid</span><span class="v">$118</span>
+              <span class="k">Yield</span><span class="v">0.8%</span>
+              <span class="k">Freq · /sh</span><span class="v">Q · $0.16</span>
+              <span class="k">Annual</span><span class="v">$90</span>
+            </div>
+            <div class="ret"><span class="lbl">Total return</span><span class="val up">+$5,278 · +91.5%</span></div>
+            <div class="foot"><button class="btn sm block" data-modal="edit">Edit</button><button class="btn sm primary block" data-modal="txns">Transactions</button></div>
+          </div>
+          <!-- add -->
+          <div class="hold add" data-modal="edit"><div style="text-align:center"><div class="plus">+</div><div style="font-size:13px">Add holding to RRSP</div></div></div>
+        </div>
+      </div>
+
+      <!-- LIST VIEW -->
+      <div id="listView" style="display:none">
+        <div class="card">
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Ticker</th><th>Type</th><th>Shares</th><th>Buy</th><th>Market</th><th>Mkt total</th><th>Div paid</th><th>Yield</th><th>Return</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><span class="ticker">RY</span> <span class="sub">Royal Bank</span></td><td><span class="badge type">Stock</span></td><td class="num">180</td><td class="num">$112.40</td><td class="num">$139.20</td><td class="num">$25,056</td><td class="num">$1,512</td><td class="num">4.1%</td><td class="num up">+23.8%</td><td><button class="btn sm ghost" data-modal="txns">⋯</button></td></tr>
+                <tr><td><span class="ticker">VFV</span> <span class="sub">Vanguard S&amp;P</span></td><td><span class="badge type">ETF</span></td><td class="num">210</td><td class="num">$98.10</td><td class="num">$132.65</td><td class="num">$27,856</td><td class="num">$402</td><td class="num">1.2%</td><td class="num up">+35.2%</td><td><button class="btn sm ghost" data-modal="txns">⋯</button></td></tr>
+                <tr><td><span class="ticker">ENB</span> <span class="sub">Enbridge</span></td><td><span class="badge type">Stock</span></td><td class="num">320</td><td class="num">$52.80</td><td class="num">$49.10</td><td class="num">$15,712</td><td class="num">$2,353</td><td class="num">7.4%</td><td class="num down">−7.0%</td><td><button class="btn sm ghost" data-modal="txns">⋯</button></td></tr>
+                <tr><td><span class="ticker">T</span> <span class="sub">TELUS</span></td><td><span class="badge type">Stock</span></td><td class="num">400</td><td class="num">$26.10</td><td class="num">$22.40</td><td class="num">$8,960</td><td class="num">$1,624</td><td class="num">7.0%</td><td class="num down">−14.2%</td><td><button class="btn sm ghost" data-modal="txns">⋯</button></td></tr>
+                <tr><td><span class="ticker">BN</span> <span class="sub">Brookfield</span></td><td><span class="badge type">Stock</span></td><td class="num">140</td><td class="num">$41.20</td><td class="num">$78.90</td><td class="num">$11,046</td><td class="num">$118</td><td class="num">0.8%</td><td class="num up">+91.5%</td><td><button class="btn sm ghost" data-modal="txns">⋯</button></td></tr>
+                <tr class="total"><td>5 of 12 shown</td><td></td><td></td><td></td><td></td><td class="num">$88,630</td><td class="num">$6,009</td><td></td><td class="num up">+19.9%</td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== TRANSACTIONS ===================== -->
+  <section class="page" id="transactions" data-screen-label="Transactions">
+    <div class="wrap">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Ledger</div>
+          <div class="page-title mt2">Transactions</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start">
+        <!-- add form -->
+        <div class="card card-pad">
+          <div class="t disp" style="font-size:17px;font-weight:600;margin-bottom:14px">Add transaction</div>
+          <div class="col" style="gap:12px">
+            <div class="field"><label>Portfolio</label><div class="input select">RRSP</div></div>
+            <div class="field"><label>Type</label><div class="input select">Buy</div></div>
+            <div class="grid-2">
+              <div class="field"><label>Quantity</label><div class="input"><span class="num">100</span></div></div>
+              <div class="field"><label>Price / share</label><div class="input"><span class="num">$139.20</span></div></div>
+            </div>
+            <div class="field"><label>Total (auto)</label><div class="input derived"><span class="num">$13,920.00</span><span class="faint" style="font-size:11px">= qty × price</span></div></div>
+            <div class="grid-2">
+              <div class="field"><label>Commission</label><div class="input"><span class="num">$9.95</span></div></div>
+              <div class="field"><label>Date</label><div class="input"><span class="num">2026-05-31</span></div></div>
+            </div>
+            <button class="btn primary block mt2">+ Add transaction</button>
+            <div class="note" style="justify-content:center;text-align:center;line-height:1.5">Types: Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal</div>
+          </div>
+        </div>
+
+        <!-- history -->
+        <div class="card">
+          <div class="card-head">
+            <div class="t">Transaction history</div>
+            <div class="row"><div class="pills"><button class="pill active">All types</button><button class="pill">RRSP</button></div><span class="a"><span class="num">312</span> records</span></div>
+          </div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Ticker</th><th>Type</th><th>Shares</th><th>Price</th><th>Total</th><th>Date</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><span class="ticker">RY</span></td><td><span class="badge buy"><span class="dot"></span>Buy</span></td><td class="num">100</td><td class="num">$139.20</td><td class="num">$13,920</td><td class="num">2026-05-31</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+                <tr><td><span class="ticker">VFV</span></td><td><span class="badge div"><span class="dot"></span>Dividend</span></td><td class="num">—</td><td class="num">$0.40</td><td class="num">$84</td><td class="num">2026-05-28</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+                <tr><td><span class="ticker">ENB</span></td><td><span class="badge reinvest"><span class="dot"></span>Reinvest</span></td><td class="num">4</td><td class="num">$49.10</td><td class="num">$196</td><td class="num">2026-05-27</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+                <tr><td><span class="ticker faint">—</span></td><td><span class="badge contrib"><span class="dot"></span>Contribution</span></td><td class="num">—</td><td class="num">—</td><td class="num">$2,000</td><td class="num">2026-05-20</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+                <tr><td><span class="ticker">T</span></td><td><span class="badge sell"><span class="dot"></span>Sell</span></td><td class="num">50</td><td class="num">$22.40</td><td class="num">$1,120</td><td class="num">2026-05-18</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+                <tr><td><span class="ticker faint">—</span></td><td><span class="badge withdraw"><span class="dot"></span>Withdrawal</span></td><td class="num">—</td><td class="num">—</td><td class="num">$800</td><td class="num">2026-05-12</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+                <tr><td><span class="ticker">BN</span></td><td><span class="badge buy"><span class="dot"></span>Buy</span></td><td class="num">40</td><td class="num">$78.90</td><td class="num">$3,156</td><td class="num">2026-05-09</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+                <tr><td><span class="ticker">RY</span></td><td><span class="badge div"><span class="dot"></span>Dividend</span></td><td class="num">—</td><td class="num">$1.05</td><td class="num">$189</td><td class="num">2026-05-01</td><td><button class="btn sm ghost danger">🗑</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="row between card-pad" style="padding-top:14px;padding-bottom:14px">
+            <span class="muted" style="font-size:12.5px">Showing <span class="num">1–20</span> of <span class="num">312</span></span>
+            <div class="pager">
+              <button>‹</button><button class="active">1</button><button>2</button><button>3</button><button>…</button><button>16</button><button>›</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mt4" style="flex-wrap:wrap;gap:14px">
+        <span class="badge buy"><span class="dot"></span>Buy</span>
+        <span class="badge sell"><span class="dot"></span>Sell</span>
+        <span class="badge div"><span class="dot"></span>Dividend</span>
+        <span class="badge reinvest"><span class="dot"></span>Reinvest</span>
+        <span class="badge contrib"><span class="dot"></span>Contribution</span>
+        <span class="badge withdraw"><span class="dot"></span>Withdrawal</span>
+        <span class="note">each type has its own hue + dot — readable at a glance</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== IMPORT ===================== -->
+  <section class="page" id="import" data-screen-label="Import Data">
+    <div class="wrap">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Bulk entry</div>
+          <div class="page-title mt2">Import data</div>
+          <div class="page-sub">Upload a CSV of transactions — we’ll validate every row before saving.</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="align-items:start">
+        <!-- upload -->
+        <div class="stack">
+          <div class="dropzone">
+            <div class="ico">⬇</div>
+            <div class="big">Drop your CSV here</div>
+            <div class="muted mt2" style="font-size:13.5px">or click to browse · .csv up to 5 MB</div>
+            <button class="btn mt4">Choose file…</button>
+          </div>
+          <div class="row between">
+            <span class="row"><span class="badge type">CSV</span> <span class="muted" style="font-size:13px">transactions_2026.csv · 48 KB</span></span>
+            <button class="btn primary">↑ Import</button>
+          </div>
+
+          <div class="banner ok">
+            <span style="font-size:18px" class="up">✓</span>
+            <div style="flex:1">
+              <div style="font-weight:600">Import complete</div>
+              <div class="muted" style="font-size:13px"><span class="num">208</span> added · <span class="num">4</span> skipped (duplicates) · <span class="down num">2</span> errors</div>
+            </div>
+            <button class="btn sm">View detail ▾</button>
+          </div>
+          <div class="code-block">Row 57  — unknown type "DIVDND" → did you mean "Dividend"?
+Row 142 — date "31/13/2026" is not YYYY-MM-DD</div>
+        </div>
+
+        <!-- format docs -->
+        <div class="card">
+          <div class="card-head"><div class="t">Expected format</div><div class="a">header row required · UTF-8</div></div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Column</th><th style="text-align:left">Example</th><th style="text-align:left">Notes</th></tr></thead>
+              <tbody>
+                <tr><td><span class="num">portfolio</span></td><td style="text-align:left">RRSP</td><td style="text-align:left" class="muted">must exist</td></tr>
+                <tr><td><span class="num">ticker</span></td><td style="text-align:left">RY</td><td style="text-align:left" class="muted">blank for cash</td></tr>
+                <tr><td><span class="num">type</span></td><td style="text-align:left">Buy</td><td style="text-align:left" class="muted">6 valid values</td></tr>
+                <tr><td><span class="num">quantity</span></td><td style="text-align:left">100</td><td style="text-align:left" class="muted">number</td></tr>
+                <tr><td><span class="num">price</span></td><td style="text-align:left">139.20</td><td style="text-align:left" class="muted">per share</td></tr>
+                <tr><td><span class="num">commission</span></td><td style="text-align:left">9.95</td><td style="text-align:left" class="muted">optional</td></tr>
+                <tr><td><span class="num">date</span></td><td style="text-align:left">2026-05-31</td><td style="text-align:left" class="muted">YYYY-MM-DD</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-pad" style="border-top:1px solid var(--line)">
+            <div class="eyebrow" style="margin-bottom:8px">Sample row</div>
+            <div class="code-block">portfolio,ticker,type,quantity,price,commission,date
+RRSP,RY,Buy,100,139.20,9.95,2026-05-31</div>
+            <div class="row mt3"><button class="btn sm">⬇ Download template</button><button class="btn sm ghost">View sample file</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===================== MODALS ===================== -->
+<div class="scrim" id="scrim">
+  <!-- edit -->
+  <div class="modal" id="m-edit" style="display:none">
+    <div class="modal-head"><div class="t">Edit ENB · Enbridge Inc.</div><button class="icon-btn" data-close>✕</button></div>
+    <div class="modal-body">
+      <div class="grid-2" style="gap:14px">
+        <div class="field"><label>Market price</label><div class="input"><span class="num">$49.10</span></div></div>
+        <div class="field"><label>Sector</label><div class="input select">Energy</div></div>
+        <div class="field"><label>Investment type</label><div class="input select">Stock</div></div>
+        <div class="field"><label>Dividend frequency</label><div class="input select">Quarterly</div></div>
+        <div class="field"><label>Dividend / share</label><div class="input"><span class="num">$0.92</span></div></div>
+        <div class="field"><label>Next pay date</label><div class="input"><span class="num">2026-06-01</span></div></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close>Save changes</button></div>
+  </div>
+  <!-- txns -->
+  <div class="modal wide" id="m-txns" style="display:none">
+    <div class="modal-head"><div class="t">RY — all transactions</div><button class="icon-btn" data-close>✕</button></div>
+    <div class="summary-bar">
+      <div class="s"><div class="k">Net shares</div><div class="v">180</div></div>
+      <div class="s"><div class="k">Total cost</div><div class="v">$20,232</div></div>
+      <div class="s"><div class="k">Commission</div><div class="v">$59.85</div></div>
+      <div class="s"><div class="k">ACB / share</div><div class="v">$112.73</div></div>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <table class="tbl">
+        <thead><tr><th>Date</th><th>Type</th><th>Shares</th><th>Price</th><th>Total</th></tr></thead>
+        <tbody>
+          <tr><td>2021-03-12</td><td><span class="badge buy"><span class="dot"></span>Buy</span></td><td class="num">100</td><td class="num">$108.20</td><td class="num">$10,820</td></tr>
+          <tr><td>2022-07-05</td><td><span class="badge buy"><span class="dot"></span>Buy</span></td><td class="num">80</td><td class="num">$117.80</td><td class="num">$9,424</td></tr>
+          <tr><td>2023-09-01</td><td><span class="badge div"><span class="dot"></span>Dividend</span></td><td class="num">—</td><td class="num">$1.02</td><td class="num">$184</td></tr>
+          <tr><td>2024-11-14</td><td><span class="badge reinvest"><span class="dot"></span>Reinvest</span></td><td class="num">2</td><td class="num">$131.40</td><td class="num">$263</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="modal-foot"><button class="btn" data-close>Close</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // page router
+  const pages = document.querySelectorAll('.page');
+  const links = document.querySelectorAll('.nav-link');
+  function go(id){
+    pages.forEach(p=>p.classList.toggle('active', p.id===id));
+    links.forEach(l=>l.classList.toggle('active', l.dataset.go===id));
+    window.scrollTo({top:0});
+    try{ localStorage.setItem('yieldlyHifiPage', id); }catch(e){}
+  }
+  document.querySelectorAll('[data-go]').forEach(el=>el.addEventListener('click',()=>go(el.dataset.go)));
+  try{ const s=localStorage.getItem('yieldlyHifiPage'); if(s) go(s); }catch(e){}
+
+  // portfolios: card/list toggle
+  const seg=document.getElementById('viewSeg');
+  if(seg){
+    seg.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+      seg.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      const card=b.dataset.view==='card';
+      document.getElementById('cardView').style.display=card?'':'none';
+      document.getElementById('listView').style.display=card?'none':'';
+    }));
+  }
+
+  // generic pill groups (single-select within a group)
+  document.querySelectorAll('.acct-tabs, #divPills').forEach(group=>{
+    group.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+      group.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+    }));
+  });
+
+  // modals
+  const scrim=document.getElementById('scrim');
+  function openModal(which){
+    document.getElementById('m-edit').style.display = which==='edit'?'':'none';
+    document.getElementById('m-txns').style.display = which==='txns'?'':'none';
+    scrim.classList.add('open');
+  }
+  function closeModal(){ scrim.classList.remove('open'); }
+  document.querySelectorAll('[data-modal]').forEach(el=>el.addEventListener('click',()=>openModal(el.dataset.modal)));
+  document.querySelectorAll('[data-close]').forEach(el=>el.addEventListener('click',closeModal));
+  scrim.addEventListener('click',e=>{ if(e.target===scrim) closeModal(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+})();
+</script>
+</body>
+</html>

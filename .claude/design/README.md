@@ -3,35 +3,40 @@
 ## Overview
 Yieldly is a portfolio-tracking web app for managing stock investments, dividends, and
 transactions across multiple registered/non-registered accounts (RRSP, TFSA, RE, RF).
-This package contains wireframes for all six pages of the app: **Home, Summary,
-Dividends, Portfolios, Transactions, and Import Data**. The goal of this work is a UI
-refresh — the existing feature set stays the same; the layouts here are the proposed
-new structure.
+This package contains a **high-fidelity design** for all six pages of the app: **Home,
+Summary, Dividends, Portfolios, Transactions, and Import Data**. The goal of this work is a
+UI refresh — the existing feature set stays the same; this is the proposed new structure
+AND visual system.
+
+The visual direction is **"Terminal Calm"** — a dark, data-forward theme (slate panels,
+mint accent, grotesk display + monospaced numbers).
 
 ## About the Design Files
-The file in this bundle (`Wireframes.html`) is a **design reference created in HTML** — a
-single-file prototype that shows the intended layout, information hierarchy, and a few
-live interactions (page tabs, the Portfolios Card/List toggle, and a Tweaks panel). It is
-**not production code to copy directly**.
+This bundle contains a working hi-fi reference, not just pictures:
+- **`Yieldly Hi-Fi.html`** — the full hi-fi design, all six pages, with live interactions
+  (nav routing, Portfolios Card/List toggle, account tabs, Edit/Transactions modals). Open
+  it in a browser.
+- **`yieldly-terminal.css`** — the **design system / token source of truth**. Every color,
+  font, spacing step, radius, and shadow is a CSS custom property in `:root`. This is the
+  authoritative reference for all visual values.
+- **`DESIGN_SPEC.md`** — the same system written out as a values table (for quick reading
+  and for porting into another token format).
 
-The task is to **recreate these layouts in Yieldly's existing codebase** — a **React**
-frontend with a **Node/Express + SQLite** backend — using its established components,
-routing, state, and styling conventions. Wire the layouts to the real API/data already in
-the app. Do not port the sketch/hand-drawn aesthetic; that is a wireframe convention only
-(see Fidelity below).
+The task is to **implement this design in Yieldly's existing codebase** — a **React**
+frontend with a **Node/Express + SQLite** backend — wiring the layouts to the real API/data
+already in the app. The HTML/CSS here is a faithful reference you can port directly or
+adapt to the app's component library; it is **not** meant to be dropped in verbatim.
 
 ## Fidelity
-**Low-fidelity (lofi).** These are wireframes. They communicate:
-- Page structure, grid/column layout, and component placement
-- Information hierarchy and grouping
-- Table columns, form fields, and content/copy
-- Interaction patterns (tabs, toggles, modals, pagination)
+**High-fidelity (hi-fi).** Colors, type, spacing, radii, and shadows are all final and
+authoritative — take them from `yieldly-terminal.css` / `DESIGN_SPEC.md` directly. The
+markup also communicates structure, hierarchy, table columns, form fields, copy, and
+interaction patterns. The only things still to supply are **real icons** (the reference
+uses unicode glyphs as placeholders) and the **live data wiring**.
 
-They intentionally do **not** specify final colors, fonts, or spacing — the hand-drawn
-look (Kalam/Caveat fonts, paper background, wobbly borders) is wireframe styling to be
-**discarded**. Apply Yieldly's existing design system / component library for all visual
-styling. Where the app has no established pattern for something, choose a clean, neutral
-treatment consistent with the rest of the app.
+> Note: an earlier **low-fidelity** sketch of the same six pages is included as
+> `Wireframes.html` for structural reference only — its hand-drawn styling is superseded by
+> the hi-fi system and should be ignored for visuals.
 
 ---
 
@@ -187,30 +192,48 @@ treatment consistent with the rest of the app.
   from the existing Express/SQLite API — wire to those endpoints.
 
 ## Design Tokens
-**None are prescribed** — this is lofi. Use Yieldly's existing tokens for color, spacing,
-type, radius, and shadow. The only semantic tokens that matter:
-- **Positive / negative** (gain/loss) color pair — reuse the app's.
-- **Transaction-type** color set for the six badge types (Buy, Sell, Dividend, Dividend
-  Reinvest, Contribution, Withdrawal).
-- Tabular/monospaced numeric alignment for money columns.
+**All values are final and live in `yieldly-terminal.css` (`:root`).** Port these directly.
+Full detail (with the type scale, spacing scale, and component anatomy) is in
+`DESIGN_SPEC.md`. Headline values:
+
+**Surfaces** `--bg #0D1014` · `--panel #161A21` · `--panel-2 #1C222B` · `--inset #0F1318`
+**Lines** `--line #262D38` · `--line-2 #323B48`
+**Text** `--ink #E7EBF1` · `--ink-2 #B7C0CC` · `--muted #8B94A1` · `--faint #5E6776`
+**Accent (mint)** `--accent #6EE7B7` · press `#53D8A4` · on-accent text `--accent-ink #06231B`
+**Gain / Loss** `--gain #4ADE80` · `--loss #F87171` (each with a ~13% alpha background)
+**Transaction types** Buy `#4ADE80` · Sell `#FBBF24` · Dividend `#38BDF8` ·
+Reinvest `#A78BFA` · Contribution `#2DD4BF` · Withdrawal `#FB7185`
+**Type** display `Space Grotesk` · body `Hanken Grotesk` · numbers `JetBrains Mono`
+(tabular, used for ALL money/figures)
+**Spacing** 4px base — 4/8/12/16/20/24/32/48
+**Radius** `--radius 12px` · `--radius-sm 8px` · `--radius-lg 16px` · pills 999px
+**Shadow** `--shadow 0 1px 0 rgba(255,255,255,.02), 0 10px 30px -18px rgba(0,0,0,.7)`
+**Layout** centered container `--maxw 1280px` · sticky nav `--nav-h 60px`
+
+Gain/loss and transaction-type also use ▲/▼ arrows and a colored dot respectively, so
+meaning survives without relying on color alone.
 
 ## Assets
-No real images or icons are used — the prototype uses dashed placeholders (`img`, avatar,
-logo mark) and unicode glyphs. Supply real icons from the app's existing icon set. No
-licensed/brand assets are included.
+No raster images are used. Icons in the reference are **unicode glyph placeholders**
+(↻, ✓, ⬇, ⋯, ❖, etc.) and the logo is a CSS mark — supply real icons from the app's icon
+set. Fonts load from Google Fonts (Space Grotesk, Hanken Grotesk, JetBrains Mono); swap to
+self-hosted in production if preferred. No licensed/brand assets are included.
 
 ## Screenshots
-Full-page renders of each wireframe live in `screenshots/` (one per page, in nav order):
-- `01-home.png` · `02-summary.png` · `03-dividends.png` · `04-portfolios.png`
-  (includes both modals) · `05-transactions.png` · `06-import.png`
+Full-page renders of each hi-fi page live in `screenshots/` (one per page, in nav order):
+- `01-home.png` · `02-summary.png` · `03-dividends.png` · `04-portfolios.png` ·
+  `05-transactions.png` · `06-import.png`
 
-These are for eyeballing layout only — the hand-drawn styling is a wireframe convention and
-should not be reproduced.
+These reflect the final Terminal Calm visuals.
 
 ## Files
-- `Wireframes.html` — the full six-page wireframe (single file). Open in a browser. Use the
-  top tabs to move between pages; on **Portfolios**, try the **Card/List** toggle. The
-  floating **Tweaks** panel and hand-drawn styling are prototype-only and should be ignored
-  for implementation.
-- An earlier 3-screen exploration (superseded) lives in the project's `archive/` folder and
-  is not needed for this handoff.
+- **`Yieldly Hi-Fi.html`** — the hi-fi design, all six pages. Open in a browser; the top
+  nav routes between pages. On **Portfolios**, try the **Card/List** toggle and the **Edit**
+  / **Transactions** buttons (open modals; Esc to close). Requires `yieldly-terminal.css`
+  beside it.
+- **`yieldly-terminal.css`** — the design-system stylesheet (token source of truth).
+- **`DESIGN_SPEC.md`** — the design system as a values reference: full token tables, type
+  scale, spacing scale, layout grids, and component anatomy.
+- `screenshots/` — full-page PNG of each page.
+- `Wireframes.html` — the earlier low-fidelity sketch of the same six pages. **Structural
+  reference only**; its hand-drawn styling is superseded by the hi-fi system.

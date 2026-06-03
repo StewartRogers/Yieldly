@@ -1,109 +1,61 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { RefreshCw, LayoutGrid, List, GripVertical } from 'lucide-react'
 import { fmtCurrency, fmtCurrencyOr, fmtPct, retClass } from '../utils/format'
 import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
 
 function HoldingCard({ holding, onEdit, onShowTxns }) {
   const hasMarket = holding.market_price > 0
 
-  const rows = [
-    { label: 'Buy price', value: fmtCurrency(holding.buy_price) },
-    { label: 'Market',    value: hasMarket ? fmtCurrency(holding.market_price) : '—', muted: !hasMarket },
-    { label: 'Buy total', value: fmtCurrency(holding.buy_total) },
-    { label: 'Mkt total', value: hasMarket ? fmtCurrency(holding.market_value) : '—', muted: !hasMarket },
-    holding.sale_total > 0
-      ? { label: 'Sale total', value: fmtCurrency(holding.sale_total) }
-      : null,
-    { label: 'Div paid', value: fmtCurrencyOr(holding.dividends_paid) },
-    hasMarket && holding.dividend_yield > 0
-      ? { label: 'Yield', value: holding.dividend_yield.toFixed(2) + '%' }
-      : null,
+  const kvRows = [
+    ['Shares',    holding.shares.toFixed(2)],
+    ['Buy price', fmtCurrency(holding.buy_price)],
+    ['Market',    hasMarket ? fmtCurrency(holding.market_price) : '—'],
+    ['Mkt total', hasMarket ? fmtCurrency(holding.market_value) : '—'],
+    holding.sale_total > 0 ? ['Sale total', fmtCurrency(holding.sale_total)] : null,
+    ['Div paid',  fmtCurrencyOr(holding.dividends_paid)],
+    hasMarket && holding.dividend_yield > 0 ? ['Yield', holding.dividend_yield.toFixed(2) + '%'] : null,
+    holding.dividend_frequency ? ['Freq · /sh', `${holding.dividend_frequency} · ${holding.dividend_per_share > 0 ? '$' + holding.dividend_per_share.toFixed(2) : '—'}`] : null,
+    holding.annual_payout > 0 ? ['Annual', fmtCurrency(holding.annual_payout)] : null,
   ].filter(Boolean)
 
+  const isGain = holding.return >= 0
+
   return (
-    <div className="ptf-card">
-      {/* Header */}
-      <div className="ptf-card-header">
+    <div className="hold">
+      <div className="top">
         <div>
-          <div className="ptf-card-ticker-row">
-            <button
-              className="ptf-card-ticker"
-              onClick={() => onShowTxns(holding.ticker)}
-            >
-              {holding.ticker}
-            </button>
-            {holding.investment_type && (
-              <Badge variant="secondary" className="ptf-card-type-badge">{holding.investment_type}</Badge>
-            )}
-          </div>
-          <div className="ptf-card-shares">
-            Owned: {holding.shares.toFixed(2)}
-          </div>
+          <div className="tk">{holding.ticker}</div>
+          {holding.investment_type && <div className="nm">{holding.investment_type}</div>}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="ptf-card-edit-btn"
-          onClick={() => onEdit(holding)}
-        >
-          Edit
-        </Button>
+        <span className="tc-badge type">
+          <span className="dot" />
+          {holding.investment_type || 'Stock'}
+        </span>
       </div>
 
-      {/* Detail rows */}
-      <div className="ptf-card-rows">
-        {rows.map(row => (
-          <div key={row.label} className="ptf-card-row">
-            <span className="ptf-card-row-label">{row.label}</span>
-            <span className={`ptf-card-row-value${row.muted ? ' ptf-card-row-value--muted' : ''}`}>
-              {row.value}
-            </span>
-          </div>
-        ))}
+      <div className="kv">
+        {kvRows.map(([k, v]) => [
+          <span key={k}      className="k">{k}</span>,
+          <span key={k+'_v'} className="v">{v}</span>,
+        ])}
       </div>
 
-      {/* Dividend frequency footer */}
-      {holding.dividend_frequency && (
-        <div className="ptf-card-div-footer">
-          Freq · {holding.dividend_frequency}
-          {holding.dividend_per_share > 0 && <> · ${holding.dividend_per_share.toFixed(2)}/sh</>}
-          {holding.annual_payout > 0 && <> · Annual {fmtCurrency(holding.annual_payout)}</>}
+      {hasMarket && (
+        <div className="ret">
+          <span className="lbl">Total return</span>
+          <span className={`val num ${isGain ? 'up' : 'down'}`}>
+            {isGain ? '+' : '−'}{fmtCurrency(Math.abs(holding.return))} · {isGain ? '+' : '−'}{Math.abs(holding.return_percent).toFixed(1)}%
+          </span>
         </div>
       )}
 
-      {/* Return — most prominent element */}
-      <div className="ptf-card-return-row">
-        <div className="ptf-card-return-left">
-          <span className="ptf-card-return-label">Return</span>
-          {hasMarket ? (
-            <span className={`ptf-card-return-value ${retClass(holding.return)}`}>
-              {fmtCurrency(holding.return)}
-            </span>
-          ) : (
-            <span className="ptf-card-return-value ptf-card-return-value--none">—</span>
-          )}
-        </div>
-        {hasMarket && (
-          <span className={`ptf-card-return-pct ${retClass(holding.return)}`}>
-            {holding.return >= 0 ? '▲' : '▼'} {Math.abs(holding.return_percent).toFixed(1)}%
-          </span>
-        )}
-      </div>
-
-      {/* Action buttons */}
-      <div className="ptf-card-actions">
-        <Button variant="outline" size="sm" className="ptf-card-action-btn" onClick={() => onEdit(holding)}>
-          ✎ Edit
-        </Button>
-        <Button variant="ghost" size="sm" className="ptf-card-action-btn" onClick={() => onShowTxns(holding.ticker)}>
-          ⊟ Txns
-        </Button>
+      <div className="foot">
+        <button className="tc-btn sm block" onClick={() => onEdit(holding)}>Edit</button>
+        <button className="tc-btn sm primary block" onClick={() => onShowTxns(holding.ticker)}>Transactions</button>
       </div>
     </div>
   )
@@ -111,17 +63,16 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
 
 function AddHoldingCard({ portfolioCode, onClick }) {
   return (
-    <button
-      onClick={onClick}
-      className="ptf-add-card"
-    >
-      <span className="ptf-add-card-plus">+</span>
-      <span className="ptf-add-card-label">Add holding to {portfolioCode}</span>
+    <button className="hold add" onClick={onClick} aria-label={`Add holding to ${portfolioCode}`}>
+      <div style={{ textAlign: 'center' }}>
+        <div className="plus">+</div>
+        <div style={{ fontSize: 13 }}>Add holding to {portfolioCode}</div>
+      </div>
     </button>
   )
 }
 
-export default function Portfolios({ portfolios, onPortfoliosChange }) {
+export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick = 0 }) {
   const navigate = useNavigate()
   const [localPortfolios, setLocalPortfolios] = useState([])
   const [selectedId, setSelectedId]           = useState(null)
@@ -156,6 +107,11 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
       .then(r => r.json())
       .then(data => setHoldings(data.filter(h => h.shares > 0.00005)))
   }
+
+  /* Re-fetch market values when nav refresh fires */
+  useEffect(() => {
+    if (pricesTick > 0) reloadHoldings()
+  }, [pricesTick])
 
   const createPortfolio = async () => {
     if (!newName.trim() || !newCode.trim()) return
@@ -218,37 +174,19 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
   return (
     <div className="flex flex-col gap-4">
 
-      {/* ── Toolbar row 1: portfolio tabs + create form ── */}
-      <div className="ptf-toolbar-row">
-        <div className="ptf-tabs-wrap">
-          {localPortfolios.length === 0
-            ? <p className="text-muted-foreground text-sm">No portfolios yet.</p>
-            : localPortfolios.map(p => (
-              <button
-                key={p.id}
-                className={`ptf-tab${selectedId === p.id ? ' ptf-tab--active' : ''}`}
-                onClick={() => setSelectedId(p.id)}
-                draggable
-                onDragStart={(e) => handleDragStart(e, p.id)}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, p.id)}
-                title="Drag to reorder"
-              >
-                {p.name || p.code}
-              </button>
-            ))
-          }
-          {localPortfolios.length > 0 && (
-            <span className="ptf-drag-hint">drag to reorder</span>
-          )}
+      {/* ── Page head: title + create form ── */}
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">Holdings</div>
+          <div className="page-title mt2">Portfolios</div>
         </div>
-
-        <div className="ptf-create-form">
+        <div className="row">
           <Input
             placeholder="New name…"
             value={newName}
             onChange={e => setNewName(e.target.value)}
-            className="h-8 w-36 text-sm"
+            className="h-9 w-36 text-sm"
+            style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
             onKeyDown={e => e.key === 'Enter' && createPortfolio()}
           />
           <Input
@@ -256,51 +194,71 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
             value={newCode}
             onChange={e => setNewCode(e.target.value)}
             maxLength={5}
-            className="h-8 w-20 text-sm"
+            className="h-9 w-20 text-sm"
+            style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
             onKeyDown={e => e.key === 'Enter' && createPortfolio()}
           />
-          <Button size="sm" onClick={createPortfolio} disabled={!newName.trim() || !newCode.trim()}>
-            Create
-          </Button>
+          <button
+            className="tc-btn primary"
+            onClick={createPortfolio}
+            disabled={!newName.trim() || !newCode.trim()}
+          >
+            + Create
+          </button>
         </div>
       </div>
 
-      {/* ── Toolbar row 2: view toggle + stats + refresh ── */}
+      {/* ── Account tabs ── */}
+      {localPortfolios.length > 0 && (
+        <div className="acct-tabs">
+          {localPortfolios.map(p => (
+            <button
+              key={p.id}
+              className={`acct-tab${selectedId === p.id ? ' active' : ''}`}
+              onClick={() => setSelectedId(p.id)}
+              draggable
+              onDragStart={(e) => handleDragStart(e, p.id)}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, p.id)}
+            >
+              <span className="grip"><GripVertical size={12} /></span>
+              {p.name || p.code}
+            </button>
+          ))}
+          <span className="note" style={{ marginLeft: 6 }}>drag to reorder — saved</span>
+        </div>
+      )}
+
+      {/* ── View toggle + stats ── */}
       {selectedPortfolio && (
-        <div className="ptf-toolbar-row ptf-toolbar-row--secondary">
-          <div className="flex items-center gap-2">
-            <div className="view-toggle">
-              <button className={`view-btn${view === 'card' ? ' active' : ''}`} onClick={() => setView('card')}>
-                ■ Cards
+        <div className="divider-row">
+          <div className="row">
+            <span className="eyebrow">View</span>
+            <div className="seg">
+              <button className={view === 'card' ? 'active' : ''} onClick={() => setView('card')}>
+                <LayoutGrid size={13} /> Cards
               </button>
-              <button className={`view-btn${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>
-                ≡ List
+              <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>
+                <List size={13} /> List
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="ptf-stats-label">
-              {selectedPortfolio.name || selectedPortfolio.code}
-              {' · '}{holdings.length} holding{holdings.length !== 1 ? 's' : ''}
-              {totalMktValue > 0 && <> · {fmtCurrency(totalMktValue)}</>}
+          <div className="row">
+            <span className="muted-txt" style={{ fontSize: 13.5 }}>
+              {selectedPortfolio.name || selectedPortfolio.code} · {holdings.length} holding{holdings.length !== 1 ? 's' : ''}
+              {totalMktValue > 0 && <> · <span className="num">{fmtCurrency(totalMktValue)}</span></>}
             </span>
-            <Button variant="outline" size="sm" onClick={refreshPrices} disabled={refreshing}>
-              {refreshing ? 'Refreshing…' : '↻ Refresh Prices'}
-            </Button>
+            <button className="tc-btn sm" onClick={refreshPrices} disabled={refreshing}>
+              <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+              {refreshing ? 'Refreshing…' : 'Refresh Prices'}
+            </button>
           </div>
         </div>
       )}
 
-      {/* ── Holdings ── */}
-      {holdings.length === 0 && selectedPortfolio ? (
-        <div className="ptf-grid">
-          <AddHoldingCard
-            portfolioCode={selectedPortfolio?.name || selectedPortfolio?.code}
-            onClick={() => navigate('/transactions')}
-          />
-        </div>
-      ) : view === 'card' ? (
-        <div className="ptf-grid">
+      {/* ── Holdings: Card view ── */}
+      {view === 'card' && (
+        <div className="holds">
           {holdings.map(h => (
             <HoldingCard
               key={h.ticker}
@@ -316,62 +274,81 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
             />
           )}
         </div>
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Ticker</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Shares</TableHead>
-                    <TableHead className="text-right">Buy</TableHead>
-                    <TableHead className="text-right">Mkt</TableHead>
-                    <TableHead className="text-right">Buy Total</TableHead>
-                    <TableHead className="text-right">Mkt Total</TableHead>
-                    <TableHead className="text-right">Div Paid</TableHead>
-                    <TableHead className="text-right">Yield</TableHead>
-                    <TableHead className="text-right">Return</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {holdings.map(h => (
-                    <TableRow key={h.ticker}>
-                      <TableCell className="font-semibold text-primary">{h.ticker}</TableCell>
-                      <TableCell>
-                        {h.investment_type
-                          ? <Badge variant="secondary" className="text-xs">{h.investment_type}</Badge>
-                          : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{h.shares.toFixed(4)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtCurrency(h.buy_price)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{h.market_price > 0 ? fmtCurrency(h.market_price) : '—'}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtCurrency(h.buy_total)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{h.market_price > 0 ? fmtCurrency(h.market_value) : '—'}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtCurrencyOr(h.dividends_paid)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {h.market_price > 0 && h.dividend_yield > 0 ? fmtPct(h.dividend_yield) : '—'}
-                      </TableCell>
-                      <TableCell className={`text-right tabular-nums ${h.market_price > 0 ? retClass(h.return) : ''}`}>
-                        {h.market_price > 0
-                          ? <>{fmtCurrency(h.return)} <span className="text-xs">({h.return_percent.toFixed(1)}%)</span></>
-                          : '—'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setStockModal(h)}>Edit</Button>
-                          <Button variant="ghost"   size="sm" className="h-7 text-xs" onClick={() => setTxModal(h.ticker)}>Txns</Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
+      )}
+
+      {/* ── Holdings: List view ── */}
+      {view === 'list' && (
+        <div className="tc-card">
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Type</th>
+                  <th>Shares</th>
+                  <th>Buy</th>
+                  <th>Market</th>
+                  <th>Buy total</th>
+                  <th>Mkt total</th>
+                  <th>Div paid</th>
+                  <th>Yield</th>
+                  <th>Return</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {holdings.map(h => (
+                  <tr key={h.ticker}>
+                    <td>
+                      <span className="ticker">{h.ticker}</span>
+                      {h.investment_type && <span className="sub"> {h.investment_type}</span>}
+                    </td>
+                    <td>
+                      {h.investment_type && (
+                        <span className="tc-badge type">
+                          <span className="dot" />{h.investment_type}
+                        </span>
+                      )}
+                    </td>
+                    <td className="num">{h.shares.toFixed(4)}</td>
+                    <td className="num">{fmtCurrency(h.buy_price)}</td>
+                    <td className="num">{h.market_price > 0 ? fmtCurrency(h.market_price) : '—'}</td>
+                    <td className="num">{fmtCurrency(h.buy_total)}</td>
+                    <td className="num">{h.market_price > 0 ? fmtCurrency(h.market_value) : '—'}</td>
+                    <td className="num">{fmtCurrencyOr(h.dividends_paid)}</td>
+                    <td className="num">{h.market_price > 0 && h.dividend_yield > 0 ? fmtPct(h.dividend_yield) : '—'}</td>
+                    <td className={`num ${h.market_price > 0 ? retClass(h.return) : ''}`}>
+                      {h.market_price > 0
+                        ? <>{h.return >= 0 ? '+' : '−'}{Math.abs(h.return_percent).toFixed(1)}%</>
+                        : '—'}
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                        <button className="tc-btn sm ghost" onClick={() => setStockModal(h)}>Edit</button>
+                        <button className="tc-btn sm ghost" onClick={() => setTxModal(h.ticker)}>Txns</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {holdings.length > 0 && (
+                  <tr className="total">
+                    <td>{holdings.length} holdings</td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td className="num">{fmtCurrency(holdings.reduce((s, h) => s + h.buy_total, 0))}</td>
+                    <td className="num">{totalMktValue > 0 ? fmtCurrency(totalMktValue) : '—'}</td>
+                    <td className="num">{fmtCurrencyOr(holdings.reduce((s, h) => s + (h.dividends_paid || 0), 0))}</td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       <StockInfoModal
