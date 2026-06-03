@@ -12,87 +12,100 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 function HoldingCard({ holding, onEdit, onShowTxns }) {
   const hasMarket = holding.market_price > 0
 
+  const rows = [
+    { label: 'Buy price', value: fmtCurrency(holding.buy_price) },
+    { label: 'Market',    value: hasMarket ? fmtCurrency(holding.market_price) : '—', muted: !hasMarket },
+    { label: 'Buy total', value: fmtCurrency(holding.buy_total) },
+    { label: 'Mkt total', value: hasMarket ? fmtCurrency(holding.market_value) : '—', muted: !hasMarket },
+    holding.sale_total > 0
+      ? { label: 'Sale total', value: fmtCurrency(holding.sale_total) }
+      : null,
+    { label: 'Div paid', value: fmtCurrencyOr(holding.dividends_paid) },
+    hasMarket && holding.dividend_yield > 0
+      ? { label: 'Yield', value: holding.dividend_yield.toFixed(2) + '%' }
+      : null,
+  ].filter(Boolean)
+
   return (
-    <Card className="flex flex-col gap-0 py-0 overflow-hidden">
-      <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b">
+    <div className="ptf-card">
+      {/* Header */}
+      <div className="ptf-card-header">
         <div>
-          <button
-            className="font-bold text-primary text-lg leading-none hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            onClick={() => onShowTxns(holding.ticker)}
-          >
-            {holding.ticker}
-          </button>
-          {holding.investment_type && (
-            <Badge variant="secondary" className="ml-2 text-xs align-middle">{holding.investment_type}</Badge>
-          )}
-          <div className="text-xs text-foreground/70 mt-1">{holding.shares.toFixed(2)} shares</div>
+          <div className="ptf-card-ticker-row">
+            <button
+              className="ptf-card-ticker"
+              onClick={() => onShowTxns(holding.ticker)}
+            >
+              {holding.ticker}
+            </button>
+            {holding.investment_type && (
+              <Badge variant="secondary" className="ptf-card-type-badge">{holding.investment_type}</Badge>
+            )}
+          </div>
+          <div className="ptf-card-shares">
+            Owned: {holding.shares.toFixed(2)}
+          </div>
         </div>
-        <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => onEdit(holding)}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ptf-card-edit-btn"
+          onClick={() => onEdit(holding)}
+        >
           Edit
         </Button>
       </div>
 
-      <div className="px-4 py-3 flex flex-col gap-2 text-sm flex-1">
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Buy price</span>
-          <span className="tabular-nums">{fmtCurrency(holding.buy_price)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Market</span>
-          <span className={`tabular-nums ${!hasMarket ? 'text-muted-foreground' : ''}`}>
-            {hasMarket ? fmtCurrency(holding.market_price) : '—'}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Buy total</span>
-          <span className="tabular-nums">{fmtCurrency(holding.buy_total)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Mkt total</span>
-          <span className={`tabular-nums ${!hasMarket ? 'text-muted-foreground' : ''}`}>
-            {hasMarket ? fmtCurrency(holding.market_value) : '—'}
-          </span>
-        </div>
-        {holding.sale_total > 0 && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Sale total</span>
-            <span className="tabular-nums">{fmtCurrency(holding.sale_total)}</span>
+      {/* Detail rows */}
+      <div className="ptf-card-rows">
+        {rows.map(row => (
+          <div key={row.label} className="ptf-card-row">
+            <span className="ptf-card-row-label">{row.label}</span>
+            <span className={`ptf-card-row-value${row.muted ? ' ptf-card-row-value--muted' : ''}`}>
+              {row.value}
+            </span>
           </div>
-        )}
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Div paid</span>
-          <span className="tabular-nums">{fmtCurrencyOr(holding.dividends_paid)}</span>
-        </div>
-        {hasMarket && holding.dividend_yield > 0 && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Yield</span>
-            <span className="tabular-nums">{holding.dividend_yield.toFixed(2)}%</span>
-          </div>
-        )}
+        ))}
       </div>
 
+      {/* Dividend frequency footer */}
       {holding.dividend_frequency && (
-        <div className="px-4 py-2 border-t bg-muted/40 text-xs text-foreground/70">
-          {holding.dividend_frequency} · {fmtCurrency(holding.dividend_per_share)}/sh
-          {holding.annual_payout > 0 && <> · {fmtCurrency(holding.annual_payout)}/yr</>}
+        <div className="ptf-card-div-footer">
+          Freq · {holding.dividend_frequency}
+          {holding.dividend_per_share > 0 && <> · ${holding.dividend_per_share.toFixed(2)}/sh</>}
+          {holding.annual_payout > 0 && <> · Annual {fmtCurrency(holding.annual_payout)}</>}
         </div>
       )}
 
-      <div className="px-4 py-3 border-t flex items-center justify-between">
-        {hasMarket ? (
-          <span className={`text-sm font-semibold tabular-nums ${retClass(holding.return)}`}>
-            Return {fmtCurrency(holding.return)} ({holding.return_percent.toFixed(2)}%)
-          </span>
-        ) : (
-          <span className="text-sm text-foreground/70">No market price</span>
-        )}
-        <div className="flex gap-1">
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onShowTxns(holding.ticker)}>
-            Txns
-          </Button>
+      {/* Return — most prominent element */}
+      <div className="ptf-card-return-row">
+        <div className="ptf-card-return-left">
+          <span className="ptf-card-return-label">Return</span>
+          {hasMarket ? (
+            <span className={`ptf-card-return-value ${retClass(holding.return)}`}>
+              {fmtCurrency(holding.return)}
+            </span>
+          ) : (
+            <span className="ptf-card-return-value ptf-card-return-value--none">—</span>
+          )}
         </div>
+        {hasMarket && (
+          <span className={`ptf-card-return-pct ${retClass(holding.return)}`}>
+            {holding.return >= 0 ? '▲' : '▼'} {Math.abs(holding.return_percent).toFixed(1)}%
+          </span>
+        )}
       </div>
-    </Card>
+
+      {/* Action buttons */}
+      <div className="ptf-card-actions">
+        <Button variant="outline" size="sm" className="ptf-card-action-btn" onClick={() => onEdit(holding)}>
+          ✎ Edit
+        </Button>
+        <Button variant="ghost" size="sm" className="ptf-card-action-btn" onClick={() => onShowTxns(holding.ticker)}>
+          ⊟ Txns
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -100,10 +113,10 @@ function AddHoldingCard({ portfolioCode, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border min-h-[200px] p-6 text-muted-foreground hover:bg-muted/50 hover:border-primary/40 transition-colors gap-2 w-full"
+      className="ptf-add-card"
     >
-      <span className="text-3xl font-light">+</span>
-      <span className="text-sm">Add holding to {portfolioCode}</span>
+      <span className="ptf-add-card-plus">+</span>
+      <span className="ptf-add-card-label">Add holding to {portfolioCode}</span>
     </button>
   )
 }
@@ -205,15 +218,15 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Row 1: Tabs + inline create form */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="portfolio-tabs borderless flex-1">
+      {/* ── Toolbar row 1: portfolio tabs + create form ── */}
+      <div className="ptf-toolbar-row">
+        <div className="ptf-tabs-wrap">
           {localPortfolios.length === 0
-            ? <p className="text-muted-foreground text-sm py-2">No portfolios yet.</p>
+            ? <p className="text-muted-foreground text-sm">No portfolios yet.</p>
             : localPortfolios.map(p => (
               <button
                 key={p.id}
-                className={`portfolio-tab${selectedId === p.id ? ' active' : ''}`}
+                className={`ptf-tab${selectedId === p.id ? ' ptf-tab--active' : ''}`}
                 onClick={() => setSelectedId(p.id)}
                 draggable
                 onDragStart={(e) => handleDragStart(e, p.id)}
@@ -221,14 +234,16 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
                 onDrop={(e) => handleDrop(e, p.id)}
                 title="Drag to reorder"
               >
-                {p.code}
+                {p.name || p.code}
               </button>
             ))
           }
+          {localPortfolios.length > 0 && (
+            <span className="ptf-drag-hint">drag to reorder</span>
+          )}
         </div>
 
-        {/* Inline create form */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="ptf-create-form">
           <Input
             placeholder="New name…"
             value={newName}
@@ -250,30 +265,25 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
         </div>
       </div>
 
-      {/* Row 2: Context info + view toggle + refresh */}
+      {/* ── Toolbar row 2: view toggle + stats + refresh ── */}
       {selectedPortfolio && (
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <span className="text-sm text-foreground/70">
-            <span className="font-medium text-foreground">{selectedPortfolio.code}</span>
-            {selectedPortfolio.name && <> · {selectedPortfolio.name}</>}
-            {' · '}{holdings.length} holding{holdings.length !== 1 ? 's' : ''}
-            {totalMktValue > 0 && <> · {fmtCurrency(totalMktValue)}</>}
-          </span>
+        <div className="ptf-toolbar-row ptf-toolbar-row--secondary">
           <div className="flex items-center gap-2">
             <div className="view-toggle">
-              <button
-                className={`view-btn${view === 'card' ? ' active' : ''}`}
-                onClick={() => setView('card')}
-              >
+              <button className={`view-btn${view === 'card' ? ' active' : ''}`} onClick={() => setView('card')}>
                 ■ Cards
               </button>
-              <button
-                className={`view-btn${view === 'list' ? ' active' : ''}`}
-                onClick={() => setView('list')}
-              >
+              <button className={`view-btn${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>
                 ≡ List
               </button>
             </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="ptf-stats-label">
+              {selectedPortfolio.name || selectedPortfolio.code}
+              {' · '}{holdings.length} holding{holdings.length !== 1 ? 's' : ''}
+              {totalMktValue > 0 && <> · {fmtCurrency(totalMktValue)}</>}
+            </span>
             <Button variant="outline" size="sm" onClick={refreshPrices} disabled={refreshing}>
               {refreshing ? 'Refreshing…' : '↻ Refresh Prices'}
             </Button>
@@ -281,16 +291,16 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
         </div>
       )}
 
-      {/* Holdings */}
+      {/* ── Holdings ── */}
       {holdings.length === 0 && selectedPortfolio ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="ptf-grid">
           <AddHoldingCard
-            portfolioCode={selectedPortfolio?.code}
+            portfolioCode={selectedPortfolio?.name || selectedPortfolio?.code}
             onClick={() => navigate('/transactions')}
           />
         </div>
       ) : view === 'card' ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="ptf-grid">
           {holdings.map(h => (
             <HoldingCard
               key={h.ticker}
@@ -301,7 +311,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange }) {
           ))}
           {selectedPortfolio && (
             <AddHoldingCard
-              portfolioCode={selectedPortfolio.code}
+              portfolioCode={selectedPortfolio.name || selectedPortfolio.code}
               onClick={() => navigate('/transactions')}
             />
           )}
