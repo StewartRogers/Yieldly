@@ -18,31 +18,30 @@ export default function App() {
 
   useEffect(() => { loadPortfolios() }, [])
 
-  const navClass = ({ isActive }) => 'nav-link' + (isActive ? ' active' : '')
-
   return (
     <BrowserRouter>
-      <nav className="top-nav">
-        <div className="nav-container">
-          <div className="nav-brand">
-            <img src="/logo.svg" alt="Yieldly" className="nav-logo" />
-            <span className="nav-title">Yieldly</span>
+      <nav className="app-nav">
+        <div className="app-nav-inner">
+          <NavLink to="/" className="app-nav-wordmark">
+            <span className="app-nav-pipe">|</span>
+            <span className="app-nav-brand">Yieldly</span>
+          </NavLink>
+          <div className="app-nav-links">
+            <NavLink to="/" end className={({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')}>Home</NavLink>
+            <NavLink to="/summary" className={({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')}>Summary</NavLink>
+            <NavLink to="/dividends" className={({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')}>Dividends</NavLink>
+            <NavLink to="/portfolios" className={({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')}>Portfolios</NavLink>
+            <NavLink to="/transactions" className={({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')}>Transactions</NavLink>
+            <NavLink to="/import" className={({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')}>Import<br />Data</NavLink>
           </div>
-          <div className="nav-menu">
-            <NavLink to="/" end className={navClass}>Home</NavLink>
-            <NavLink to="/summary" className={navClass}>Summary</NavLink>
-            <NavLink to="/dividends" className={navClass}>Dividends</NavLink>
-            <NavLink to="/portfolios" className={navClass}>Portfolios</NavLink>
-            <NavLink to="/transactions" className={navClass}>Transactions</NavLink>
-            <NavLink to="/import" className={navClass}>Import Data</NavLink>
-          </div>
+          <div className="app-nav-avatar" aria-label="Account">YL</div>
         </div>
       </nav>
-      <div className="container">
+      <div className="app-page">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/summary" element={<Summary />} />
-          <Route path="/dividends" element={<Dividends />} />
+          <Route path="/dividends" element={<Dividends portfolios={portfolios} />} />
           <Route path="/portfolios" element={<Portfolios portfolios={portfolios} onPortfoliosChange={loadPortfolios} />} />
           <Route path="/transactions" element={<Transactions portfolios={portfolios} />} />
           <Route path="/import" element={<Import onImported={loadPortfolios} />} />

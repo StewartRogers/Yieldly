@@ -38,72 +38,109 @@ body {
 }
 
 /* ===== TOP NAVIGATION ===== */
-.top-nav {
-  background: var(--color-primary);
-  box-shadow: var(--shadow-md);
+.app-nav {
+  background: #ffffff;
+  border-bottom: 1px solid var(--border-color);
   position: sticky;
   top: 0;
   z-index: 100;
 }
 
-.nav-container {
+.app-nav-inner {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 16px 32px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.nav-brand {
+  padding: 0 32px;
+  height: 52px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 0;
 }
 
-.nav-logo {
-  width: 32px;
-  height: 32px;
-}
-
-.nav-title {
-  color: white;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.nav-menu {
+/* Wordmark: "| Yieldly" */
+.app-nav-wordmark {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 0;
+  text-decoration: none;
+  margin-right: 24px;
+  flex-shrink: 0;
 }
 
-.nav-link {
-  color: rgba(255, 255, 255, 0.75);
+.app-nav-pipe {
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-right: 6px;
+  line-height: 1;
+}
+
+.app-nav-brand {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Nav links */
+.app-nav-links {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  height: 100%;
+  gap: 0;
+}
+
+.app-nav-link {
+  color: var(--text-secondary);
   text-decoration: none;
   font-weight: 500;
-  font-size: 0.9rem;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s, color 0.15s;
+  font-size: 0.875rem;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.25;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
 
-.nav-link:hover {
-  color: white;
-  background: rgba(255, 255, 255, 0.12);
+.app-nav-link:hover {
+  color: var(--text-primary);
 }
 
-.nav-link:focus {
-  outline: 2px solid rgba(255, 255, 255, 0.6);
-  outline-offset: 2px;
+.app-nav-link--active {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--text-primary);
 }
 
-.nav-link.active {
-  color: white;
-  background: rgba(255, 255, 255, 0.2);
+.app-nav-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* Avatar */
+.app-nav-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-muted);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* ===== CONTAINER ===== */
-.container {
+.app-page {
   max-width: 1200px;
   margin: 0 auto;
   padding: 32px;
@@ -427,6 +464,15 @@ body {
   border: 1px solid #fecaca;
   display: block;
 }
+
+/* ===== SEMANTIC STATUS PANELS ===== */
+/* Use with: rounded-lg border px-4 py-3 text-sm (layout in Tailwind, colors here) */
+.status-success { border-color: #bbf7d0; background: #dcfce7; color: #14532d; }
+.status-error   { border-color: #fecaca; background: #fee2e2; color: #7f1d1d; }
+.status-warning { border-color: #fde68a; background: #fef9c3; color: #854d0e; }
+
+/* ===== PORTFOLIO TABS MODIFIER ===== */
+.portfolio-tabs.borderless { margin-bottom: 0; border: none; }
 
 /* ===== SECTION / CARD ===== */
 .main-content {
@@ -1009,23 +1055,126 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .container {
+  .app-page {
     padding: 16px;
   }
 
-  .nav-container {
-    padding: 12px 16px;
-    flex-direction: column;
-    gap: 12px;
+  .app-nav-inner {
+    padding: 0 16px;
+    height: auto;
+    flex-wrap: wrap;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    gap: 8px;
   }
 
-  .nav-menu {
+  .app-nav-links {
     flex-wrap: wrap;
-    justify-content: center;
+    height: auto;
   }
 }
 
-/* ===== SUMMARY TABLE ===== */
+/* ===== SUMMARY PAGE ===== */
+
+/* Eyebrow label above section headings */
+.summary-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+/* Large display heading (Portfolio Overview card) */
+.summary-display-heading {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+/* Smaller section heading (ACB card) */
+.summary-section-heading {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+/* Shared table header cell */
+.summary-th {
+  padding: 10px 20px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: var(--bg-muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Shared table body cell */
+.summary-td {
+  padding: 11px 20px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+  color: var(--text-primary);
+}
+
+/* Portfolio Overview table */
+.summary-overview-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.summary-overview-table .summary-row:last-child .summary-td {
+  border-bottom: none;
+}
+
+.summary-overview-table .summary-row:hover .summary-td {
+  background: var(--bg-muted);
+}
+
+/* Portfolio name cell */
+.summary-portfolio-name {
+  font-weight: 600;
+  min-width: 140px;
+}
+
+/* Grand total row */
+.summary-total-row .summary-td {
+  font-weight: 700;
+  background: var(--bg-muted);
+  border-top: 2px solid var(--border-color);
+  border-bottom: none;
+}
+
+.summary-total-label {
+  color: var(--text-primary);
+}
+
+/* ACB table */
+.summary-acb-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.summary-acb-table .summary-row:last-child .summary-td {
+  border-bottom: none;
+}
+
+.summary-acb-table .summary-row:hover .summary-td {
+  background: var(--bg-muted);
+}
+
+.acb-label-col {
+  min-width: 76px;
+}
+
+/* ===== SUMMARY TABLE (legacy) ===== */
 .summary-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -1243,7 +1392,455 @@ h2 {
 .cash-cancel-btn:hover { background: var(--bg-muted); }
 .cash-error { color: var(--color-error); font-size: 0.7rem; width: 100%; }
 
-/* ===== DIVIDEND INCOME PAGE ===== */
+/* ===== DIVIDENDS PAGE ===== */
+
+/* "last 5 years" indicator top-right of header */
+.div-last5-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 6px;
+}
+
+/* Portfolio filter pill row */
+.div-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+
+.div-filter-pill {
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  line-height: 1.5;
+}
+
+.div-filter-pill:hover {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+}
+
+.div-filter-pill:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.div-filter-pill--active {
+  background: var(--text-primary);
+  color: #fff;
+  border-color: var(--text-primary);
+}
+
+.div-filter-pill--active:hover {
+  background: var(--text-primary);
+  color: #fff;
+}
+
+/* KPI strip — 4 tiles in a row */
+.div-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.div-kpi-tile {
+  padding: 16px 20px;
+  border-right: 1px solid var(--border-color);
+}
+
+.div-kpi-tile:last-child {
+  border-right: none;
+}
+
+.div-kpi-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.div-kpi-value {
+  font-size: 1.625rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.div-kpi-sub {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+/* Dividend matrix table */
+.div-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.div-th {
+  padding: 10px 20px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: var(--bg-muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.div-td {
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.div-matrix-row:last-child .div-td {
+  border-bottom: none;
+}
+
+.div-matrix-row:hover .div-td {
+  background: var(--bg-muted);
+}
+
+/* YoY column: left border to separate it visually */
+.div-yoy-col {
+  border-left: 1px solid var(--border-color) !important;
+}
+
+/* Annual total row */
+.div-total-row .div-td {
+  font-weight: 700;
+  background: var(--bg-muted);
+  border-top: 2px solid var(--border-color);
+  border-bottom: none;
+}
+
+@media (max-width: 640px) {
+  .div-kpi-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .div-kpi-tile:nth-child(2) {
+    border-right: none;
+  }
+}
+
+/* ===== PORTFOLIOS PAGE ===== */
+
+/* Toolbar rows */
+.ptf-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ptf-toolbar-row--secondary {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+
+/* Portfolio tab strip */
+.ptf-tabs-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.ptf-tab {
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: grab;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ptf-tab:active {
+  cursor: grabbing;
+}
+
+.ptf-tab:hover {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+}
+
+.ptf-tab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ptf-tab--active {
+  background: var(--text-primary);
+  color: #fff;
+  border-color: var(--text-primary);
+}
+
+.ptf-tab--active:hover {
+  background: var(--text-primary);
+  color: #fff;
+}
+
+.ptf-drag-hint {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  margin-left: 6px;
+}
+
+/* Create form (tabs row, right side) */
+.ptf-create-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Stats label (secondary toolbar, right side) */
+.ptf-stats-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Holdings card grid */
+.ptf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+/* ── Holding card ── */
+.ptf-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Card header */
+.ptf-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ptf-card-ticker-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ptf-card-ticker {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.ptf-card-ticker:hover {
+  opacity: 0.75;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.ptf-card-ticker:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.ptf-card-type-badge {
+  font-size: 0.65rem !important;
+  padding: 1px 6px !important;
+}
+
+.ptf-card-shares {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+.ptf-card-edit-btn {
+  height: 28px !important;
+  font-size: 0.75rem !important;
+  padding: 0 10px !important;
+  flex-shrink: 0;
+}
+
+/* Detail rows */
+.ptf-card-rows {
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+
+.ptf-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8125rem;
+}
+
+.ptf-card-row-label {
+  color: var(--text-secondary);
+}
+
+.ptf-card-row-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ptf-card-row-value--muted {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+/* Dividend footer */
+.ptf-card-div-footer {
+  padding: 7px 16px;
+  font-size: 0.73rem;
+  color: var(--text-secondary);
+  background: var(--bg-muted);
+  border-top: 1px solid var(--border-color);
+}
+
+/* Return section — most prominent */
+.ptf-card-return-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px dashed var(--border-color);
+  margin-top: auto;
+}
+
+.ptf-card-return-left {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.ptf-card-return-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.ptf-card-return-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ptf-card-return-value--none {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.ptf-card-return-pct {
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Action buttons */
+.ptf-card-actions {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.ptf-card-action-btn {
+  flex: 1;
+  height: 30px !important;
+  font-size: 0.75rem !important;
+  justify-content: center;
+}
+
+/* Add holding card */
+.ptf-add-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  border: 2px dashed var(--border-color);
+  min-height: 180px;
+  padding: 24px;
+  color: var(--text-secondary);
+  background: none;
+  cursor: pointer;
+  gap: 8px;
+  width: 100%;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ptf-add-card:hover {
+  background: var(--bg-muted);
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
+.ptf-add-card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ptf-add-card-plus {
+  font-size: 1.75rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.ptf-add-card-label {
+  font-size: 0.8125rem;
+}
+
+/* ===== DIVIDEND INCOME PAGE (legacy) ===== */
 .div-income-section {
   background: var(--bg-surface);
   border-radius: var(--radius-lg);

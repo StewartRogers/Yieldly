@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react'
 import { fmtCurrency, fmtCurrencyOr } from '../utils/format'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardAction } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const QUARTERS = ['Q1','Q2','Q3','Q4']
+const QUARTER_END_MONTHS = [3, 6, 9, 12]
+
+function fmtUpdatedTime(date) {
+  return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })
+}
 
 function CashCell({ portfolio, onRefresh }) {
   const [editing, setEditing] = useState(false)
@@ -40,7 +45,7 @@ function CashCell({ portfolio, onRefresh }) {
 
   if (editing) {
     return (
-      <TableCell>
+      <td className="summary-td text-right">
         <form className="cash-inline-form" onSubmit={save}>
           <Input className="h-7 w-28 text-right tabular-nums" type="number" step="0.01"
             value={input} onChange={e => setInput(e.target.value)} placeholder="Amount" autoFocus />
@@ -48,23 +53,27 @@ function CashCell({ portfolio, onRefresh }) {
           <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={cancel}>✕</Button>
           {error && <span className="text-destructive text-xs">{error}</span>}
         </form>
-      </TableCell>
+      </td>
     )
   }
 
   if (portfolio.cash === null) {
     return (
-      <TableCell>
+      <td className="summary-td text-right">
         <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={startEdit}>Set</Button>
-      </TableCell>
+      </td>
     )
   }
 
   return (
-    <TableCell className={`text-right tabular-nums${portfolio.cash < 0 ? ' text-destructive' : ''}`}>
+    <td
+      className={`summary-td text-right tabular-nums cursor-pointer select-none group/cash${portfolio.cash < 0 ? ' text-destructive' : ''}`}
+      onClick={startEdit}
+      title="Click to edit"
+    >
       {fmtCurrency(portfolio.cash)}
-      <Button variant="ghost" size="sm" className="h-6 w-6 ml-1 p-0 text-muted-foreground" title="Edit" onClick={startEdit}>✎</Button>
-    </TableCell>
+      <span className="ml-1 text-muted-foreground text-xs opacity-0 group-hover/cash:opacity-100 transition-opacity">✎</span>
+    </td>
   )
 }
 
@@ -77,76 +86,131 @@ function OverviewTable({ data, onRefresh }) {
   const totalMkt   = data.reduce((s, p) => s + p.market_value, 0)
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead></TableHead>
-            {data.map(p => <TableHead key={p.id} className="text-right" title={p.name}>{p.code}</TableHead>)}
-            <TableHead className="text-right">Total</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow>
-            <TableCell className="font-medium">Cash Balance</TableCell>
-            {data.map(p => <CashCell key={p.id} portfolio={p} onRefresh={onRefresh} />)}
-            <TableCell className="text-right tabular-nums">{allCashSet ? fmtCurrency(totalCash) : '—'}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="font-medium">Buy Total</TableCell>
-            {data.map(p => <TableCell key={p.id} className="text-right tabular-nums">{p.buy_total > 0 ? fmtCurrency(p.buy_total) : '—'}</TableCell>)}
-            <TableCell className="text-right tabular-nums">{totalBuy > 0 ? fmtCurrency(totalBuy) : '—'}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="font-medium">Sale Total</TableCell>
-            {data.map(p => <TableCell key={p.id} className="text-right tabular-nums">{p.sale_total > 0 ? fmtCurrency(p.sale_total) : '—'}</TableCell>)}
-            <TableCell className="text-right tabular-nums">{totalSale > 0 ? fmtCurrency(totalSale) : '—'}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="font-medium">Cash Invested</TableCell>
-            {data.map(p => <TableCell key={p.id} className="text-right tabular-nums">{fmtCurrency(p.cash_invested)}</TableCell>)}
-            <TableCell className="text-right tabular-nums">{fmtCurrency(totalInv)}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="font-medium">Market Value</TableCell>
-            {data.map(p => <TableCell key={p.id} className="text-right tabular-nums">{p.market_value > 0 ? fmtCurrency(p.market_value) : '—'}</TableCell>)}
-            <TableCell className="text-right tabular-nums">{totalMkt > 0 ? fmtCurrency(totalMkt) : '—'}</TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
+    <div>
+      <div className="overflow-x-auto">
+        <table className="summary-overview-table">
+          <thead>
+            <tr>
+              <th className="summary-th text-left">Portfolio</th>
+              <th className="summary-th text-right">Cash Balance</th>
+              <th className="summary-th text-right">Buy Total</th>
+              <th className="summary-th text-right">Sale Total</th>
+              <th className="summary-th text-right">Cash Invested</th>
+              <th className="summary-th text-right">Market Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map(p => (
+              <tr key={p.id} className="summary-row">
+                <td className="summary-td summary-portfolio-name">
+                  {p.name || p.code}
+                </td>
+                <CashCell portfolio={p} onRefresh={onRefresh} />
+                <td className="summary-td text-right tabular-nums">{p.buy_total > 0 ? fmtCurrency(p.buy_total) : '—'}</td>
+                <td className="summary-td text-right tabular-nums">{p.sale_total > 0 ? fmtCurrency(p.sale_total) : '—'}</td>
+                <td className="summary-td text-right tabular-nums">{fmtCurrency(p.cash_invested)}</td>
+                <td className="summary-td text-right tabular-nums">{p.market_value > 0 ? fmtCurrency(p.market_value) : '—'}</td>
+              </tr>
+            ))}
+            <tr className="summary-total-row">
+              <td className="summary-td summary-total-label">Grand total</td>
+              <td className="summary-td text-right tabular-nums">
+                {allCashSet ? fmtCurrency(totalCash) : '—'}
+              </td>
+              <td className="summary-td text-right tabular-nums">{totalBuy > 0 ? fmtCurrency(totalBuy) : '—'}</td>
+              <td className="summary-td text-right tabular-nums">{totalSale > 0 ? fmtCurrency(totalSale) : '—'}</td>
+              <td className="summary-td text-right tabular-nums">{fmtCurrency(totalInv)}</td>
+              <td className="summary-td text-right tabular-nums">{totalMkt > 0 ? fmtCurrency(totalMkt) : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="px-5 py-3 text-xs text-muted-foreground border-t border-border">
+        Cash Invested = Buy Total − Sale Total. Click a Cash Balance cell to edit inline.
+      </p>
     </div>
   )
 }
 
-function MonthlyACBTable({ data }) {
-  const years  = [...new Set(data.map(d => d.year))].sort((a, b) => a - b).slice(-5)
+function ACBTable({ data }) {
+  const [mode, setMode] = useState('month')
+
+  const now = new Date()
+  const currentYear  = now.getFullYear()
+  const currentMonth = now.getMonth() + 1
+
+  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b).slice(-5)
+
   const lookup = {}
   data.forEach(d => {
     if (!lookup[d.year]) lookup[d.year] = {}
     lookup[d.year][d.month] = d.total_acb
   })
 
+  const isFuture = (year, month) =>
+    year > currentYear || (year === currentYear && month > currentMonth)
+
+  const rows = mode === 'month'
+    ? MONTHS.map((label, i) => ({ label, endMonth: i + 1 }))
+    : QUARTERS.map((label, qi) => ({ label, endMonth: QUARTER_END_MONTHS[qi] }))
+
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead></TableHead>
-            {years.map(y => <TableHead key={y} className="text-right">{y}</TableHead>)}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {MONTHS.map((label, i) => (
-            <TableRow key={label}>
-              <TableCell className="font-medium">{label}</TableCell>
-              {years.map(y => {
-                const v = lookup[y]?.[i + 1]
-                return <TableCell key={y} className="text-right tabular-nums">{v != null ? fmtCurrencyOr(v) : ''}</TableCell>
-              })}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div>
+      <div className="flex items-center justify-end gap-2 px-5 pb-4">
+        <div className="view-toggle">
+          <button
+            className={`view-btn${mode === 'month' ? ' active' : ''}`}
+            onClick={() => setMode('month')}
+          >
+            By month
+          </button>
+          <button
+            className={`view-btn${mode === 'quarter' ? ' active' : ''}`}
+            onClick={() => setMode('quarter')}
+          >
+            By quarter
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="summary-acb-table">
+          <thead>
+            <tr>
+              <th className="summary-th text-left acb-label-col sticky left-0 z-10 bg-muted">
+                {mode === 'month' ? 'Month' : 'Quarter'}
+              </th>
+              {years.map(y => (
+                <th key={y} className="summary-th text-right">{y}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ label, endMonth }) => (
+              <tr key={label} className="summary-row">
+                <td className="summary-td acb-label-col font-medium text-muted-foreground sticky left-0 z-10 bg-card">
+                  {label}
+                </td>
+                {years.map(y => {
+                  if (isFuture(y, endMonth)) {
+                    return <td key={y} className="summary-td text-right text-muted-foreground">—</td>
+                  }
+                  let v = lookup[y]?.[endMonth]
+                  if (v == null && mode === 'quarter') {
+                    for (let m = endMonth - 1; m >= endMonth - 2; m--) {
+                      if (lookup[y]?.[m] != null) { v = lookup[y][m]; break }
+                    }
+                  }
+                  return (
+                    <td key={y} className="summary-td text-right tabular-nums">
+                      {v != null ? fmtCurrencyOr(v) : '—'}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -156,9 +220,13 @@ export default function Summary() {
   const [acb, setAcb]               = useState([])
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState(null)
+  const [updatedAt, setUpdatedAt]   = useState(null)
 
   const loadOverview = () =>
-    fetch('/api/overview').then(r => r.json()).then(setOverview).catch(console.error)
+    fetch('/api/overview')
+      .then(r => r.json())
+      .then(data => { setOverview(data); setUpdatedAt(new Date()) })
+      .catch(console.error)
 
   useEffect(() => {
     loadOverview()
@@ -183,15 +251,9 @@ export default function Summary() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Summary</h1>
-        <Button variant="outline" onClick={refreshAll} disabled={refreshing}>
-          {refreshing ? 'Refreshing…' : 'Refresh All Prices'}
-        </Button>
-      </div>
 
       {refreshMsg && (
-        <div className={`rounded-lg border px-4 py-3 text-sm ${refreshMsg.success ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+        <div className={`rounded-lg border px-4 py-3 text-sm ${refreshMsg.success ? 'status-success' : 'status-error'}`}>
           <strong>{refreshMsg.text}</strong>
           {refreshMsg.errors?.length > 0 && (
             <details className="mt-2">
@@ -202,27 +264,46 @@ export default function Summary() {
         </div>
       )}
 
+      {/* Portfolio Overview */}
       <Card>
-        <CardHeader>
-          <CardTitle>Portfolio Overview</CardTitle>
+        <CardHeader className="border-b px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="summary-eyebrow">Portfolio Overview</p>
+              <h1 className="summary-display-heading">All accounts at a glance</h1>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0 pt-1">
+              {updatedAt && (
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  prices updated {fmtUpdatedTime(updatedAt)}
+                </span>
+              )}
+              <Button size="sm" onClick={refreshAll} disabled={refreshing}>
+                {refreshing ? 'Refreshing…' : '↻ Refresh All Prices'}
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {overview.length === 0
-            ? <p className="text-muted-foreground text-sm px-4 pb-4">Loading…</p>
+            ? <p className="text-muted-foreground text-sm px-5 py-4">Loading…</p>
             : <OverviewTable data={overview} onRefresh={loadOverview} />
           }
         </CardContent>
       </Card>
 
+      {/* ACB Matrix */}
       <Card>
-        <CardHeader>
-          <CardTitle>Book Value of Holdings</CardTitle>
-          <CardDescription>End-of-month cost basis (ACB) across all portfolios</CardDescription>
+        <CardHeader className="border-b px-5 py-4">
+          <div>
+            <p className="summary-eyebrow">Book Value of Holdings</p>
+            <h2 className="summary-section-heading">End-of-month ACB · all portfolios</h2>
+          </div>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 pt-4">
           {acb.length === 0
-            ? <p className="text-muted-foreground text-sm px-4 pb-4">Loading…</p>
-            : <MonthlyACBTable data={acb} />
+            ? <p className="text-muted-foreground text-sm px-5 pb-4">Loading…</p>
+            : <ACBTable data={acb} />
           }
         </CardContent>
       </Card>
