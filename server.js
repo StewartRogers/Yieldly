@@ -724,6 +724,7 @@ function parseCSVLine(line) {
 
 // Helper function to parse date from DD-MMM-YY to YYYY-MM-DD
 function parseDate(dateStr) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
   const months = {
     'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
     'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
