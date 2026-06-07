@@ -1,117 +1,141 @@
 # Yieldly
 
-A local portfolio tracking web application for managing stock investments, dividends, and transaction history.
+Yieldly is a local stock portfolio tracker for managing multiple portfolios, transaction history, dividend income, and basic market data stored in a SQLite database.
 
-## Features
+## What It Does
 
-- 📊 **Multiple Portfolios** - Create and manage multiple portfolios with unique names and codes
-- 💰 **Transaction Tracking** - Record buys, sells, dividends, and dividend reinvestments
-- 📈 **Portfolio Overview** - View holdings, average cost, and dividend totals for each portfolio
-- 📥 **CSV Import** - Bulk import historical transactions from CSV files
-- 🔍 **Transaction History** - Paginated view of all transactions with delete functionality
-- 💾 **Persistent Storage** - SQLite database that survives server restarts
+- Manage multiple portfolios with unique codes and configurable display order
+- Track buys, sells, dividends, dividend reinvestments, contributions, and withdrawals
+- View holdings, average cost, sale totals, dividends paid, and estimated market value
+- Store manual stock details such as market price, dividend yield, sector, and investment type
+- Refresh stock prices and dividend data from TMX for supported tickers
+- Import historical transactions from CSV
+- Keep data locally in SQLite with automatic persistence across restarts
 
 ## Tech Stack
 
-- **Backend**: Node.js + Express
-- **Database**: SQLite (better-sqlite3)
-- **Frontend**: Vanilla HTML, CSS, JavaScript (no build tools required)
+- Backend: Node.js + Express
+- Database: SQLite via `better-sqlite3`
+- Frontend: React app in `client/` for production, with a legacy static UI in `public/` for development
 
-## Installation
+## Requirements
 
-### Prerequisites
+- Node.js 14 or newer
+- npm
 
-- Node.js (v14 or higher)
+## Setup
 
-### Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/yieldly.git
-cd yieldly
-```
-
-2. Install dependencies:
+1. Install dependencies from the repository root:
 ```bash
 npm install
 ```
 
-3. Start the server:
+2. Start the app in development mode:
 ```bash
-npm start
+npm run dev
 ```
 
-4. Open your browser to `http://localhost:3000`
+3. Open `http://localhost:3000`
 
-## Usage
+## Production Build
 
-### Creating a Portfolio
-
-1. Navigate to the **Portfolios** page
-2. Click **+ New Portfolio**
-3. Enter a name (e.g., "Retirement Fund") and code (e.g., "RR")
-4. Click **Create Portfolio**
-
-### Adding Transactions
-
-1. Navigate to the **Transactions** page
-2. Select a portfolio from the dropdown
-3. Fill in transaction details:
-   - **Buy/Sell/Dividend Reinvestment**: Ticker, quantity, price per share, date
-   - **Dividend**: Ticker, total amount, date
-4. Click **Add Transaction**
-
-### Importing CSV Data
-
-1. Navigate to the **Import Data** page
-2. Click **Choose CSV File** and select your file
-3. Click **Import CSV**
-
-**CSV Format:**
+1. Build the client app:
+```bash
+npm run build
 ```
+
+2. Start the server in production mode:
+```bash
+npm run start:prod
+```
+
+## Environment Variables
+
+The app loads `.env` automatically. Optional variables include:
+
+- `ALPHA_KEY` - reserved in the server for market-data integration
+- `NODE_ENV=production` - serves the built client from `client/dist`
+
+## Supported Transaction Types
+
+- `BUY`
+- `SELL`
+- `DIVIDEND`
+- `DIVIDEND_REINVEST`
+- `CONTRIBUTION`
+- `WITHDRAWAL`
+
+Cash-flow transactions use `CASH` as the ticker internally.
+
+## CSV Import
+
+The CSV importer expects a header row and at least these columns:
+
+`Date,Symbol,Portfolio,Type,Quantity,Share Price,Total`
+
+Example:
+
+```csv
 Date,Symbol,Portfolio,Type,Quantity,Share Price,Total
 01-Jan-24,AAPL,RR,B,10,150.00,1500.00
 15-Feb-24,AAPL,RR,D,0,0,25.50
 ```
 
-**Transaction Types:**
-- `B` - Buy
-- `S` - Sell
-- `D` - Dividend
-- `DR` - Dividend Reinvestment
-
-**Date Format:** DD-MMM-YY (e.g., 01-Jan-24, 15-Feb-24)
-
-## Project Structure
-
-```
-yieldly/
-├── database.js          # SQLite database setup and schema
-├── server.js            # Express server and API endpoints
-├── package.json         # Project dependencies
-├── public/
-│   ├── index.html       # Main application UI
-│   ├── style.css        # Styling
-│   ├── app.js           # Client-side JavaScript
-│   └── logo.svg         # Application logo
-└── yieldly.db          # SQLite database (auto-generated)
-```
+Supported type codes for imports depend on the app UI and database mapping. The app currently recognizes the transaction types listed above.
 
 ## API Endpoints
 
 ### Portfolios
-- `GET /api/portfolios` - Get all portfolios
-- `POST /api/portfolios` - Create a new portfolio
+
+- `GET /api/portfolios` - List all portfolios
+- `POST /api/portfolios` - Create a portfolio
+- `PUT /api/portfolios/:id/order` - Update portfolio display order
+- `PUT /api/portfolios/:id/cash-balance` - Set or clear a manual cash balance
 - `DELETE /api/portfolios/:id` - Delete a portfolio
-- `GET /api/portfolios/:id/summary` - Get portfolio holdings summary
-- `GET /api/portfolios/:id/transactions` - Get all transactions for a portfolio
+- `GET /api/portfolios/:id/summary` - Get aggregated holdings for one portfolio
+- `GET /api/portfolios/:id/transactions` - Get all transactions for one portfolio
+- `GET /api/portfolios/:id/transactions/ticker/:ticker` - Get transactions for one ticker
+- `PUT /api/portfolios/:portfolioId/stocks/:ticker` - Update manual stock info
+- `POST /api/portfolios/:portfolioId/refresh-prices` - Refresh TMX quote data for one portfolio
 
 ### Transactions
-- `POST /api/transactions` - Add a new transaction
+
+- `POST /api/transactions` - Add a transaction
 - `DELETE /api/transactions/:id` - Delete a transaction
 
+### Summary and Income
+
+- `GET /api/summary` - Combined holdings across all portfolios
+- `GET /api/overview` - Portfolio overview with cash and market value fields
+- `GET /api/summary/monthly-acb` - Monthly average cost basis trend
+- `GET /api/dividends/monthly` - Monthly dividend totals by portfolio
+
 ### Import
+
 - `POST /api/import/csv` - Import transactions from CSV
+
+### Refresh
+
+- `POST /api/refresh-all-prices` - Refresh TMX quote data for every holding across all portfolios
+
+## Project Structure
+
+```text
+yieldly/
+├── client/              # React frontend used in production builds
+├── public/              # Static development UI
+├── lib/                 # Shared server-side helpers
+├── database.js          # SQLite schema and migrations
+├── server.js            # Express API server
+├── yieldly.db           # Local SQLite database
+└── portfolios.json      # Backup of portfolio metadata
+```
+
+## Notes
+
+- The database is created automatically on first run.
+- Portfolio metadata is backed up to `portfolios.json` so it can be restored if the database is recreated.
+- The app is designed to run locally, not as a hosted multi-user service.
 
 ## License
 
