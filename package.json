@@ -22,7 +22,8 @@
     "express": "^4.18.2"
   },
   "devDependencies": {
-    "concurrently": "^10.0.1"
+    "concurrently": "^10.0.1",
+    "cross-env": "^7.0.3"
   },
   "allowScripts": {
     "better-sqlite3@12.10.0": true

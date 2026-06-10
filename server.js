@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const db = require('./database');
 const { computeHoldings } = require('./lib/compute');
+const { parseCSVLine, parseDate } = require('./lib/parse');
 
 const PORTFOLIOS_BACKUP = path.join(__dirname, 'portfolios.json');
 
@@ -703,48 +704,6 @@ app.post('/api/import/csv', (req, res) => {
   }
 });
 
-function parseCSVLine(line) {
-  const fields = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      fields.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  fields.push(current.trim());
-  return fields;
-}
-
-// Helper function to parse date from DD-MMM-YY to YYYY-MM-DD
-function parseDate(dateStr) {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-  const months = {
-    'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
-    'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
-    'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-  };
-
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return dateStr; // Return as-is if not expected format
-
-  const day = parts[0].padStart(2, '0');
-  const month = months[parts[1]] || '01';
-  let year = parts[2];
-
-  // Convert 2-digit year to 4-digit (assuming 2000s for < 50, 1900s for >= 50)
-  if (year.length === 2) {
-    year = parseInt(year) < 50 ? '20' + year : '19' + year;
-  }
-
-  return `${year}-${month}-${day}`;
-}
 
 // SPA fallback — must come after all API routes
 if (process.env.NODE_ENV === 'production') {
