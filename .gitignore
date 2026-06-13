@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.db
+portfolios.json
 .DS_Store
 .env
 npm-debug.log*
