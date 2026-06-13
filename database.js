@@ -206,6 +206,17 @@ if (txTypeSql && !txTypeSql.sql.includes('CONTRIBUTION')) {
   console.log('Migration complete: CONTRIBUTION/WITHDRAWAL types added.');
 }
 
+// Migration: Add market column to transactions (TMX, NYSE, NASDAQ, etc.)
+const marketColExists = db.prepare(`
+  SELECT COUNT(*) as count FROM pragma_table_info('transactions')
+  WHERE name = 'market'
+`).get();
+if (marketColExists.count === 0) {
+  console.log('Adding market column to transactions...');
+  db.exec(`ALTER TABLE transactions ADD COLUMN market TEXT DEFAULT 'TMX'`);
+  db.exec(`UPDATE transactions SET market = 'TMX' WHERE market IS NULL`);
+}
+
 // Auto-restore portfolios from backup if the DB is fresh (empty portfolios table)
 const portfolioBackupPath = path.join(__dirname, 'portfolios.json');
 const portfolioCount = db.prepare('SELECT COUNT(*) as count FROM portfolios').get();

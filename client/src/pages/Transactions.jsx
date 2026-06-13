@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { fmtCurrency } from '../utils/format'
 import { getPortfolioTransactions, createTransaction, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Trash2 } from 'lucide-react'
 
@@ -63,6 +63,7 @@ function Pager({ page, totalPages, onChange }) {
 export default function Transactions({ portfolios }) {
   const [formPortfolioId, setFormPortfolioId] = useState('')
   const [type, setType]                       = useState('BUY')
+  const [market, setMarket]                   = useState('TMX')
   const [ticker, setTicker]                   = useState('')
   const [quantity, setQuantity]               = useState('')
   const [price, setPrice]                     = useState('')
@@ -111,7 +112,7 @@ export default function Transactions({ portfolios }) {
     const txn = {
       portfolio_id: parseInt(formPortfolioId),
       ticker: isCashFlow ? 'CASH' : ticker.trim().toUpperCase(),
-      type, date,
+      type, date, market,
     }
     if (isCashOnly) {
       txn.quantity = 0; txn.price = 0; txn.total = parseFloat(total)
@@ -126,7 +127,7 @@ export default function Transactions({ portfolios }) {
     try {
       await createTransaction(txn)
       setTicker(''); setQuantity(''); setPrice(''); setTotal('')
-      setCommission(''); setDate(new Date().toISOString().slice(0, 10))
+      setCommission(''); setDate(new Date().toISOString().slice(0, 10)); setMarket('TMX')
       loadAllTxns()
     } catch (err) { alert(err.message) }
   }
@@ -168,8 +169,13 @@ export default function Transactions({ portfolios }) {
             <div className="tc-field">
               <label>Portfolio</label>
               <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
-                <SelectTrigger className="h-9" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
-                  <SelectValue placeholder="Select…" />
+                <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                  {/* base-ui Select.Value shows raw value string, so we render the label ourselves */}
+                  <span className="flex flex-1 text-left text-sm truncate" style={{ color: formPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
+                    {formPortfolioId
+                      ? (() => { const p = portfolios?.find(p => String(p.id) === formPortfolioId); return p ? `${p.code} — ${p.name}` : 'Select…' })()
+                      : 'Select portfolio…'}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {portfolios?.map(p => (
@@ -184,8 +190,8 @@ export default function Transactions({ portfolios }) {
               <Select value={type} onValueChange={v => {
                 setType(v); setTicker(''); setQuantity(''); setPrice(''); setTotal('')
               }}>
-                <SelectTrigger className="h-9" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
-                  <SelectValue />
+                <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                  <span className="flex flex-1 text-left text-sm">{TYPE_LABEL[type] ?? type}</span>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="BUY">Buy</SelectItem>
@@ -199,12 +205,27 @@ export default function Transactions({ portfolios }) {
             </div>
 
             {!isCashOnly && !isCashFlow && (
-              <div className="tc-field">
-                <label>Ticker</label>
-                <Input className="h-9" placeholder="XEI.TO" value={ticker}
-                  style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
-                  onChange={e => setTicker(e.target.value)} required />
-              </div>
+              <>
+                <div className="tc-field">
+                  <label>Ticker</label>
+                  <Input className="h-9" placeholder="XEI.TO" value={ticker}
+                    style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
+                    onChange={e => setTicker(e.target.value)} required />
+                </div>
+                <div className="tc-field">
+                  <label>Market</label>
+                  <Select value={market} onValueChange={setMarket}>
+                    <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                      <span className="flex flex-1 text-left text-sm">{{ TMX: 'TMX (Toronto)', NYSE: 'NYSE (New York)', NASDAQ: 'NASDAQ' }[market] ?? market}</span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="TMX">TMX (Toronto)</SelectItem>
+                      <SelectItem value="NYSE">NYSE (New York)</SelectItem>
+                      <SelectItem value="NASDAQ">NASDAQ</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
             )}
 
             {!isCashOnly && (

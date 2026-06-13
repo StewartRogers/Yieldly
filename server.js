@@ -100,9 +100,6 @@ app.post('/api/portfolios', (req, res) => {
     if (typeof name !== 'string' || name.trim().length === 0 || name.trim().length > 100) {
       return res.status(400).json({ error: 'Name must be 1–100 characters' });
     }
-    if (/[<>"']/.test(name)) {
-      return res.status(400).json({ error: 'Name must not contain < > " \' characters' });
-    }
     if (typeof code !== 'string' || !/^[A-Z0-9]{1,5}$/i.test(code.trim())) {
       return res.status(400).json({ error: 'Code must be 1–5 alphanumeric characters' });
     }
@@ -152,6 +149,24 @@ app.put('/api/portfolios/:id/cash-balance', (req, res) => {
                      .run(value, req.params.id);
     if (result.changes === 0) return res.status(404).json({ error: 'Portfolio not found' });
     res.json({ message: 'Cash balance updated', cash_balance: value });
+  } catch (error) {
+    serverError(res, error);
+  }
+});
+
+// Update portfolio name and/or code
+app.put('/api/portfolios/:id', (req, res) => {
+  try {
+    const { name, code } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+    if (!code || !code.trim()) return res.status(400).json({ error: 'Code is required' });
+    const upperCode = code.trim().toUpperCase();
+    const existing = db.prepare('SELECT id FROM portfolios WHERE code = ? AND id != ?').get(upperCode, req.params.id);
+    if (existing) return res.status(409).json({ error: `Code "${upperCode}" is already in use` });
+    const result = db.prepare('UPDATE portfolios SET name = ?, code = ? WHERE id = ?').run(name.trim(), upperCode, req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Portfolio not found' });
+    backupPortfolios();
+    res.json({ message: 'Portfolio updated', id: Number(req.params.id), name: name.trim(), code: upperCode });
   } catch (error) {
     serverError(res, error);
   }
@@ -207,7 +222,7 @@ app.put('/api/portfolios/:portfolioId/stocks/:ticker', (req, res) => {
   }
 });
 
-// ===== TMX DATA HELPERS =====
+// ===== MARKET DATA HELPERS =====
 
 function normalizeTicker(ticker) {
   return ticker.replace(/\.TO$/i, '').replace(/-/g, '.');
@@ -238,6 +253,70 @@ async function fetchTMXQuote(ticker) {
   return data?.data?.getQuoteBySymbol ?? null;
 }
 
+// Yahoo Finance session (cookie + crumb) — cached in memory, refreshed on 401
+let _yahooSession = null;
+
+async function getYahooSession() {
+  if (_yahooSession) return _yahooSession;
+
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+  // Step 1: hit fc.yahoo.com to get a session cookie
+  const cookieRes = await fetch('https://fc.yahoo.com', {
+    headers: { 'User-Agent': UA },
+    redirect: 'manual',
+  });
+  const rawCookie = cookieRes.headers.get('set-cookie') || '';
+  // Extract the A1 (or first) cookie value
+  const cookie = rawCookie.split(',').map(s => s.trim().split(';')[0]).filter(Boolean).join('; ');
+
+  // Step 2: fetch the crumb using that cookie
+  const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    headers: { 'User-Agent': UA, 'Cookie': cookie },
+  });
+  if (!crumbRes.ok) throw new Error(`Yahoo Finance crumb fetch failed: HTTP ${crumbRes.status}`);
+  const crumb = (await crumbRes.text()).trim();
+  if (!crumb || crumb.includes('<')) throw new Error('Yahoo Finance returned invalid crumb (possibly geo-blocked)');
+
+  _yahooSession = { cookie, crumb, UA };
+  return _yahooSession;
+}
+
+async function fetchYahooQuote(ticker, retry = true) {
+  const { cookie, crumb, UA } = await getYahooSession();
+  const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'application/json' };
+
+  const chartRes = await fetch(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d&crumb=${encodeURIComponent(crumb)}`,
+    { headers }
+  );
+  // Session expired — clear and retry once
+  if ((chartRes.status === 401 || chartRes.status === 403) && retry) {
+    _yahooSession = null;
+    return fetchYahooQuote(ticker, false);
+  }
+  if (!chartRes.ok) throw new Error(`Yahoo Finance HTTP ${chartRes.status} for ${ticker}`);
+  const chartData = await chartRes.json();
+  const price = chartData?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null;
+  if (price === null) throw new Error(`No price data for ${ticker} from Yahoo Finance`);
+
+  // Attempt dividend yield from summaryDetail — optional, best-effort
+  let dividendYield = null;
+  try {
+    const summaryRes = await fetch(
+      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=summaryDetail&crumb=${encodeURIComponent(crumb)}`,
+      { headers }
+    );
+    if (summaryRes.ok) {
+      const summaryData = await summaryRes.json();
+      const raw = summaryData?.quoteSummary?.result?.[0]?.summaryDetail?.dividendYield?.raw;
+      if (raw != null) dividendYield = raw * 100; // Yahoo decimal (0.023) → percent (2.3) to match TMX scale
+    }
+  } catch { /* yield is optional */ }
+
+  return { price, dividendYield };
+}
+
 function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, payDate) {
   db.prepare(`
     INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_yield, last_dividend_date, updated_at)
@@ -251,56 +330,66 @@ function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, payDat
          marketPrice, dividendYield, payDate);
 }
 
-// Refresh prices for one portfolio using TMX
+// Refresh prices for one portfolio, routing TMX vs US stocks to the correct source
 app.post('/api/portfolios/:portfolioId/refresh-prices', async (req, res) => {
   try {
     const portfolioId = req.params.portfolioId;
-    const tickers = db.prepare(`
-      SELECT DISTINCT ticker FROM transactions
+    const holdings = db.prepare(`
+      SELECT ticker,
+        (SELECT market FROM transactions t2
+         WHERE t2.portfolio_id = t.portfolio_id AND t2.ticker = t.ticker AND t2.market IS NOT NULL
+         ORDER BY t2.id DESC LIMIT 1) AS market
+      FROM transactions t
       WHERE portfolio_id = ? AND ticker != 'CASH'
       GROUP BY ticker
       HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
                       WHEN type = 'SELL' THEN -quantity ELSE 0 END) > 0
-    `).all(portfolioId).map(r => r.ticker);
+    `).all(portfolioId);
 
-    if (!tickers.length) return res.json({ message: 'No holdings to update', updated: 0 });
+    if (!holdings.length) return res.json({ message: 'No holdings to update', updated: 0 });
 
     const wait = ms => new Promise(r => setTimeout(r, ms));
     const today = new Date(); today.setHours(0,0,0,0);
     let updated = 0; const errors = [];
 
-    for (let i = 0; i < tickers.length; i++) {
-      const ticker = tickers[i];
+    for (let i = 0; i < holdings.length; i++) {
+      const { ticker, market } = holdings[i];
+      const isUS = market === 'NYSE' || market === 'NASDAQ';
       try {
-        const q = await fetchTMXQuote(ticker);
-        if (!q) { errors.push({ ticker, error: 'No data' }); }
-        else {
-          const price = q.price != null ? parseFloat(q.price) : null;
-          // TMX returns dividendYield as 0–100 percentage (e.g. 5.5 = 5.5%)
+        if (isUS) {
+          const q = await fetchYahooQuote(ticker);
+          upsertStockInfo(portfolioId, ticker, q.price, q.dividendYield, null);
+          console.log(`${ticker} (${market} via Yahoo): $${q.price?.toFixed(2)} yield=${q.dividendYield}%`);
+        } else {
+          const q = await fetchTMXQuote(ticker);
+          if (!q) { errors.push({ ticker, error: 'No data from TMX' }); continue; }
+          const price    = q.price         != null ? parseFloat(q.price)         : null;
           const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
-          const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today
-                           ? q.dividendPayDate : null;
+          const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today ? q.dividendPayDate : null;
           upsertStockInfo(portfolioId, ticker, price, divYield, payDate);
-          console.log(`${ticker}: $${price?.toFixed(2)} yield=${divYield}%`);
-          updated++;
+          console.log(`${ticker} (TMX): $${price?.toFixed(2)} yield=${divYield}%`);
         }
+        updated++;
       } catch (e) { errors.push({ ticker, error: e.message }); }
-      if (i < tickers.length - 1) await wait(300);
+      if (i < holdings.length - 1) await wait(300);
     }
 
-    res.json({ message: `Updated ${updated} of ${tickers.length} stocks`, updated,
-               total: tickers.length, errors: errors.length ? errors : undefined });
+    res.json({ message: `Updated ${updated} of ${holdings.length} stocks`, updated,
+               total: holdings.length, errors: errors.length ? errors : undefined });
   } catch (error) {
     serverError(res, error);
   }
 });
 
-// Refresh prices for ALL portfolios using TMX (fetches each unique ticker once)
+// Refresh prices for ALL portfolios, routing TMX vs US stocks to the correct source
 app.post('/api/refresh-all-prices', async (req, res) => {
   try {
-    // All portfolio_id/ticker combos with current holdings
     const holdings = db.prepare(`
-      SELECT DISTINCT portfolio_id, ticker FROM transactions
+      SELECT DISTINCT portfolio_id, ticker,
+        (SELECT market FROM transactions t2
+         WHERE t2.portfolio_id = t.portfolio_id AND t2.ticker = t.ticker AND t2.market IS NOT NULL
+         ORDER BY t2.id DESC LIMIT 1) AS market
+      FROM transactions t
       WHERE ticker != 'CASH'
       GROUP BY portfolio_id, ticker
       HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
@@ -313,35 +402,50 @@ app.post('/api/refresh-all-prices', async (req, res) => {
     const today = new Date(); today.setHours(0,0,0,0);
     const errors = [];
 
-    // Fetch each unique ticker from TMX once
-    const uniqueTickers = [...new Set(holdings.map(h => h.ticker))];
+    // Fetch each unique ticker once, routed by market
+    const uniqueHoldings = [];
+    const seen = new Set();
+    for (const h of holdings) {
+      if (!seen.has(h.ticker)) { seen.add(h.ticker); uniqueHoldings.push(h); }
+    }
+
     const quotes = {};
-    for (let i = 0; i < uniqueTickers.length; i++) {
-      const ticker = uniqueTickers[i];
+    for (let i = 0; i < uniqueHoldings.length; i++) {
+      const { ticker, market } = uniqueHoldings[i];
+      const isUS = market === 'NYSE' || market === 'NASDAQ';
       try {
-        quotes[ticker] = await fetchTMXQuote(ticker);
-        console.log(`${ticker}: ${JSON.stringify(quotes[ticker])}`);
+        if (isUS) {
+          quotes[ticker] = await fetchYahooQuote(ticker);
+          console.log(`${ticker} (${market} via Yahoo): $${quotes[ticker]?.price?.toFixed(2)}`);
+        } else {
+          quotes[ticker] = await fetchTMXQuote(ticker);
+          console.log(`${ticker} (TMX): $${quotes[ticker]?.price?.toFixed(2)}`);
+        }
       } catch (e) {
         errors.push({ ticker, error: e.message });
         quotes[ticker] = null;
       }
-      if (i < uniqueTickers.length - 1) await wait(300);
+      if (i < uniqueHoldings.length - 1) await wait(300);
     }
 
     // Write to every portfolio that holds each ticker
     let updated = 0;
-    for (const { portfolio_id, ticker } of holdings) {
+    for (const { portfolio_id, ticker, market } of holdings) {
       const q = quotes[ticker];
       if (!q) continue;
-      const price    = q.price         != null ? parseFloat(q.price)         : null;
-      const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
-      const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today
-                       ? q.dividendPayDate : null;
-      upsertStockInfo(portfolio_id, ticker, price, divYield, payDate);
+      const isUS = market === 'NYSE' || market === 'NASDAQ';
+      if (isUS) {
+        upsertStockInfo(portfolio_id, ticker, q.price, q.dividendYield, null);
+      } else {
+        const price    = q.price         != null ? parseFloat(q.price)         : null;
+        const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
+        const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today ? q.dividendPayDate : null;
+        upsertStockInfo(portfolio_id, ticker, price, divYield, payDate);
+      }
       updated++;
     }
 
-    res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueTickers.length} unique tickers)`,
+    res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueHoldings.length} unique tickers)`,
                updated, total: holdings.length, errors: errors.length ? errors : undefined });
   } catch (error) {
     serverError(res, error);
@@ -519,7 +623,7 @@ app.get('/api/overview', (req, res) => {
 // Add a new transaction
 app.post('/api/transactions', (req, res) => {
   try {
-    const { portfolio_id, ticker, type, quantity, price, total, date, commission } = req.body;
+    const { portfolio_id, ticker, type, quantity, price, total, date, commission, market } = req.body;
 
     const isCashFlow = type === 'CONTRIBUTION' || type === 'WITHDRAWAL';
     const finalTicker = (isCashFlow && !ticker) ? 'CASH' : ticker;
@@ -534,11 +638,11 @@ app.post('/api/transactions', (req, res) => {
     const finalPrice = price !== undefined ? price : 0;
 
     const stmt = db.prepare(`
-      INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, commission, date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, commission, date, market)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const result = stmt.run(portfolio_id, finalTicker.toUpperCase(), type.toUpperCase(), finalQuantity, finalPrice, finalTotal, commission || 0, date);
+    const result = stmt.run(portfolio_id, finalTicker.toUpperCase(), type.toUpperCase(), finalQuantity, finalPrice, finalTotal, commission || 0, date, market || 'TMX');
 
     res.json({
       id: result.lastInsertRowid,

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { updateStockInfo } from '../api/client'
 
 export default function StockInfoModal({ holding, portfolioId, onClose, onSaved }) {
@@ -73,7 +73,9 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
                 <label className="text-sm font-medium">Type</label>
                 <Select value={form.investmentType} onValueChange={setVal('investmentType')}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="—" />
+                    <span className="flex flex-1 text-left text-sm" style={{ color: form.investmentType ? undefined : 'var(--tc-muted)' }}>
+                      {({ S: 'S — Stock', E: 'E — ETF/Index', X: 'X — Other' }[form.investmentType]) ?? '—'}
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="S">S — Stock</SelectItem>
@@ -92,7 +94,9 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
                 <label className="text-sm font-medium">Frequency</label>
                 <Select value={form.dividendFrequency} onValueChange={setVal('dividendFrequency')}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="None" />
+                    <span className="flex flex-1 text-left text-sm" style={{ color: form.dividendFrequency ? undefined : 'var(--tc-muted)' }}>
+                      {form.dividendFrequency || 'None'}
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Monthly">Monthly</SelectItem>

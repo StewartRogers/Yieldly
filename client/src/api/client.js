@@ -21,6 +21,9 @@ export const getPortfolios = () =>
 export const createPortfolio = (data) =>
   request('/api/portfolios', { method: 'POST', body: json(data) })
 
+export const updatePortfolio = (id, data) =>
+  request(`/api/portfolios/${id}`, { method: 'PUT', body: json(data) })
+
 export const updatePortfolioOrder = (id, display_order) =>
   request(`/api/portfolios/${id}/order`, { method: 'PUT', body: json({ display_order }) })
 
