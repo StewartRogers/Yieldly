@@ -116,8 +116,8 @@ export default function Import({ onImported }) {
                 <span className="font-medium">{file.name}</span>
                 <span className="ml-2 text-foreground/70">{(file.size / 1024).toFixed(0)} KB</span>
               </div>
-              <Button size="sm" onClick={handleImport} disabled={importing}>
-                {importing ? 'Importing…' : '↑ Import'}
+              <Button size="sm" onClick={handleImport} disabled={importing} className="shrink-0">
+                {importing ? 'Importing…' : 'Import'}
               </Button>
             </div>
           )}
@@ -211,7 +211,7 @@ export default function Import({ onImported }) {
 
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={downloadTemplate}>
-              ↓ Download template
+              Download template
             </Button>
           </div>
         </CardContent>

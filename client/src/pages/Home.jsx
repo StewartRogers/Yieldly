@@ -33,7 +33,7 @@ export default function Home() {
           </p>
           <div className="row" style={{ justifyContent: 'center', marginTop: 28, gap: 12, flexWrap: 'wrap' }}>
             <Button onClick={() => navigate('/summary')}>
-              View Summary →
+              View Summary
             </Button>
             <Button variant="outline" onClick={() => navigate('/portfolios')}>
               Open Portfolios
