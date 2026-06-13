@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import { RefreshCw, Check } from 'lucide-react'
+import { getPortfolios, refreshAllPrices } from './api/client'
 import Home from './pages/Home'
 import Summary from './pages/Summary'
 import Dividends from './pages/Dividends'
@@ -20,10 +21,7 @@ export default function App() {
   const [navRefreshOk,   setNavRefreshOk]   = useState(false)
 
   const loadPortfolios = () =>
-    fetch('/api/portfolios')
-      .then(r => r.json())
-      .then(setPortfolios)
-      .catch(console.error)
+    getPortfolios().then(setPortfolios).catch(console.error)
 
   useEffect(() => { loadPortfolios() }, [])
 
@@ -32,12 +30,10 @@ export default function App() {
     setNavRefreshing(true)
     setNavRefreshOk(false)
     try {
-      const res = await fetch('/api/refresh-all-prices', { method: 'POST' })
-      if (res.ok) {
-        setPricesTick(t => t + 1)
-        setNavRefreshOk(true)
-        setTimeout(() => setNavRefreshOk(false), 2000)
-      }
+      await refreshAllPrices()
+      setPricesTick(t => t + 1)
+      setNavRefreshOk(true)
+      setTimeout(() => setNavRefreshOk(false), 2000)
     } catch {
       /* silent — pages have their own error handling */
     } finally {

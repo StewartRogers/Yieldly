@@ -3,6 +3,7 @@ import { RefreshCw, PenLine } from 'lucide-react'
 import { fmtCurrency, fmtCurrencyOr } from '../utils/format'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { getOverview, getMonthlyAcb, refreshAllPrices, updateCashBalance } from '../api/client'
 
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const QUARTERS = ['Q1','Q2','Q3','Q4']
@@ -30,12 +31,7 @@ function CashCell({ portfolio, onRefresh }) {
     const value = raw === '' ? null : parseFloat(raw.replace(/[$,\s]/g, ''))
     if (raw !== '' && isNaN(value)) { setError('Invalid number'); return }
     try {
-      const res = await fetch(`/api/portfolios/${portfolio.id}/cash-balance`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cash_balance: value })
-      })
-      if (!res.ok) throw new Error((await res.json()).error)
+      await updateCashBalance(portfolio.id, value)
       setEditing(false)
       onRefresh()
     } catch (err) {
@@ -199,15 +195,14 @@ export default function Summary({ pricesTick = 0 }) {
   const [updatedAt, setUpdatedAt]   = useState(null)
 
   const loadOverview = () =>
-    fetch('/api/overview')
-      .then(r => r.json())
+    getOverview()
       .then(data => { setOverview(data); setUpdatedAt(new Date()) })
       .catch(console.error)
 
   /* Initial load + ACB (ACB data doesn't change on price refresh) */
   useEffect(() => {
     loadOverview()
-    fetch('/api/summary/monthly-acb').then(r => r.json()).then(setAcb).catch(console.error)
+    getMonthlyAcb().then(setAcb).catch(console.error)
   }, [])
 
   /* Re-fetch market values when nav refresh fires */
@@ -219,9 +214,7 @@ export default function Summary({ pricesTick = 0 }) {
     setRefreshing(true)
     setRefreshMsg(null)
     try {
-      const res = await fetch('/api/refresh-all-prices', { method: 'POST' })
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
-      const result = await res.json()
+      const result = await refreshAllPrices()
       setRefreshMsg({ success: true, text: result.message, errors: result.errors })
       loadOverview()
     } catch (e) {

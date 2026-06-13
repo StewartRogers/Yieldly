@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { importCsv } from '../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -51,13 +52,7 @@ export default function Import({ onImported }) {
     if (!csvData) return
     setImporting(true); setStatus(null)
     try {
-      const res = await fetch('/api/import/csv', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csvData })
-      })
-      if (!res.ok) throw new Error('Failed to import CSV')
-      const result = await res.json()
+      const result = await importCsv(csvData)
       if (result.imported === 0 && result.errors === 0) {
         setStatus({ type: 'error', imported: 0, errors: 0, details: [] })
       } else {

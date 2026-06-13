@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { fmtCurrency } from '../utils/format'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getTickerTransactions } from '../api/client'
 
 function typeLabel(t) { return t.replace(/_/g, ' ') }
 
@@ -13,8 +14,7 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
   useEffect(() => {
     if (!portfolioId || !ticker) return
     setTxns(null); setSummary(null); setError(null)
-    fetch(`/api/portfolios/${portfolioId}/transactions/ticker/${ticker}`)
-      .then(r => r.json())
+    getTickerTransactions(portfolioId, ticker)
       .then(data => {
         setTxns(data)
         let shares = 0, cost = 0, commission = 0
