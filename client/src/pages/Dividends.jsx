@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getDividendsMonthly } from '../api/client'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -172,10 +173,7 @@ export default function Dividends({ portfolios = [] }) {
   const [selected, setSelected] = useState('ALL')
 
   useEffect(() => {
-    fetch('/api/dividends/monthly')
-      .then(r => r.json())
-      .then(setAllData)
-      .catch(console.error)
+    getDividendsMonthly().then(setAllData).catch(console.error)
   }, [])
 
   const codes = portfolios.length

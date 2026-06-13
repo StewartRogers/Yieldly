@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fmtCurrency } from '../utils/format'
+import { getPortfolioTransactions, createTransaction, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -87,8 +88,7 @@ export default function Transactions({ portfolios }) {
     setLoading(true)
     Promise.all(
       portfolios.map(p =>
-        fetch(`/api/portfolios/${p.id}/transactions`)
-          .then(r => r.json())
+        getPortfolioTransactions(p.id)
           .then(txns => txns.map(t => ({ ...t, _portfolioId: p.id, _portfolioCode: p.code })))
       )
     )
@@ -124,12 +124,7 @@ export default function Transactions({ portfolios }) {
       if (c > 0) txn.commission = c
     }
     try {
-      const res = await fetch('/api/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(txn)
-      })
-      if (!res.ok) throw new Error('Failed to add transaction')
+      await createTransaction(txn)
       setTicker(''); setQuantity(''); setPrice(''); setTotal('')
       setCommission(''); setDate(new Date().toISOString().slice(0, 10))
       loadAllTxns()
@@ -138,7 +133,7 @@ export default function Transactions({ portfolios }) {
 
   const deleteTxn = async (id) => {
     if (!confirm('Delete this transaction?')) return
-    await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
+    await deleteTransaction(id)
     loadAllTxns()
   }
 

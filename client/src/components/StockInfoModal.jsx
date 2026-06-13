@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { updateStockInfo } from '../api/client'
 
 export default function StockInfoModal({ holding, portfolioId, onClose, onSaved }) {
   const [form, setForm] = useState({
@@ -31,19 +32,14 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
     e.preventDefault()
     setSaving(true)
     try {
-      const res = await fetch(`/api/portfolios/${portfolioId}/stocks/${holding.ticker}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          market_price:       parseFloat(form.marketPrice)       || null,
-          dividend_frequency: form.dividendFrequency             || null,
-          dividend_per_share: parseFloat(form.dividendPerShare)  || null,
-          last_dividend_date: form.lastDividendDate              || null,
-          sector:             form.sector                        || null,
-          investment_type:    form.investmentType                || null,
-        })
+      await updateStockInfo(portfolioId, holding.ticker, {
+        market_price:       parseFloat(form.marketPrice)       || null,
+        dividend_frequency: form.dividendFrequency             || null,
+        dividend_per_share: parseFloat(form.dividendPerShare)  || null,
+        last_dividend_date: form.lastDividendDate              || null,
+        sector:             form.sector                        || null,
+        investment_type:    form.investmentType                || null,
       })
-      if (!res.ok) throw new Error('Failed to update')
       onSaved()
       onClose()
     } catch (err) {

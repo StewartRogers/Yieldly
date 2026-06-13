@@ -6,6 +6,7 @@ import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder } from '../api/client'
 
 function HoldingCard({ holding, onEdit, onShowTxns }) {
   const hasMarket = holding.market_price > 0
@@ -95,17 +96,16 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
 
   useEffect(() => {
     if (!selectedId) return
-    fetch(`/api/portfolios/${selectedId}/summary`)
-      .then(r => r.json())
+    getPortfolioSummary(selectedId)
       .then(data => setHoldings(data.filter(h => h.shares > 0.00005)))
       .catch(console.error)
   }, [selectedId])
 
   const reloadHoldings = () => {
     if (!selectedId) return
-    fetch(`/api/portfolios/${selectedId}/summary`)
-      .then(r => r.json())
+    getPortfolioSummary(selectedId)
       .then(data => setHoldings(data.filter(h => h.shares > 0.00005)))
+      .catch(console.error)
   }
 
   /* Re-fetch market values when nav refresh fires */
@@ -113,16 +113,10 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
     if (pricesTick > 0) reloadHoldings()
   }, [pricesTick])
 
-  const createPortfolio = async () => {
+  const handleCreatePortfolio = async () => {
     if (!newName.trim() || !newCode.trim()) return
     try {
-      const res = await fetch('/api/portfolios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), code: newCode.trim() })
-      })
-      if (!res.ok) throw new Error((await res.json()).error)
-      const p = await res.json()
+      const p = await createPortfolio({ name: newName.trim(), code: newCode.trim() })
       setNewName(''); setNewCode('')
       onPortfoliosChange()
       setSelectedId(p.id)
@@ -133,9 +127,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
     if (!selectedId) return
     setRefreshing(true)
     try {
-      const res = await fetch(`/api/portfolios/${selectedId}/refresh-prices`, { method: 'POST' })
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
-      const result = await res.json()
+      const result = await refreshPortfolioPrices(selectedId)
       alert(result.message)
       reloadHoldings()
     } catch (e) { alert(e.message) }
@@ -143,13 +135,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   }
 
   const updateOrder = async (ordered) => {
-    await Promise.all(ordered.map((p, i) =>
-      fetch(`/api/portfolios/${p.id}/order`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ display_order: i + 1 })
-      })
-    ))
+    await Promise.all(ordered.map((p, i) => updatePortfolioOrder(p.id, i + 1)))
   }
 
   const handleDragStart = (e, id) => { dragId.current = id; e.dataTransfer.effectAllowed = 'move' }
@@ -187,7 +173,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
             onChange={e => setNewName(e.target.value)}
             className="h-9 w-36 text-sm"
             style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
-            onKeyDown={e => e.key === 'Enter' && createPortfolio()}
+            onKeyDown={e => e.key === 'Enter' && handleCreatePortfolio()}
           />
           <Input
             placeholder="Code"
@@ -196,11 +182,11 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
             maxLength={5}
             className="h-9 w-20 text-sm"
             style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
-            onKeyDown={e => e.key === 'Enter' && createPortfolio()}
+            onKeyDown={e => e.key === 'Enter' && handleCreatePortfolio()}
           />
           <button
             className="tc-btn primary"
-            onClick={createPortfolio}
+            onClick={handleCreatePortfolio}
             disabled={!newName.trim() || !newCode.trim()}
           >
             + Create
