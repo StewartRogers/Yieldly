@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, LayoutGrid, List, GripVertical } from 'lucide-react'
+import { RefreshCw, LayoutGrid, List, GripVertical, Pencil } from 'lucide-react'
 import { fmtCurrency, fmtCurrencyOr, fmtPct, retClass } from '../utils/format'
 import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder } from '../api/client'
+import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder, updatePortfolio } from '../api/client'
 
 function HoldingCard({ holding, onEdit, onShowTxns }) {
   const hasMarket = holding.market_price > 0
@@ -81,9 +81,15 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   const [view, setView]                       = useState('card')
   const [newName, setNewName]                 = useState('')
   const [newCode, setNewCode]                 = useState('')
+  const [createError, setCreateError]         = useState('')
+  const [editError, setEditError]             = useState('')
+  const [refreshMsg, setRefreshMsg]           = useState('')
   const [refreshing, setRefreshing]           = useState(false)
   const [stockModal, setStockModal]           = useState(null)
   const [txModal, setTxModal]                 = useState(null)
+  const [editing, setEditing]                 = useState(false)
+  const [editName, setEditName]               = useState('')
+  const [editCode, setEditCode]               = useState('')
   const dragId = useRef(null)
 
   useEffect(() => { setLocalPortfolios(portfolios) }, [portfolios])
@@ -115,12 +121,13 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
 
   const handleCreatePortfolio = async () => {
     if (!newName.trim() || !newCode.trim()) return
+    setCreateError('')
     try {
       const p = await createPortfolio({ name: newName.trim(), code: newCode.trim() })
       setNewName(''); setNewCode('')
       onPortfoliosChange()
       setSelectedId(p.id)
-    } catch (e) { alert(e.message) }
+    } catch (e) { setCreateError(e.message) }
   }
 
   const refreshPrices = async () => {
@@ -128,9 +135,10 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
     setRefreshing(true)
     try {
       const result = await refreshPortfolioPrices(selectedId)
-      alert(result.message)
+      setRefreshMsg(result.message)
+      setTimeout(() => setRefreshMsg(''), 4000)
       reloadHoldings()
-    } catch (e) { alert(e.message) }
+    } catch (e) { setRefreshMsg(e.message) }
     finally { setRefreshing(false) }
   }
 
@@ -152,6 +160,24 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
     await updateOrder(reordered)
     onPortfoliosChange()
     dragId.current = null
+  }
+
+  const startEdit = () => {
+    if (!selectedPortfolio) return
+    setEditName(selectedPortfolio.name || '')
+    setEditCode(selectedPortfolio.code || '')
+    setEditing(true)
+  }
+
+  const cancelEdit = () => { setEditing(false); setEditError('') }
+
+  const saveEdit = async () => {
+    setEditError('')
+    try {
+      await updatePortfolio(selectedId, { name: editName, code: editCode })
+      setEditing(false)
+      onPortfoliosChange()
+    } catch (e) { setEditError(e.message) }
   }
 
   const selectedPortfolio = localPortfolios.find(p => p.id === selectedId)
@@ -192,6 +218,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
             + Create
           </button>
         </div>
+        {createError && <p className="text-destructive text-xs" style={{ marginTop: 4 }}>{createError}</p>}
       </div>
 
       {/* ── Account tabs ── */}
@@ -230,14 +257,52 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
             </div>
           </div>
           <div className="row">
-            <span className="muted-txt" style={{ fontSize: 13.5 }}>
-              {selectedPortfolio.name || selectedPortfolio.code} · {holdings.length} holding{holdings.length !== 1 ? 's' : ''}
-              {totalMktValue > 0 && <> · <span className="num">{fmtCurrency(totalMktValue)}</span></>}
-            </span>
-            <button className="tc-btn sm" onClick={refreshPrices} disabled={refreshing}>
-              <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
-              {refreshing ? 'Refreshing…' : 'Refresh Prices'}
-            </button>
+            {editing ? (
+              <>
+                <Input
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  placeholder="Portfolio name"
+                  className="h-7 w-36 text-sm"
+                  style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
+                  onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }}
+                  autoFocus
+                />
+                <Input
+                  value={editCode}
+                  onChange={e => setEditCode(e.target.value.toUpperCase())}
+                  placeholder="Code"
+                  maxLength={5}
+                  className="h-7 w-20 text-sm"
+                  style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
+                  onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }}
+                />
+                <button className="tc-btn sm primary" onClick={saveEdit} disabled={!editName.trim() || !editCode.trim()}>Save</button>
+                <button className="tc-btn sm ghost" onClick={cancelEdit}>Cancel</button>
+                {editError && <span className="text-destructive text-xs">{editError}</span>}
+              </>
+            ) : (
+              <>
+                <span className="muted-txt" style={{ fontSize: 13.5 }}>
+                  {selectedPortfolio.name || selectedPortfolio.code} · {holdings.length} holding{holdings.length !== 1 ? 's' : ''}
+                  {totalMktValue > 0 && <> · <span className="num">{fmtCurrency(totalMktValue)}</span></>}
+                </span>
+                {/* custom: pencil trigger for inline portfolio name/code edit */}
+                <button
+                  className="tc-btn sm ghost"
+                  onClick={startEdit}
+                  title="Edit portfolio name and code"
+                  style={{ padding: '0 6px' }}
+                >
+                  <Pencil size={12} />
+                </button>
+                <button className="tc-btn sm" onClick={refreshPrices} disabled={refreshing}>
+                  <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+                  {refreshing ? 'Refreshing…' : 'Refresh Prices'}
+                </button>
+                {refreshMsg && <span className="text-xs" style={{ color: 'var(--tc-muted)' }}>{refreshMsg}</span>}
+              </>
+            )}
           </div>
         </div>
       )}

@@ -1,13 +1,8 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, PenLine } from 'lucide-react'
-import { fmtCurrency, fmtCurrencyOr } from '../utils/format'
+import { RefreshCw, PenLine, Check } from 'lucide-react'
+import { fmtCurrency } from '../utils/format'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { getOverview, getMonthlyAcb, refreshAllPrices, updateCashBalance } from '../api/client'
-
-const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const QUARTERS = ['Q1','Q2','Q3','Q4']
-const QUARTER_END_MONTHS = [3, 6, 9, 12]
+import { getOverview, refreshAllPrices, updateCashBalance } from '../api/client'
 
 function fmtTime(date) {
   return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })
@@ -43,10 +38,10 @@ function CashCell({ portfolio, onRefresh }) {
     return (
       <td style={{ textAlign: 'right' }}>
         <form className="cash-inline-form" onSubmit={save}>
-          <Input className="h-7 w-28 text-right tabular-nums" type="number" step="0.01"
+          <Input className="h-7 w-28 text-right tabular-nums" type="text" inputMode="decimal"
             value={input} onChange={e => setInput(e.target.value)} placeholder="Amount" autoFocus />
-          <Button type="submit" size="sm" className="h-7 px-2">Save</Button>
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={cancel}>✕</Button>
+          <button type="submit" className="tc-btn sm ghost" title="Save" style={{ padding: '0 6px' }}><Check size={13} /></button>
+          <button type="button" className="tc-btn sm ghost" onClick={cancel} title="Cancel" style={{ padding: '0 6px' }}>✕</button>
           {error && <span className="text-destructive text-xs">{error}</span>}
         </form>
       </td>
@@ -74,10 +69,9 @@ function CashCell({ portfolio, onRefresh }) {
 function OverviewTable({ data, onRefresh }) {
   const allCashSet = data.every(p => p.cash !== null)
   const totalCash  = data.reduce((s, p) => s + (p.cash ?? 0), 0)
-  const totalBuy   = data.reduce((s, p) => s + p.buy_total, 0)
-  const totalSale  = data.reduce((s, p) => s + p.sale_total, 0)
   const totalInv   = data.reduce((s, p) => s + p.cash_invested, 0)
   const totalMkt   = data.reduce((s, p) => s + p.market_value, 0)
+  const totalVal   = totalMkt + totalCash
 
   return (
     <>
@@ -87,30 +81,32 @@ function OverviewTable({ data, onRefresh }) {
             <tr>
               <th>Portfolio</th>
               <th>Cash balance</th>
-              <th>Buy total</th>
-              <th>Sale total</th>
               <th>Cash invested</th>
               <th>Market value</th>
+              <th>Total value</th>
             </tr>
           </thead>
           <tbody>
-            {data.map(p => (
-              <tr key={p.id}>
-                <td>{p.name || p.code}</td>
-                <CashCell portfolio={p} onRefresh={onRefresh} />
-                <td className="num">{p.buy_total > 0 ? fmtCurrency(p.buy_total) : '—'}</td>
-                <td className="num">{p.sale_total > 0 ? fmtCurrency(p.sale_total) : '—'}</td>
-                <td className="num">{fmtCurrency(p.cash_invested)}</td>
-                <td className="num">{p.market_value > 0 ? fmtCurrency(p.market_value) : '—'}</td>
-              </tr>
-            ))}
+            {data.map(p => {
+              const mkt = p.market_value > 0 ? p.market_value : 0
+              const cash = p.cash ?? 0
+              const total = mkt + cash
+              return (
+                <tr key={p.id}>
+                  <td>{p.name || p.code}</td>
+                  <CashCell portfolio={p} onRefresh={onRefresh} />
+                  <td className="num">{fmtCurrency(p.cash_invested)}</td>
+                  <td className="num">{p.market_value > 0 ? fmtCurrency(p.market_value) : '—'}</td>
+                  <td className="num">{p.cash !== null || p.market_value > 0 ? fmtCurrency(total) : '—'}</td>
+                </tr>
+              )
+            })}
             <tr className="total">
               <td>Grand total</td>
               <td className="num">{allCashSet ? fmtCurrency(totalCash) : '—'}</td>
-              <td className="num">{totalBuy > 0 ? fmtCurrency(totalBuy) : '—'}</td>
-              <td className="num">{totalSale > 0 ? fmtCurrency(totalSale) : '—'}</td>
               <td className="num">{fmtCurrency(totalInv)}</td>
               <td className="num">{totalMkt > 0 ? fmtCurrency(totalMkt) : '—'}</td>
+              <td className="num">{allCashSet && totalMkt > 0 ? fmtCurrency(totalVal) : '—'}</td>
             </tr>
           </tbody>
         </table>
@@ -119,77 +115,8 @@ function OverviewTable({ data, onRefresh }) {
   )
 }
 
-function ACBTable({ data, mode, setMode }) {
-  const now = new Date()
-  const currentYear  = now.getFullYear()
-  const currentMonth = now.getMonth() + 1
-
-  const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b).slice(-5)
-
-  const lookup = {}
-  data.forEach(d => {
-    if (!lookup[d.year]) lookup[d.year] = {}
-    lookup[d.year][d.month] = d.total_acb
-  })
-
-  const isFuture = (year, month) =>
-    year > currentYear || (year === currentYear && month > currentMonth)
-
-  const rows = mode === 'month'
-    ? MONTHS.map((label, i) => ({ label, endMonth: i + 1 }))
-    : QUARTERS.map((label, qi) => ({ label, endMonth: QUARTER_END_MONTHS[qi] }))
-
-  return (
-    <div className="tbl-wrap">
-      <table className="tbl matrix">
-        <thead>
-          <tr>
-            <th>{mode === 'month' ? 'Month' : 'Quarter'}</th>
-            {years.map(y => <th key={y}>{y}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(({ label, endMonth }) => (
-            <tr key={label}>
-              <td>{label}</td>
-              {years.map(y => {
-                if (isFuture(y, endMonth)) {
-                  return <td key={y} className="num dim">—</td>
-                }
-                let v = lookup[y]?.[endMonth]
-                if (v == null && mode === 'quarter') {
-                  for (let m = endMonth - 1; m >= endMonth - 2; m--) {
-                    if (lookup[y]?.[m] != null) { v = lookup[y][m]; break }
-                  }
-                }
-                return (
-                  <td key={y} className="num">{v != null ? fmtCurrencyOr(v) : '—'}</td>
-                )
-              })}
-            </tr>
-          ))}
-          <tr className="total">
-            <td>Dec close</td>
-            {years.map(y => {
-              const dec = lookup[y]?.[12]
-              const isThisYear = y === currentYear
-              return (
-                <td key={y} className={`num${dec == null ? ' dim' : ''}`}>
-                  {dec != null ? fmtCurrencyOr(dec) : isThisYear ? 'in progress' : '—'}
-                </td>
-              )
-            })}
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 export default function Summary({ pricesTick = 0 }) {
   const [overview, setOverview]     = useState([])
-  const [acb, setAcb]               = useState([])
-  const [acbMode, setAcbMode]       = useState('month')
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState(null)
   const [updatedAt, setUpdatedAt]   = useState(null)
@@ -202,7 +129,6 @@ export default function Summary({ pricesTick = 0 }) {
   /* Initial load + ACB (ACB data doesn't change on price refresh) */
   useEffect(() => {
     loadOverview()
-    getMonthlyAcb().then(setAcb).catch(console.error)
   }, [])
 
   /* Re-fetch market values when nav refresh fires */
@@ -338,28 +264,6 @@ export default function Summary({ pricesTick = 0 }) {
         <span className="note">Cash invested = Buy total − Sale total</span>
       </div>
 
-      {/* ── ACB matrix ── */}
-      <div className="page-head mt6" style={{ marginBottom: 14 }}>
-        <div>
-          <div className="eyebrow">Book value of holdings</div>
-          <div className="page-title mt2">End-of-month ACB · all portfolios</div>
-        </div>
-        <div className="seg">
-          <button className={acbMode === 'month' ? 'active' : ''} onClick={() => setAcbMode('month')}>
-            By month
-          </button>
-          <button className={acbMode === 'quarter' ? 'active' : ''} onClick={() => setAcbMode('quarter')}>
-            By quarter
-          </button>
-        </div>
-      </div>
-
-      <div className="tc-card">
-        {acb.length === 0
-          ? <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
-          : <ACBTable data={acb} mode={acbMode} setMode={setAcbMode} />
-        }
-      </div>
     </div>
   )
 }
