@@ -23,7 +23,7 @@ function serverError(res, error) {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = 2085;
 const ALPHA_KEY = process.env.ALPHA_KEY;
 
 const HOLDINGS_SQL = `
