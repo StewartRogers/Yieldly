@@ -16,7 +16,7 @@ Yieldly is a local stock portfolio tracker for managing multiple portfolios, tra
 
 - Backend: Node.js + Express
 - Database: SQLite via `better-sqlite3`
-- Frontend: React app in `client/` for production, with a legacy static UI in `public/` for development
+- Frontend: React + Vite app in `client/`
 
 ## Requirements
 
@@ -35,7 +35,7 @@ npm install
 npm run dev
 ```
 
-3. Open `http://localhost:3000`
+3. Open `http://localhost:2080`
 
 ## Production Build
 
@@ -53,7 +53,6 @@ npm run start:prod
 
 The app loads `.env` automatically. Optional variables include:
 
-- `ALPHA_KEY` - reserved in the server for market-data integration
 - `NODE_ENV=production` - serves the built client from `client/dist`
 
 ## Supported Transaction Types
@@ -125,16 +124,17 @@ yieldly/
 ├── client/              # React frontend used in production builds
 ├── public/              # Static development UI
 ├── lib/                 # Shared server-side helpers
-├── database.js          # SQLite schema and migrations
-├── server.js            # Express API server
-├── yieldly.db           # Local SQLite database
-└── portfolios.json      # Backup of portfolio metadata
+├── database.js              # SQLite schema and migrations
+├── server.js                # Express API server
+├── yieldly.db               # Local SQLite database (git-ignored)
+├── portfolios.json          # Auto-generated portfolio backup (git-ignored)
+└── portfolios.example.json  # Example seed file — copy to portfolios.json to pre-seed
 ```
 
 ## Notes
 
 - The database is created automatically on first run.
-- Portfolio metadata is backed up to `portfolios.json` so it can be restored if the database is recreated.
+- Portfolio metadata is backed up to `portfolios.json` (git-ignored) on every write so it can be restored if the database is recreated. Copy `portfolios.example.json` to `portfolios.json` to pre-seed portfolios on a fresh install.
 - The app is designed to run locally, not as a hosted multi-user service.
 
 ## License

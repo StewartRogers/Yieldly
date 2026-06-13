@@ -1,0 +1,12 @@
+[
+  {
+    "name": "My RRSP",
+    "code": "RR",
+    "display_order": 1
+  },
+  {
+    "name": "My TFSA",
+    "code": "TF",
+    "display_order": 2
+  }
+]
