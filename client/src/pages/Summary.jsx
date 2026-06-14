@@ -103,7 +103,12 @@ function OverviewTable({ data, onRefresh }) {
             })}
             <tr className="total">
               <td>Grand total</td>
-              <td className="num">{allCashSet ? fmtCurrency(totalCash) : '—'}</td>
+              <td style={{ textAlign: 'right' }}>
+                <span className="editable num" style={{ cursor: 'default' }}>
+                  {allCashSet ? fmtCurrency(totalCash) : '—'}
+                  <span className="pen" style={{ visibility: 'hidden' }}><PenLine size={10} /></span>
+                </span>
+              </td>
               <td className="num">{fmtCurrency(totalInv)}</td>
               <td className="num">{totalMkt > 0 ? fmtCurrency(totalMkt) : '—'}</td>
               <td className="num">{allCashSet && totalMkt > 0 ? fmtCurrency(totalVal) : '—'}</td>

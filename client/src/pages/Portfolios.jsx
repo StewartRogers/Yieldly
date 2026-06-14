@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, LayoutGrid, List, GripVertical, Pencil } from 'lucide-react'
-import { fmtCurrency, fmtCurrencyOr, fmtPct, retClass } from '../utils/format'
+import { fmtCurrency, fmtCurrencyOr, fmtPrice, fmtPct, retClass } from '../utils/format'
 import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
 import { Input } from '@/components/ui/input'
@@ -13,8 +13,8 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
 
   const kvRows = [
     ['Shares',    holding.shares.toFixed(2)],
-    ['Buy price', fmtCurrency(holding.buy_price)],
-    ['Market',    hasMarket ? fmtCurrency(holding.market_price) : '—'],
+    ['Buy price', fmtPrice(holding.buy_price)],
+    ['Market',    hasMarket ? fmtPrice(holding.market_price) : '—'],
     ['Mkt total', hasMarket ? fmtCurrency(holding.market_value) : '—'],
     holding.sale_total > 0 ? ['Sale total', fmtCurrency(holding.sale_total)] : null,
     ['Div paid',  fmtCurrencyOr(holding.dividends_paid)],
@@ -362,9 +362,9 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                       )}
                     </td>
                     <td className="num">{h.shares.toFixed(4)}</td>
-                    <td className="num">{fmtCurrency(h.buy_price)}</td>
-                    <td className="num">{h.market_price > 0 ? fmtCurrency(h.market_price) : '—'}</td>
-                    <td className="num">{fmtCurrency(h.buy_total)}</td>
+                    <td className="num">{fmtPrice(h.buy_price)}</td>
+                    <td className="num">{h.market_price > 0 ? fmtPrice(h.market_price) : '—'}</td>
+                    <td className="num">{fmtCurrency(h.buy_price * h.shares)}</td>
                     <td className="num">{h.market_price > 0 ? fmtCurrency(h.market_value) : '—'}</td>
                     <td className="num">{fmtCurrencyOr(h.dividends_paid)}</td>
                     <td className="num">{h.market_price > 0 && h.dividend_yield > 0 ? fmtPct(h.dividend_yield) : '—'}</td>
@@ -388,7 +388,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                     <td></td>
                     <td></td>
                     <td></td>
-                    <td className="num">{fmtCurrency(holdings.reduce((s, h) => s + h.buy_total, 0))}</td>
+                    <td className="num">{fmtCurrency(holdings.reduce((s, h) => s + h.buy_price * h.shares, 0))}</td>
                     <td className="num">{totalMktValue > 0 ? fmtCurrency(totalMktValue) : '—'}</td>
                     <td className="num">{fmtCurrencyOr(holdings.reduce((s, h) => s + (h.dividends_paid || 0), 0))}</td>
                     <td></td>
