@@ -30,7 +30,7 @@ const TYPE_LABEL = {
 
 const FIELD_LABEL = 'text-[11px] font-semibold uppercase tracking-[.08em] text-foreground/60'
 
-function Pager({ page, totalPages, onChange }) {
+function Pager({ page, totalPages, totalCount, onChange }) {
   if (totalPages <= 1) return null
   const pages = []
   if (totalPages <= 7) {
@@ -45,7 +45,7 @@ function Pager({ page, totalPages, onChange }) {
   return (
     <div className="row between" style={{ padding: '14px 20px' }}>
       <span className="muted-txt" style={{ fontSize: 12.5 }}>
-        Showing <span className="num">{(page-1)*PER_PAGE+1}–{Math.min(page*PER_PAGE, totalPages*PER_PAGE)}</span>
+        Showing <span className="num">{(page-1)*PER_PAGE+1}–{Math.min(page*PER_PAGE, totalCount)}</span>
       </span>
       <div className="pager">
         <button onClick={() => onChange(page-1)} disabled={page===1}>‹</button>
@@ -376,7 +376,7 @@ export default function Transactions({ portfolios }) {
                   </tbody>
                 </table>
               </div>
-              <Pager page={page} totalPages={totalPages} onChange={setPage} />
+              <Pager page={page} totalPages={totalPages} totalCount={filteredTxns.length} onChange={setPage} />
             </>
           )}
         </div>
