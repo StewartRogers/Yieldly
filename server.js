@@ -598,9 +598,9 @@ app.get('/api/overview', (req, res) => {
         mktValById[pid]    = (mktValById[pid]    || 0) + h.market_value;
         buyTotalById[pid]  = (buyTotalById[pid]  || 0) + h.buy_total;
         saleTotalById[pid] = (saleTotalById[pid] || 0) + h.sale_total;
-        // Cash invested: net cash deployed into currently-held positions (buy - sale for shares > 0)
+        // Cash invested: cost basis of currently-held shares (avg buy price × shares held)
         if (h.shares > 0) {
-          investedById[pid] = (investedById[pid] || 0) + h.buy_total - h.sale_total;
+          investedById[pid] = (investedById[pid] || 0) + h.buy_price * h.shares;
         }
       }
     });
