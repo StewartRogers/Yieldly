@@ -66,11 +66,8 @@ function CashCell({ portfolio, onRefresh }) {
   )
 }
 
-function OverviewTable({ data, onRefresh }) {
+function OverviewTable({ data, onRefresh, totalCash, totalInv, totalMkt }) {
   const allCashSet = data.every(p => p.cash !== null)
-  const totalCash  = data.reduce((s, p) => s + (p.cash ?? 0), 0)
-  const totalInv   = data.reduce((s, p) => s + p.cash_invested, 0)
-  const totalMkt   = data.reduce((s, p) => s + p.market_value, 0)
   const totalVal   = totalMkt + totalCash
 
   return (
@@ -260,7 +257,7 @@ export default function Summary({ pricesTick = 0 }) {
         </div>
         {overview.length === 0
           ? <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
-          : <OverviewTable data={overview} onRefresh={loadOverview} />
+          : <OverviewTable data={overview} onRefresh={loadOverview} totalCash={totalCash} totalInv={totalInvested} totalMkt={totalMkt} />
         }
       </div>
 
