@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { fmtCurrency } from '../utils/format'
 import { getPortfolioTransactions, createTransaction, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
@@ -60,6 +60,83 @@ function Pager({ page, totalPages, totalCount, onChange }) {
   )
 }
 
+/* custom: shadcn Select can't do free-text typeahead — hand-rolled combobox styled with TC tokens */
+function TickerCombobox({ value, options, onChange, placeholder, required }) {
+  const [open, setOpen]           = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  const wrapRef                   = useRef(null)
+
+  const matches = (value ? options.filter(t => t.includes(value) && t !== value) : options)
+  const showList = open && matches.length > 0
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const choose = t => { onChange(t); setOpen(false) }
+
+  const onKeyDown = e => {
+    if (!showList) {
+      if (e.key === 'ArrowDown' && matches.length) { setOpen(true); setHighlight(0); e.preventDefault() }
+      return
+    }
+    if (e.key === 'ArrowDown')      { setHighlight(h => Math.min(h + 1, matches.length - 1)); e.preventDefault() }
+    else if (e.key === 'ArrowUp')   { setHighlight(h => Math.max(h - 1, 0)); e.preventDefault() }
+    else if (e.key === 'Enter')     { choose(matches[highlight]); e.preventDefault() }
+    else if (e.key === 'Escape')    { setOpen(false) }
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <Input
+        className="h-9"
+        placeholder={placeholder}
+        value={value}
+        style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
+        onChange={e => { onChange(e.target.value.toUpperCase()); setOpen(true); setHighlight(0) }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        autoComplete="off"
+        required={required}
+        role="combobox"
+        aria-expanded={showList}
+        aria-autocomplete="list"
+      />
+      {showList && (
+        <ul
+          role="listbox"
+          style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 50,
+            maxHeight: 200, overflowY: 'auto', margin: 0, padding: 4, listStyle: 'none',
+            background: 'var(--panel)', border: '1px solid var(--line-2)', borderRadius: 8,
+            boxShadow: 'var(--shadow-md)',
+          }}
+        >
+          {matches.map((t, i) => (
+            <li
+              key={t}
+              role="option"
+              aria-selected={i === highlight}
+              onMouseDown={e => { e.preventDefault(); choose(t) }}
+              onMouseEnter={() => setHighlight(i)}
+              style={{
+                padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                color: 'var(--ink)',
+                background: i === highlight ? 'var(--panel-2)' : 'transparent',
+              }}
+            >
+              {t}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function Transactions({ portfolios }) {
   const [formPortfolioId, setFormPortfolioId] = useState('')
   const [type, setType]                       = useState('BUY')
@@ -77,6 +154,18 @@ export default function Transactions({ portfolios }) {
 
   const isCashOnly = CASH_ONLY_TYPES.has(type)
   const isCashFlow = CASH_FLOW_TYPES.has(type)
+
+  // Tickers acquired in the selected portfolio — drives autocomplete + non-Buy validation
+  const ownedTickers = useMemo(() => {
+    if (!formPortfolioId) return []
+    const pid = parseInt(formPortfolioId)
+    const set = new Set()
+    for (const t of allTxns) {
+      if (t._portfolioId !== pid || t.ticker === 'CASH') continue
+      if (t.type === 'BUY' || t.type === 'DIVIDEND_REINVEST') set.add(t.ticker)
+    }
+    return [...set].sort()
+  }, [allTxns, formPortfolioId])
 
   useEffect(() => {
     const q = parseFloat(quantity) || 0
@@ -109,6 +198,14 @@ export default function Transactions({ portfolios }) {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!formPortfolioId) { alert('Select a portfolio'); return }
+    // Non-Buy ticketed transactions must reference a stock already held in this portfolio
+    if (!isCashFlow && type !== 'BUY') {
+      const tk = ticker.trim().toUpperCase()
+      if (!ownedTickers.includes(tk)) {
+        alert(`You don't own ${tk || 'that stock'} in this portfolio. Add a Buy transaction first, or pick an existing holding.`)
+        return
+      }
+    }
     const txn = {
       portfolio_id: parseInt(formPortfolioId),
       ticker: isCashFlow ? 'CASH' : ticker.trim().toUpperCase(),
@@ -204,13 +301,17 @@ export default function Transactions({ portfolios }) {
               </Select>
             </div>
 
-            {!isCashOnly && !isCashFlow && (
+            {!isCashFlow && (
               <>
                 <div className="tc-field">
                   <label>Ticker</label>
-                  <Input className="h-9" placeholder="XEI.TO" value={ticker}
-                    style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
-                    onChange={e => setTicker(e.target.value)} required />
+                  <TickerCombobox
+                    value={ticker}
+                    options={ownedTickers}
+                    onChange={setTicker}
+                    placeholder="XEI.TO"
+                    required
+                  />
                 </div>
                 <div className="tc-field">
                   <label>Market</label>
