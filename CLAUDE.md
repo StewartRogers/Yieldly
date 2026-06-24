@@ -22,9 +22,12 @@ npm run build
 
 # Production server (serves built client as static files)
 npm run start:prod
+
+# Backend math test suite (in-memory SQLite, no server needed)
+node test.js
 ```
 
-No test runner is configured. There is no single-test command.
+`test.js` is the only test suite: 30 numbered scenarios (~107 assertions) validating `lib/compute.js` against an in-memory SQLite DB via a hand-rolled `check()`/`checkEq()` harness (no Jest/Mocha). It is a flat script with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios in the file. Playwright is installed under `client/` but no E2E tests or config exist yet.
 
 ## Ports
 
@@ -57,6 +60,24 @@ This is a local single-user portfolio tracker with no authentication.
 - Global state in `App.jsx`: `portfolios` list and `pricesTick` counter. Pages receive these as props. When `pricesTick` increments (after a price refresh), price-sensitive pages re-fetch via `useEffect([pricesTick])`.
 - Styling uses Tailwind v4 + a custom design system with CSS custom properties (`--ink`, `--inset`, `--line-2`, etc.). Shadcn/ui components live in `client/src/components/ui/`.
 - `client/src/utils/format.js` — shared currency/percentage formatters used across all pages.
+
+## Financial correctness
+
+The money math is the heart of this app, and several rules are non-obvious and easy to break:
+- **ACB** includes buy commissions; `buy_price` (avg share price) excludes them. After a partial sell, ACB is prorated: `(buyTotal + buyExpense) × (shares / sharesBought)`.
+- **Return %** uses ACB as the denominator, not all-time buy cost.
+- **Dividends have two mutually exclusive paths** in `computeHoldings`: yield-first (when `stock_info.dividend_yield > 0` and market value > 0) vs per-share fallback. Don't blend them.
+- `DIVIDEND` (cash) accumulates `dividends_paid`; `DIVIDEND_REINVEST` instead adds shares and buy cost. `cash_balance` is a **manual** field — cash-flow transactions do not update it.
+- The holdings query filters `HAVING shares > 0`, so fully-sold positions never appear in `/summary` or `/overview`.
+
+Run `node test.js` after touching `lib/compute.js` or the `HOLDINGS_SQL` aggregation in `server.js`.
+
+## Project skills
+
+Invoke these on demand (`/<name>`); they are not automatic:
+- `/finance-auditor` — audits the math and reconciles portfolio totals against the live DB.
+- `/test-engineer` — creates/updates tests following the `test.js` conventions.
+- `/ui-design` — see below.
 
 ## UI Work
 

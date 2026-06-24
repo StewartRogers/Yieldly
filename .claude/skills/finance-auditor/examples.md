@@ -35,6 +35,67 @@ for (const h of holdings) {
 }
 ```
 
+## Independent raw-transaction re-sum (Invariant 9)
+
+The other invariants recompute from `HOLDINGS_SQL`'s own `SUM(CASE…)` output, so they can't catch a bug in that SQL. This one re-sums the **raw ledger** in plain JS and compares — it's the only source-of-truth check. Run it every time.
+
+```js
+const txByKey = {}; // "pid|ticker" -> raw transaction rows
+for (const t of db.prepare('SELECT * FROM transactions').all())
+  (txByKey[`${t.portfolio_id}|${t.ticker}`] ??= []).push(t);
+
+for (const h of holdings) {
+  const pid = pidByCode[h.portfolio_code];
+  const tx = txByKey[`${pid}|${h.ticker}`] || [];
+  const isBuy = t => t.type === 'BUY' || t.type === 'DIVIDEND_REINVEST';
+  const sum = (f, p) => tx.filter(p).reduce((a, t) => a + (f(t) || 0), 0);
+
+  const expect = {
+    buy_total:      sum(t => t.total, isBuy),
+    sale_total:     sum(t => t.total, t => t.type === 'SELL'),
+    dividends_paid: sum(t => t.total, t => t.type === 'DIVIDEND'),
+    buy_expense:    sum(t => t.commission, isBuy),
+    sale_expense:   sum(t => t.commission, t => t.type === 'SELL'),
+  };
+  for (const [k, v] of Object.entries(expect))
+    if (!close(v, h[k]))
+      console.log(`CRITICAL ${h.portfolio_code}/${h.ticker}: ${k} SQL=${h[k]} ledger=${v} (Δ ${(h[k]-v).toFixed(4)})`);
+}
+```
+
+## Running-balance oversell (Invariant 10)
+
+Invariant 1 only checks the net `shares ≥ 0`, and `HAVING shares > 0` hides closed positions — so a SELL recorded before its shares existed is invisible. Walk the balance chronologically instead.
+
+```js
+for (const k of db.prepare('SELECT DISTINCT portfolio_id, ticker FROM transactions').all()) {
+  const tx = db.prepare('SELECT date, type, quantity FROM transactions WHERE portfolio_id=? AND ticker=? ORDER BY date, id').all(k.portfolio_id, k.ticker);
+  let bal = 0, worst = 0, worstDate = null;
+  for (const t of tx) {
+    if (t.type === 'BUY' || t.type === 'DIVIDEND_REINVEST') bal += t.quantity;
+    else if (t.type === 'SELL') bal -= t.quantity;
+    if (bal < worst) { worst = bal; worstDate = t.date; }
+  }
+  if (worst < -EPS) // HIGH, not Critical — may be a same-day BUY/SELL ordering artifact
+    console.log(`HIGH ${k.ticker}: running balance hit ${worst} on ${worstDate}, final=${bal}`);
+}
+```
+
+✅ Note the caveat in the finding: same-date rows are tie-broken by `id`, so a one-day dip that recovers may be ordering, not corruption. State the date and the final balance.
+
+## Data-quality screen (Invariant 11)
+
+```js
+const neg = db.prepare('SELECT COUNT(*) c FROM transactions WHERE quantity<0 OR price<0 OR total<0').get().c;
+const future = db.prepare('SELECT COUNT(*) c FROM transactions WHERE date > ?').get(TODAY).c; // TODAY = 'YYYY-MM-DD'
+const dups = db.prepare(`SELECT portfolio_id,ticker,type,quantity,price,total,date,COUNT(*) n
+  FROM transactions GROUP BY portfolio_id,ticker,type,quantity,price,total,date HAVING n>1`).all();
+// Held positions silently valued at 0 because stock_info.market_price is missing:
+const missingPrice = holdings.filter(h => h.shares > 0 && (!rawByKey[`${h.portfolio_code}|${h.ticker}`].market_price));
+```
+
+Negatives / future dates / duplicates are **High**; a missing price on a held position is **Medium** (stale data, not wrong math).
+
 ## Float comparison
 
 ✅ Compare money with a one-cent tolerance:
