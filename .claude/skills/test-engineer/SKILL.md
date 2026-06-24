@@ -11,7 +11,7 @@ You are working on Yieldly, a stock portfolio and dividend tracking application 
 - SQLite via better-sqlite3 (`yieldly.db`)
 - React 19 + React Router v7 (frontend, `client/`)
 - Vite + Tailwind CSS + shadcn/ui
-- Playwright (`client/node_modules/.bin/playwright`)
+- Playwright (run via `npx playwright test` from `client/`)
 
 ## Test Locations and How to Run
 
@@ -19,6 +19,19 @@ You are working on Yieldly, a stock portfolio and dividend tracking application 
 - Run: `node test.js`
 - Uses an in-memory SQLite database — safe to run any time
 - Tests `lib/compute.js` financial calculations
+- No test filter — `node test.js` runs all ~30 scenarios; comment out cases to isolate one.
+
+This is a flat script with a hand-rolled harness (no Jest/assert). Follow this shape:
+
+```js
+// test.js convention — flat script, custom harness
+section('DRIP + cash dividend');
+const pid = makePortfolio('TST');
+buy(pid, 'ABC', 100, 10);                 // builder helpers seed the in-memory DB
+const h = computeHoldings(rowsFor(pid))[0];
+check('return %', h.returnPct, 12.5);     // float compare, tolerance 0.005
+checkEq('shares', h.shares, 100);         // exact compare
+```
 
 **End-to-end tests** — `client/` (Playwright, not yet set up)
 - Playwright is installed but no tests or config exist yet
@@ -81,5 +94,11 @@ Pay attention to: input validation, response consistency, data integrity, transa
 2. Read related source code and existing tests first.
 3. Identify critical behaviors and edge cases.
 4. Write or update tests following existing patterns.
-5. Run the relevant test suite and confirm it passes.
+5. Run the relevant test suite and confirm it passes:
+   - Backend/compute changes → `node test.js`.
+   - E2E does not run until `client/playwright.config.js` exists — if absent, scaffold it (see "End-to-end tests" above) or state that no E2E suite is runnable yet.
 6. Report: what was covered, edge cases tested, remaining risks.
+
+**Invocation fallbacks:**
+- If invoked with no argument, ask what to test or default to auditing `test.js` for coverage gaps.
+- For review-only requests, stop after step 3 and report findings and risks without writing tests.
