@@ -811,6 +811,44 @@ section('35. Negative Return %');
   check('return_percent ≈ -39.92%',   h.return_percent,    -39.9202, 0.001);
 }
 
+// ── 36. Zero-Cost Position → Return % Guards Against $0 ACB ───────────────────
+section('36. Zero-Cost ACB → Return % = 0');
+{
+  const pid = makePortfolio('T36');
+  buy(pid, 'FREE.TO', 100, 0.00);   // 100 shares at $0 (e.g. share grant) → ACB = 0
+
+  setInfo(pid, 'FREE.TO', { market_price: 5.00 });
+  const [h] = getHoldings(pid);
+
+  // acb = (0 + 0) × 100/100 = 0
+  // market_value = 100 × 5 = 500 ; return = 500 + 0 + 0 - 0 = 500
+  // return_percent is guarded to 0 because acb is not > 0 (no div-by-zero)
+  check('shares = 100',                    h.shares,         100);
+  check('acb = $0',                        h.acb,              0);
+  check('market_value = $500',             h.market_value,   500);
+  check('return = $500',                   h.return,         500);
+  check('return_percent = 0 (acb guard)',  h.return_percent,   0);
+}
+
+// ── 37. Defensive Defaults — Sparse Row Passed Directly to computeHoldings ─────
+section('37. Defensive Defaults for Sparse Rows');
+{
+  // computeHoldings is a pure function reused by /summary and /overview.
+  // A row missing every optional field must not throw and must collapse
+  // to safe zeros/empty strings (no NaN, no undefined leaking through).
+  const [h] = computeHoldings([{ ticker: 'SPARSE.TO' }]);
+
+  checkEq('ticker preserved',                 h.ticker,         'SPARSE.TO');
+  check('shares default 0',                   h.shares,           0);
+  check('buy_total default 0',                h.buy_total,        0);
+  check('acb default 0 (no shares_bought)',   h.acb,              0);
+  check('buy_price default 0',                h.buy_price,        0);
+  check('return_percent default 0',           h.return_percent,   0);
+  checkEq('portfolio_code default ""',        h.portfolio_code,  '');
+  checkEq('portfolio_name default ""',        h.portfolio_name,  '');
+  checkEq('buy_count default 0',              h.buy_count,        0);
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 const total = passed + failed;

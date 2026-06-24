@@ -24,10 +24,13 @@ npm run build
 npm run start:prod
 
 # Backend math test suite (in-memory SQLite, no server needed)
-node test.js
+node test.js          # or: npm test
+
+# Same suite with branch/line coverage of lib/compute.js (text + HTML report)
+npm run coverage
 ```
 
-`test.js` is the only test suite: 30 numbered scenarios (~107 assertions) validating `lib/compute.js` against an in-memory SQLite DB via a hand-rolled `check()`/`checkEq()` harness (no Jest/Mocha). It is a flat script with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios in the file. Playwright is installed under `client/` but no E2E tests or config exist yet.
+`test.js` is the only test suite: 37 numbered scenarios (~141 assertions) validating `lib/compute.js` against an in-memory SQLite DB via a hand-rolled `check()`/`checkEq()` harness (no Jest/Mocha). It is a flat script with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios in the file. Coverage is via `c8` (V8 coverage, no source changes); `lib/compute.js` is at 100% statements/branches/lines and the HTML report lands in `coverage/`. Playwright is installed under `client/` but no E2E tests or config exist yet.
 
 ## Ports
 
