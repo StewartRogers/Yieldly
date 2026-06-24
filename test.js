@@ -11,8 +11,14 @@
 
 const Database = require('better-sqlite3');
 const { computeHoldings } = require('./lib/compute');
+const { HOLDINGS_SQL, GROUP_ORDER } = require('./lib/holdings');
 
-// ─── In-memory database setup ────────────────────────────────────────────────
+// ─── In-memory database ──────────────────────────────────────────────────────
+// These suites validate the money math, which is driver-agnostic, so they run
+// synchronously on better-sqlite3 (a devDependency) for a tight, await-free
+// harness. The aggregation SQL is imported from lib/holdings.js (single source
+// of truth); production data access runs on async libSQL (see database.js).
+// The real async schema + app are exercised by test-auth.js.
 
 const db = new Database(':memory:');
 
@@ -97,38 +103,10 @@ function setInfo(pid, ticker, fields) {
   `).run(...keys.map(k => fields[k]));
 }
 
-// ─── Holdings query (mirrors server.js parameterized statements) ─────────────
+// ─── Holdings query (SQL shared with the server via lib/holdings.js) ─────────
 
-const HOLDINGS_SQL = `
-    SELECT
-      p.code AS portfolio_code, p.name AS portfolio_name, t.ticker,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity
-               WHEN t.type = 'SELL' THEN -t.quantity ELSE 0 END) AS shares,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END) AS shares_bought,
-      SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END) AS shares_sold,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.total ELSE 0 END) AS buy_total,
-      SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) AS sale_total,
-      SUM(CASE WHEN t.type = 'DIVIDEND' THEN t.total ELSE 0 END) AS dividends_paid,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.total ELSE 0 END) /
-        NULLIF(SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END), 0) AS buy_price,
-      SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) /
-        NULLIF(SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END), 0) AS sale_price,
-      COUNT(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN 1 END) AS buy_count,
-      COUNT(CASE WHEN t.type = 'SELL' THEN 1 END) AS sell_count,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN COALESCE(t.commission,0) ELSE 0 END) AS buy_expense,
-      SUM(CASE WHEN t.type = 'SELL' THEN COALESCE(t.commission,0) ELSE 0 END) AS sale_expense,
-      s.market_price, s.dividend_yield, s.dividend_frequency,
-      s.dividend_per_share, s.last_dividend_date, s.sector, s.investment_type
-    FROM transactions t
-    JOIN portfolios p ON t.portfolio_id = p.id
-    LEFT JOIN stock_info s ON s.portfolio_id = t.portfolio_id AND s.ticker = t.ticker`;
-
-const holdingsAllStmt = db.prepare(
-  `${HOLDINGS_SQL} GROUP BY t.portfolio_id, t.ticker HAVING shares > 0 ORDER BY p.code, t.ticker`
-);
-const holdingsByPortfolioStmt = db.prepare(
-  `${HOLDINGS_SQL} WHERE t.portfolio_id = ? GROUP BY t.portfolio_id, t.ticker HAVING shares > 0 ORDER BY p.code, t.ticker`
-);
+const holdingsAllStmt = db.prepare(`${HOLDINGS_SQL} ${GROUP_ORDER}`);
+const holdingsByPortfolioStmt = db.prepare(`${HOLDINGS_SQL} WHERE t.portfolio_id = ? ${GROUP_ORDER}`);
 
 function query(portfolioId) {
   return portfolioId ? holdingsByPortfolioStmt.all(portfolioId) : holdingsAllStmt.all();

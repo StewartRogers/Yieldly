@@ -15,12 +15,13 @@ Yieldly is a local stock portfolio tracker for managing multiple portfolios, tra
 ## Tech Stack
 
 - Backend: Node.js + Express
-- Database: SQLite via `better-sqlite3`
+- Database: libSQL via `@libsql/client` — a local `file:` SQLite database in development, or hosted [Turso](https://turso.tech) in production
+- Auth: stateless JWT in an httpOnly cookie
 - Frontend: React + Vite app in `client/`
 
 ## Requirements
 
-- Node.js 14 or newer
+- Node.js 18 or newer
 - npm
 
 ## Setup
@@ -51,7 +52,7 @@ If you forget your password, reset it from the command line:
 ```bash
 npm run user:reset-password
 ```
-This invalidates all active sessions.
+(Auth is stateless JWT, so this changes the password but does not retroactively revoke tokens already issued to other devices — they expire on their own.)
 
 ## Production Build
 
@@ -69,9 +70,34 @@ npm run start:prod
 
 The app loads `.env` automatically. Copy `.env.example` to `.env` to get started.
 
-- `NODE_ENV=production` - serves the built client from `client/dist`
-- `SESSION_SECRET` - secret key for signing session cookies (required for production — without it, sessions are lost on server restart)
+- `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` - hosted Turso database. **Omit both for local dev** — the app falls back to a local `file:yieldly.db`.
+- `SESSION_SECRET` - secret key used to sign JWT auth tokens (required in production — `server.js` / the Vercel function refuse to start without it). Generate with `openssl rand -hex 32`.
+- `NODE_ENV=production` - serves the built client from `client/dist` (local production mode)
 - `TRUST_PROXY=1` - set when running behind a reverse proxy with HTTPS (enables secure cookies)
+- `DEBUG_IMPORT=1` - log per-row detail during CSV import
+
+## Deploying to Vercel + Turso
+
+The same codebase runs on a local SQLite file in dev and on Turso when hosted — switched purely by environment.
+
+1. **Create a Turso database** ([turso.tech](https://turso.tech)) and grab its URL + auth token:
+   ```bash
+   turso db create yieldly
+   turso db show yieldly --url
+   turso db tokens create yieldly
+   ```
+2. **Set Vercel environment variables** (Project → Settings → Environment Variables): `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `SESSION_SECRET`.
+3. **Apply the schema** once to the new database:
+   ```bash
+   TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run db:migrate
+   ```
+4. **Create the superuser** against Turso (or use the in-app setup screen on first load):
+   ```bash
+   TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run user:create
+   ```
+5. **Deploy**: `vercel --prod` (or connect the repo). `vercel.json` builds the client to `client/dist`, routes `/api/*` to the serverless function in `api/index.js`, and serves the SPA.
+
+To migrate existing local data into Turso, dump `yieldly.db` and import it with the Turso CLI (`turso db shell yieldly < dump.sql`).
 
 ## Supported Transaction Types
 
@@ -102,7 +128,7 @@ Supported type codes for imports depend on the app UI and database mapping. The 
 
 ## API Endpoints
 
-All API routes except `/api/auth/*` require authentication (return 401 if no active session).
+All API routes except `/api/auth/*` require authentication (return 401 without a valid auth cookie).
 
 ### Authentication
 
@@ -151,14 +177,20 @@ All API routes except `/api/auth/*` require authentication (return 401 if no act
 yieldly/
 ├── client/              # React frontend used in production builds
 ├── public/              # Static development UI
+├── api/index.js         # Vercel serverless entrypoint (Express → Turso)
 ├── lib/                 # Shared server-side helpers
 │   ├── compute.js           # Holdings computation (ACB, return, yield)
+│   ├── holdings.js          # Shared holdings aggregation SQL
 │   ├── parse.js             # CSV parsing utilities
-│   └── session-store.js     # SQLite-backed express-session store
-├── database.js              # SQLite schema and migrations
-├── server.js                # Express API server
+│   ├── auth.js              # Stateless JWT auth helpers
+│   └── portfolios-backup.js # Local-file portfolio backup/restore
+├── app.js                   # createApp(db, options) — all Express routes
+├── database.js              # createDb()/runMigrations() — libSQL (local file / Turso)
+├── server.js                # Local server entrypoint
+├── scripts/migrate.js       # Apply schema to the configured database
 ├── manage-user.js           # CLI tool for user account management
-├── yieldly.db               # Local SQLite database (git-ignored)
+├── vercel.json              # Vercel build + routing config
+├── yieldly.db               # Local libSQL database (git-ignored)
 ├── portfolios.json          # Auto-generated portfolio backup (git-ignored)
 └── portfolios.example.json  # Example seed file — copy to portfolios.json to pre-seed
 ```
@@ -167,7 +199,7 @@ yieldly/
 
 - The database is created automatically on first run.
 - Portfolio metadata is backed up to `portfolios.json` (git-ignored) on every write so it can be restored if the database is recreated. Copy `portfolios.example.json` to `portfolios.json` to pre-seed portfolios on a fresh install.
-- The app supports a single superuser with session-based authentication. All API routes (except `/api/auth/*`) require an active session.
+- The app supports a single superuser with stateless JWT authentication. All API routes (except `/api/auth/*`) require a valid auth cookie.
 
 ## License
 

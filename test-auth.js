@@ -3,190 +3,49 @@
 /**
  * Yieldly Authentication Test Suite
  *
- * Spins up an Express server on a random port backed by an in-memory
- * SQLite database. Tests auth routes and the auth guard middleware.
+ * Drives the REAL Express app (app.js / createApp) against an in-memory libSQL
+ * database (database.js / createDb ':memory:'). This is the suite that exercises
+ * the real async stack: the libSQL schema/migrations, the route handlers, the
+ * auth guard, and stateless JWT cookies. No hand-copied schema or routes.
  *
  * Usage:  node test-auth.js
  */
 
 const http = require('http');
-const express = require('express');
-const session = require('express-session');
-const bcrypt = require('bcryptjs');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
-const SQLiteSessionStore = require('./lib/session-store');
+const { createApp } = require('./app');
+const { createDb } = require('./database');
 
-// ─── In-memory database ─────────────────────────────────────────────────────
+const SESSION_SECRET = crypto.randomBytes(16).toString('hex');
 
-const db = new Database(':memory:');
-
-db.exec(`
-  CREATE TABLE portfolios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    code TEXT NOT NULL UNIQUE,
-    display_order INTEGER DEFAULT 0,
-    cash_balance REAL
-  );
-  CREATE TABLE transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    portfolio_id INTEGER NOT NULL,
-    ticker TEXT NOT NULL,
-    type TEXT NOT NULL,
-    quantity REAL NOT NULL DEFAULT 0,
-    price REAL NOT NULL DEFAULT 0,
-    total REAL NOT NULL DEFAULT 0,
-    commission REAL DEFAULT 0,
-    date TEXT NOT NULL DEFAULT '2024-01-01',
-    market TEXT DEFAULT 'TMX'
-  );
-  CREATE TABLE stock_info (
-    portfolio_id INTEGER NOT NULL,
-    ticker TEXT NOT NULL,
-    market_price REAL,
-    dividend_yield REAL,
-    dividend_frequency TEXT,
-    dividend_per_share REAL,
-    last_dividend_date TEXT,
-    sector TEXT,
-    investment_type TEXT,
-    PRIMARY KEY (portfolio_id, ticker)
-  );
-  CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE sessions (
-    sid TEXT PRIMARY KEY,
-    sess TEXT NOT NULL,
-    expired INTEGER NOT NULL
-  );
-  CREATE INDEX idx_sessions_expired ON sessions(expired);
-`);
-
-// ─── Express app (mirrors server.js auth layer) ─────────────────────────────
-
-const app = express();
-app.use(express.json());
-
-app.use(session({
-  store: new SQLiteSessionStore(db),
-  secret: crypto.randomBytes(16).toString('hex'),
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, secure: false, sameSite: 'lax', maxAge: 60000 },
-}));
-
-function serverError(res, error) {
-  console.error(error);
-  res.status(500).json({ error: 'An internal error occurred' });
+// libSQL ':memory:' is per-connection — an interactive transaction can open a
+// fresh empty in-memory DB. Back each test app with a unique temp file so all
+// connections share one database (mirrors local `file:` / remote Turso, where
+// this is a non-issue). Tracked for cleanup on exit.
+const tempDbFiles = [];
+function tempDbUrl() {
+  const file = path.join(os.tmpdir(), `yieldly-test-${crypto.randomBytes(6).toString('hex')}.db`);
+  tempDbFiles.push(file);
+  return `file:${file}`;
 }
-
-// Auth routes
-app.get('/api/auth/session', (req, res) => {
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-  if (userCount === 0) return res.json({ authenticated: false, needsSetup: true });
-  if (req.session.userId) {
-    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.session.userId);
-    if (user) return res.json({ authenticated: true, user: { id: user.id, username: user.username } });
+function cleanupTempDbs() {
+  for (const f of tempDbFiles) {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(f + suffix); } catch { /* ignore */ }
+    }
   }
-  res.json({ authenticated: false, needsSetup: false });
-});
-
-app.post('/api/auth/setup', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    if (!username || typeof username !== 'string' || username.trim().length < 2)
-      return res.status(400).json({ error: 'Username must be at least 2 characters' });
-    if (!password || typeof password !== 'string' || password.length < 8)
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    const hash = await bcrypt.hash(password, 10);
-    const atomicInsert = db.transaction(() => {
-      const count = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-      if (count > 0) return null;
-      return db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username.trim(), hash);
-    });
-    const result = atomicInsert();
-    if (!result) return res.status(403).json({ error: 'Setup already completed' });
-    req.session.regenerate((err) => {
-      if (err) return serverError(res, err);
-      req.session.userId = result.lastInsertRowid;
-      res.json({ success: true, user: { id: result.lastInsertRowid, username: username.trim() } });
-    });
-  } catch (error) { serverError(res, error); }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ error: 'Username and password are required' });
-    const user = db.prepare('SELECT id, username, password_hash FROM users WHERE username = ?').get(username.trim());
-    if (!user || !(await bcrypt.compare(password, user.password_hash)))
-      return res.status(401).json({ error: 'Invalid username or password' });
-    req.session.regenerate((err) => {
-      if (err) return serverError(res, err);
-      req.session.userId = user.id;
-      res.json({ success: true, user: { id: user.id, username: user.username } });
-    });
-  } catch (error) { serverError(res, error); }
-});
-
-app.post('/api/auth/logout', (req, res) => {
-  req.session.destroy((err) => {
-    if (err) return serverError(res, err);
-    res.clearCookie('connect.sid');
-    res.json({ success: true });
-  });
-});
-
-// Auth guard
-app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth/')) return next();
-  if (!req.session.userId) return res.status(401).json({ error: 'Authentication required' });
-  next();
-});
-
-app.post('/api/change-password', async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword)
-      return res.status(400).json({ error: 'Current and new password are required' });
-    if (typeof newPassword !== 'string' || newPassword.length < 8)
-      return res.status(400).json({ error: 'New password must be at least 8 characters' });
-    const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.session.userId);
-    if (!user || !(await bcrypt.compare(currentPassword, user.password_hash)))
-      return res.status(401).json({ error: 'Current password is incorrect' });
-    const hash = await bcrypt.hash(newPassword, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.session.userId);
-    const currentSid = req.sessionID;
-    db.prepare('DELETE FROM sessions WHERE sid != ?').run(currentSid);
-    res.json({ success: true });
-  } catch (error) { serverError(res, error); }
-});
-
-// A protected route for testing the guard
-app.get('/api/portfolios', (req, res) => {
-  const portfolios = db.prepare('SELECT * FROM portfolios ORDER BY display_order, id').all();
-  res.json(portfolios);
-});
-
-app.post('/api/portfolios', (req, res) => {
-  const { name, code } = req.body;
-  if (!name || !code) return res.status(400).json({ error: 'Name and code are required' });
-  const result = db.prepare('INSERT INTO portfolios (name, code) VALUES (?, ?)').run(name, code.toUpperCase());
-  res.json({ id: result.lastInsertRowid, name, code: code.toUpperCase() });
-});
+}
 
 // ─── HTTP helpers ────────────────────────────────────────────────────────────
 
 let BASE;
 
-function req(method, path, body, cookie) {
+function req(method, path, body, cookie, base = BASE) {
   return new Promise((resolve, reject) => {
-    const url = new URL(path, BASE);
+    const url = new URL(path, base);
     const opts = { method, hostname: url.hostname, port: url.port, path: url.pathname, headers: {} };
     if (body) {
       const payload = JSON.stringify(body);
@@ -212,11 +71,12 @@ function req(method, path, body, cookie) {
   });
 }
 
-function extractSid(setCookieHeaders) {
+// Extract the JWT auth cookie (token=...) from a Set-Cookie header list.
+function extractToken(setCookieHeaders) {
   if (!setCookieHeaders) return null;
   for (const h of setCookieHeaders) {
-    const m = h.match(/connect\.sid=([^;]+)/);
-    if (m) return `connect.sid=${m[1]}`;
+    const m = h.match(/(?:^|\s)token=([^;]+)/);
+    if (m && m[1] && m[1] !== '') return `token=${m[1]}`;
   }
   return null;
 }
@@ -244,6 +104,19 @@ function checkTruthy(label, actual) {
 
 function section(title) { const pad = Math.max(2, 50 - title.length); console.log(`\n── ${title} ${'─'.repeat(pad)}`); }
 
+// Boot an app+server over a fresh in-memory libSQL DB. Returns { base, close }.
+async function bootApp(options = {}) {
+  const db = await createDb(tempDbUrl());
+  const app = createApp(db, { sessionSecret: SESSION_SECRET, ...options });
+  return new Promise((resolve) => {
+    const server = http.createServer(app);
+    server.listen(0, () => {
+      const { port } = server.address();
+      resolve({ base: `http://127.0.0.1:${port}`, close: () => server.close() });
+    });
+  });
+}
+
 // ─── Test runner ─────────────────────────────────────────────────────────────
 
 async function run() {
@@ -258,7 +131,7 @@ async function run() {
   }
 
   // ── 2. Protected route rejects unauthenticated request ─────────────────────
-  section('2. Auth guard – 401 without session');
+  section('2. Auth guard – 401 without token');
   {
     const r = await req('GET', '/api/portfolios');
     checkEq('status = 401', r.status, 401);
@@ -289,7 +162,7 @@ async function run() {
     checkEq('success = true', r.body.success, true);
     checkEq('username returned', r.body.user.username, 'admin');
     checkTruthy('user id returned', r.body.user.id);
-    checkTruthy('session cookie set', extractSid(r.cookie));
+    checkTruthy('auth cookie set', extractToken(r.cookie));
   }
 
   // ── 5. Setup rejects when user already exists ──────────────────────────────
@@ -331,37 +204,37 @@ async function run() {
 
   // ── 9. Successful login ────────────────────────────────────────────────────
   section('9. Login – correct credentials');
-  let sessionCookie;
+  let authCookie;
   {
     const r = await req('POST', '/api/auth/login', { username: 'admin', password: 'testpass123' });
     checkEq('status = 200', r.status, 200);
     checkEq('success = true', r.body.success, true);
     checkEq('username = admin', r.body.user.username, 'admin');
-    sessionCookie = extractSid(r.cookie);
-    checkTruthy('session cookie set', sessionCookie);
+    authCookie = extractToken(r.cookie);
+    checkTruthy('auth cookie set', authCookie);
   }
 
   // ── 10. Session check with valid cookie ────────────────────────────────────
   section('10. Session – authenticated with cookie');
   {
-    const r = await req('GET', '/api/auth/session', null, sessionCookie);
+    const r = await req('GET', '/api/auth/session', null, authCookie);
     checkEq('status = 200', r.status, 200);
     checkEq('authenticated = true', r.body.authenticated, true);
     checkEq('username = admin', r.body.user.username, 'admin');
   }
 
-  // ── 11. Protected route accessible with session ────────────────────────────
+  // ── 11. Protected route accessible with token ──────────────────────────────
   section('11. Auth guard – allows authenticated request');
   {
-    const r = await req('GET', '/api/portfolios', null, sessionCookie);
+    const r = await req('GET', '/api/portfolios', null, authCookie);
     checkEq('status = 200', r.status, 200);
     checkTruthy('returns array', Array.isArray(r.body));
   }
 
-  // ── 12. Protected POST route with session ──────────────────────────────────
-  section('12. Auth guard – POST with session');
+  // ── 12. Protected POST route with token ────────────────────────────────────
+  section('12. Auth guard – POST with token');
   {
-    const r = await req('POST', '/api/portfolios', { name: 'Test', code: 'TST' }, sessionCookie);
+    const r = await req('POST', '/api/portfolios', { name: 'Test', code: 'TST' }, authCookie);
     checkEq('status = 200', r.status, 200);
     checkEq('portfolio created', r.body.code, 'TST');
   }
@@ -369,19 +242,19 @@ async function run() {
   // ── 13. Change password validation ─────────────────────────────────────────
   section('13. Change password – validation');
   {
-    const r1 = await req('POST', '/api/change-password', {}, sessionCookie);
+    const r1 = await req('POST', '/api/change-password', {}, authCookie);
     checkEq('missing fields → 400', r1.status, 400);
 
     const r2 = await req('POST', '/api/change-password',
-      { currentPassword: 'testpass123', newPassword: 'short' }, sessionCookie);
+      { currentPassword: 'testpass123', newPassword: 'short' }, authCookie);
     checkEq('short new password → 400', r2.status, 400);
 
     const r3 = await req('POST', '/api/change-password',
-      { currentPassword: 'wrongcurrent', newPassword: 'newpass12345' }, sessionCookie);
+      { currentPassword: 'wrongcurrent', newPassword: 'newpass12345' }, authCookie);
     checkEq('wrong current password → 401', r3.status, 401);
   }
 
-  // ── 14. Change password without session ────────────────────────────────────
+  // ── 14. Change password without token ──────────────────────────────────────
   section('14. Change password – requires auth');
   {
     const r = await req('POST', '/api/change-password',
@@ -393,9 +266,10 @@ async function run() {
   section('15. Change password – success');
   {
     const r = await req('POST', '/api/change-password',
-      { currentPassword: 'testpass123', newPassword: 'newpass12345' }, sessionCookie);
+      { currentPassword: 'testpass123', newPassword: 'newpass12345' }, authCookie);
     checkEq('status = 200', r.status, 200);
     checkEq('success = true', r.body.success, true);
+    authCookie = extractToken(r.cookie) || authCookie; // token re-issued on change
   }
 
   // ── 16. Login with new password ────────────────────────────────────────────
@@ -406,78 +280,78 @@ async function run() {
 
     const r2 = await req('POST', '/api/auth/login', { username: 'admin', password: 'newpass12345' });
     checkEq('new password accepted → 200', r2.status, 200);
-    sessionCookie = extractSid(r2.cookie);
+    authCookie = extractToken(r2.cookie);
   }
 
   // ── 17. Logout ─────────────────────────────────────────────────────────────
   section('17. Logout');
   {
-    const r = await req('POST', '/api/auth/logout', null, sessionCookie);
+    const r = await req('POST', '/api/auth/logout', null, authCookie);
     checkEq('status = 200', r.status, 200);
     checkEq('success = true', r.body.success, true);
   }
 
-  // ── 18. Session invalid after logout ───────────────────────────────────────
-  section('18. Session – invalid after logout');
+  // ── 18. Token tampering rejected ───────────────────────────────────────────
+  section('18. Auth guard – tampered token rejected');
   {
-    const r = await req('GET', '/api/auth/session', null, sessionCookie);
+    const tampered = (authCookie || 'token=x') + 'tampered';
+    const r = await req('GET', '/api/auth/session', null, tampered);
     checkEq('authenticated = false', r.body.authenticated, false);
   }
 
-  // ── 19. Protected route rejected after logout ──────────────────────────────
-  section('19. Auth guard – 401 after logout');
+  // ── 19. Protected route rejected with tampered token ───────────────────────
+  section('19. Auth guard – 401 with tampered token');
   {
-    const r = await req('GET', '/api/portfolios', null, sessionCookie);
+    const r = await req('GET', '/api/portfolios', null, 'token=not-a-valid-jwt');
     checkEq('status = 401', r.status, 401);
   }
 
-  // ── 20. Session store – expired sessions pruned ────────────────────────────
-  section('20. Session store – expiry');
-  {
-    const store = new SQLiteSessionStore(db);
-    const testSess = { cookie: { maxAge: 1 }, userId: 999 };
-    await new Promise(resolve => store.set('expired-sid', testSess, resolve));
-    await new Promise(resolve => setTimeout(resolve, 10));
-    const result = await new Promise(resolve => store.get('expired-sid', (err, sess) => resolve(sess)));
-    checkEq('expired session returns null', result, null);
-  }
-
-  // ── 21. Session store – valid session persists ─────────────────────────────
-  section('21. Session store – persistence');
-  {
-    const store = new SQLiteSessionStore(db);
-    const testSess = { cookie: { maxAge: 60000 }, userId: 42 };
-    await new Promise(resolve => store.set('valid-sid', testSess, resolve));
-    const result = await new Promise(resolve => store.get('valid-sid', (err, sess) => resolve(sess)));
-    checkEq('valid session userId', result.userId, 42);
-  }
-
-  // ── 22. Session store – destroy removes session ────────────────────────────
-  section('22. Session store – destroy');
-  {
-    const store = new SQLiteSessionStore(db);
-    await new Promise(resolve => store.set('to-delete', { cookie: { maxAge: 60000 } }, resolve));
-    await new Promise(resolve => store.destroy('to-delete', resolve));
-    const result = await new Promise(resolve => store.get('to-delete', (err, sess) => resolve(sess)));
-    checkEq('destroyed session returns null', result, null);
-  }
-
-  // ── 23. Username trimming ──────────────────────────────────────────────────
-  section('23. Login – username trimmed');
+  // ── 20. Username trimming ──────────────────────────────────────────────────
+  section('20. Login – username trimmed');
   {
     const r = await req('POST', '/api/auth/login', { username: '  admin  ', password: 'newpass12345' });
     checkEq('trimmed username accepted → 200', r.status, 200);
     checkEq('returned username trimmed', r.body.user.username, 'admin');
   }
+
+  // ── 21. Portfolio delete cascades to transactions/stock_info ───────────────
+  section('21. Portfolio delete – explicit cascade');
+  {
+    const login = await req('POST', '/api/auth/login', { username: 'admin', password: 'newpass12345' });
+    const cookie = extractToken(login.cookie);
+    const created = await req('POST', '/api/portfolios', { name: 'Cascade', code: 'CAS' }, cookie);
+    const pid = created.body.id;
+    await req('POST', '/api/transactions',
+      { portfolio_id: pid, ticker: 'RY.TO', type: 'BUY', quantity: 10, price: 100, date: '2024-01-01' }, cookie);
+    const del = await req('DELETE', `/api/portfolios/${pid}`, null, cookie);
+    checkEq('delete → 200', del.status, 200);
+    const txns = await req('GET', `/api/portfolios/${pid}/transactions`, null, cookie);
+    checkEq('transactions gone after cascade', Array.isArray(txns.body) ? txns.body.length : -1, 0);
+  }
+
+  // ── 22. Rate limiting on login ─────────────────────────────────────────────
+  section('22. Login – rate limited after too many attempts');
+  {
+    const limited = await bootApp({ rateLimit: { windowMs: 60000, max: 3 } });
+    try {
+      let last;
+      for (let i = 0; i < 4; i++) {
+        last = await req('POST', '/api/auth/login', { username: 'nobody', password: 'x' }, null, limited.base);
+      }
+      checkEq('4th attempt → 429', last.status, 429);
+      checkEq('rate-limit error message', last.body.error, 'Too many attempts. Please try again later.');
+    } finally {
+      limited.close();
+    }
+  }
 }
 
 // ─── Boot and run ────────────────────────────────────────────────────────────
 
-const server = http.createServer(app);
-server.listen(0, async () => {
-  const { port } = server.address();
-  BASE = `http://127.0.0.1:${port}`;
-  console.log(`Auth test server on port ${port}\n`);
+(async () => {
+  const main = await bootApp({ rateLimit: false }); // disabled so the many login attempts below aren't throttled
+  BASE = main.base;
+  console.log(`Auth test server on ${BASE}\n`);
 
   try {
     await run();
@@ -486,11 +360,12 @@ server.listen(0, async () => {
     failed++;
   }
 
-  server.close();
+  main.close();
+  cleanupTempDbs();
 
   const total = passed + failed;
   console.log(`\n${'═'.repeat(58)}`);
   console.log(`  ${total} tests   ${passed} passed   ${failed} failed`);
   console.log(`${'═'.repeat(58)}\n`);
   process.exit(failed > 0 ? 1 : 0);
-});
+})();

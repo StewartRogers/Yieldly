@@ -14,11 +14,17 @@
  * Uses the better-sqlite3 v11 pre-built binary that matches Node v20 arm64.
  */
 
-const Database    = require('/tmp/deps-test/node_modules/better-sqlite3');
+const Database = require('better-sqlite3');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
+const { HOLDINGS_SQL, GROUP_ORDER } = require('./lib/holdings');
+const { computeMonthlyACB: _computeMonthlyACB } = require('./app');
 
-// ─── In-memory database ───────────────────────────────────────────────────────
+// ─── In-memory database ──────────────────────────────────────────────────────
+// Validates driver-agnostic money math, so it runs synchronously on
+// better-sqlite3 (devDependency). Aggregation SQL and computeMonthlyACB are
+// imported from the real modules (single source of truth); production runs on
+// async libSQL. The real async schema + app are exercised by test-auth.js.
 
 const db = new Database(':memory:');
 
@@ -103,36 +109,9 @@ function setInfo(pid, ticker, fields) {
 
 // ─── Holdings query ───────────────────────────────────────────────────────────
 
-const HOLDINGS_SQL = `
-    SELECT
-      p.code AS portfolio_code, p.name AS portfolio_name, t.ticker,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity
-               WHEN t.type = 'SELL' THEN -t.quantity ELSE 0 END) AS shares,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END) AS shares_bought,
-      SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END) AS shares_sold,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.total ELSE 0 END) AS buy_total,
-      SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) AS sale_total,
-      SUM(CASE WHEN t.type = 'DIVIDEND' THEN t.total ELSE 0 END) AS dividends_paid,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.total ELSE 0 END) /
-        NULLIF(SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN t.quantity ELSE 0 END), 0) AS buy_price,
-      SUM(CASE WHEN t.type = 'SELL' THEN t.total ELSE 0 END) /
-        NULLIF(SUM(CASE WHEN t.type = 'SELL' THEN t.quantity ELSE 0 END), 0) AS sale_price,
-      COUNT(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN 1 END) AS buy_count,
-      COUNT(CASE WHEN t.type = 'SELL' THEN 1 END) AS sell_count,
-      SUM(CASE WHEN t.type IN ('BUY','DIVIDEND_REINVEST') THEN COALESCE(t.commission,0) ELSE 0 END) AS buy_expense,
-      SUM(CASE WHEN t.type = 'SELL' THEN COALESCE(t.commission,0) ELSE 0 END) AS sale_expense,
-      s.market_price, s.dividend_yield, s.dividend_frequency,
-      s.dividend_per_share, s.last_dividend_date, s.sector, s.investment_type
-    FROM transactions t
-    JOIN portfolios p ON t.portfolio_id = p.id
-    LEFT JOIN stock_info s ON s.portfolio_id = t.portfolio_id AND s.ticker = t.ticker`;
-
-const holdingsAllStmt  = db.prepare(`${HOLDINGS_SQL} GROUP BY t.portfolio_id, t.ticker HAVING shares > 0 ORDER BY p.code, t.ticker`);
-const holdingsByPidStmt = db.prepare(`${HOLDINGS_SQL} WHERE t.portfolio_id = ? GROUP BY t.portfolio_id, t.ticker HAVING shares > 0 ORDER BY p.code, t.ticker`);
-
-function queryHoldings(pid) {
-  return pid ? holdingsByPidStmt.all(pid) : holdingsAllStmt.all();
-}
+const holdingsAllStmt  = db.prepare(`${HOLDINGS_SQL} ${GROUP_ORDER}`);
+const holdingsByPidStmt = db.prepare(`${HOLDINGS_SQL} WHERE t.portfolio_id = ? ${GROUP_ORDER}`);
+function queryHoldings(pid) { return pid ? holdingsByPidStmt.all(pid) : holdingsAllStmt.all(); }
 function getHoldings(pid) {
   return computeHoldings(queryHoldings(pid));
 }
@@ -152,64 +131,10 @@ const divMonthlyStmt = db.prepare(`
   ORDER BY year, month
 `);
 
-// ─── computeMonthlyACB (copy of server.js implementation for testing) ─────────
-
-function computeMonthlyACB(txRows) {
-  if (!txRows.length) return [];
-
-  const state = new Map();
-
-  function getState(portfolioId, ticker) {
-    const key = `${portfolioId}:${ticker}`;
-    if (!state.has(key)) state.set(key, { sharesBought: 0, buyTotal: 0, buyExpense: 0, sharesSold: 0 });
-    return state.get(key);
-  }
-
-  function totalACB() {
-    let sum = 0;
-    for (const s of state.values()) {
-      const shares = s.sharesBought - s.sharesSold;
-      if (shares > 0 && s.sharesBought > 0) {
-        sum += (s.buyTotal + s.buyExpense) * (shares / s.sharesBought);
-      }
-    }
-    return Math.round(sum * 100) / 100;
-  }
-
-  const byMonth = new Map();
-  for (const tx of txRows) {
-    const key = tx.date.substring(0, 7);
-    if (!byMonth.has(key)) byMonth.set(key, []);
-    byMonth.get(key).push(tx);
-  }
-
-  const firstMonth = txRows[0].date.substring(0, 7);
-  const now = new Date('2024-12-31'); // fixed for deterministic tests
-  const lastMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-  const results = [];
-  let [y, m] = firstMonth.split('-').map(Number);
-  const [ey, em] = lastMonth.split('-').map(Number);
-
-  while (y < ey || (y === ey && m <= em)) {
-    const key = `${y}-${String(m).padStart(2, '0')}`;
-    for (const tx of (byMonth.get(key) || [])) {
-      if (tx.ticker === 'CASH') continue;
-      const s = getState(tx.portfolio_id, tx.ticker);
-      if (tx.type === 'BUY' || tx.type === 'DIVIDEND_REINVEST') {
-        s.sharesBought += tx.quantity || 0;
-        s.buyTotal     += tx.total    || 0;
-        s.buyExpense   += tx.commission || 0;
-      } else if (tx.type === 'SELL') {
-        s.sharesSold += tx.quantity || 0;
-      }
-    }
-    results.push({ year: y, month: m, total_acb: totalACB() });
-    if (++m > 12) { m = 1; y++; }
-  }
-
-  return results;
-}
+// computeMonthlyACB is the real implementation from ./app, with a fixed "now"
+// injected so the month range these tests assert on stays deterministic.
+const FIXED_NOW = new Date('2024-12-31');
+function computeMonthlyACB(txRows) { return _computeMonthlyACB(txRows, FIXED_NOW); }
 
 // ─── CSV helpers (imported from lib/parse.js) ────────────────────────────────
 
