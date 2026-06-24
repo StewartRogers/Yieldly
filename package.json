@@ -8,10 +8,12 @@
     "dev": "concurrently \"node server.js\" \"npm run dev --prefix client\"",
     "build": "npm run build --prefix client",
     "start:prod": "cross-env NODE_ENV=production node server.js",
-    "test": "node test.js && node test-auth.js",
+    "test": "node test.js && node test-full.js && node test-auth.js",
     "test:math": "node test.js",
+    "test:full": "node test-full.js",
     "test:auth": "node test-auth.js",
     "coverage": "c8 --include=lib/compute.js --reporter=text --reporter=html node test.js",
+    "db:migrate": "node scripts/migrate.js",
     "user:create": "node manage-user.js create",
     "user:reset-password": "node manage-user.js reset-password"
   },
@@ -23,13 +25,17 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@libsql/client": "^0.17.4",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.10.0",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "express-session": "^1.19.0"
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
+    "better-sqlite3": "^12.10.0",
     "c8": "^11.0.0",
     "concurrently": "^10.0.1",
     "cross-env": "^7.0.3"

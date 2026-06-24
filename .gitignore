@@ -2,7 +2,10 @@ node_modules/
 dist/
 coverage/
 *.db
+*.db-wal
+*.db-shm
 *.db.bak*
+.vercel
 portfolios.json
 .DS_Store
 .env
