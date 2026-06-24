@@ -217,6 +217,31 @@ if (marketColExists.count === 0) {
   db.exec(`UPDATE transactions SET market = 'TMX' WHERE market IS NULL`);
 }
 
+// Create users table for authentication
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+// Create sessions table for express-session store
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    sid TEXT PRIMARY KEY,
+    sess TEXT NOT NULL,
+    expired INTEGER NOT NULL
+  )
+`);
+
+// Index on expired for efficient cleanup and per-request filtering
+const sessIdxExists = db.prepare(`SELECT COUNT(*) as count FROM sqlite_master WHERE type='index' AND name='idx_sessions_expired'`).get();
+if (sessIdxExists.count === 0) {
+  db.exec(`CREATE INDEX idx_sessions_expired ON sessions(expired)`);
+}
+
 // Auto-restore portfolios from backup if the DB is fresh (empty portfolios table)
 const portfolioBackupPath = path.join(__dirname, 'portfolios.json');
 const portfolioCount = db.prepare('SELECT COUNT(*) as count FROM portfolios').get();

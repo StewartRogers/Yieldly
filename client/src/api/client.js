@@ -1,3 +1,6 @@
+let _onUnauthorized = null
+export function setOnUnauthorized(cb) { _onUnauthorized = cb }
+
 async function request(url, options = {}) {
   const { body, ...rest } = options
   const res = await fetch(url, {
@@ -5,6 +8,10 @@ async function request(url, options = {}) {
     ...(body !== undefined ? { body } : {}),
     ...rest,
   })
+  if (res.status === 401 && !url.startsWith('/api/auth/')) {
+    _onUnauthorized?.()
+    throw new Error('Session expired')
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.error || `Request failed (${res.status})`)
@@ -13,6 +20,22 @@ async function request(url, options = {}) {
 }
 
 const json = (data) => JSON.stringify(data)
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+export const getSession = () =>
+  request('/api/auth/session')
+
+export const login = (username, password) =>
+  request('/api/auth/login', { method: 'POST', body: json({ username, password }) })
+
+export const logout = () =>
+  request('/api/auth/logout', { method: 'POST' })
+
+export const setupAccount = (username, password) =>
+  request('/api/auth/setup', { method: 'POST', body: json({ username, password }) })
+
+export const changePassword = (currentPassword, newPassword) =>
+  request('/api/change-password', { method: 'POST', body: json({ currentPassword, newPassword }) })
 
 // ── Portfolios ──────────────────────────────────────────────────────────────
 export const getPortfolios = () =>

@@ -1,21 +1,21 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { RefreshCw, Check } from 'lucide-react'
-import { getPortfolios, refreshAllPrices } from './api/client'
+import { RefreshCw, Check, LogOut } from 'lucide-react'
+import { getPortfolios, refreshAllPrices, getSession, login, logout, setupAccount, setOnUnauthorized } from './api/client'
 import Home from './pages/Home'
 import Summary from './pages/Summary'
 import Dividends from './pages/Dividends'
 import Portfolios from './pages/Portfolios'
 import Transactions from './pages/Transactions'
 import Import from './pages/Import'
+import Login from './pages/Login'
 
 const navCls = ({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')
 
 export default function App() {
+  const [authState, setAuthState] = useState({ loading: true, user: null, needsSetup: false })
   const [portfolios, setPortfolios] = useState([])
 
-  /* Global price refresh — incremented after each successful refresh so
-     price-sensitive pages can watch this value in their own useEffect  */
   const [pricesTick,     setPricesTick]     = useState(0)
   const [navRefreshing,  setNavRefreshing]  = useState(false)
   const [navRefreshOk,   setNavRefreshOk]   = useState(false)
@@ -23,7 +23,28 @@ export default function App() {
   const loadPortfolios = () =>
     getPortfolios().then(setPortfolios).catch(console.error)
 
-  useEffect(() => { loadPortfolios() }, [])
+  useEffect(() => {
+    setOnUnauthorized(() => setAuthState({ loading: false, user: null, needsSetup: false }))
+    getSession()
+      .then(data => {
+        setAuthState({ loading: false, user: data.authenticated ? data.user : null, needsSetup: data.needsSetup })
+        if (data.authenticated) loadPortfolios()
+      })
+      .catch(() => setAuthState({ loading: false, user: null, needsSetup: false }))
+  }, [])
+
+  const handleAuth = async (username, password) => {
+    const authenticate = authState.needsSetup ? setupAccount : login
+    const data = await authenticate(username, password)
+    setAuthState({ loading: false, user: data.user, needsSetup: false })
+    loadPortfolios()
+  }
+
+  const handleLogout = async () => {
+    try { await logout() } catch { /* proceed anyway */ }
+    setAuthState({ loading: false, user: null, needsSetup: false })
+    setPortfolios([])
+  }
 
   const handleNavRefresh = async () => {
     if (navRefreshing) return
@@ -41,18 +62,24 @@ export default function App() {
     }
   }
 
+  if (authState.loading) {
+    return <div className="login-page"><p style={{ color: 'var(--tc-muted)' }}>Loading...</p></div>
+  }
+
+  if (!authState.user) {
+    return <Login needsSetup={authState.needsSetup} onAuthenticated={handleAuth} />
+  }
+
   return (
     <BrowserRouter>
       <nav className="app-nav">
         <div className="app-nav-inner">
 
-          {/* ── Brand ── */}
           <NavLink to="/" className="app-nav-wordmark" aria-label="Yieldly home">
             <span className="app-nav-mark" aria-hidden="true">Y</span>
             <span className="app-nav-brand">Yieldly</span>
           </NavLink>
 
-          {/* ── Links ── */}
           <div className="app-nav-links">
             <NavLink to="/" end className={navCls}>Home</NavLink>
             <NavLink to="/summary"      className={navCls}>Summary</NavLink>
@@ -62,10 +89,8 @@ export default function App() {
             <NavLink to="/import"       className={navCls}>Import Data</NavLink>
           </div>
 
-          {/* ── Spacer ── */}
           <span style={{ flex: 1 }} aria-hidden="true" />
 
-          {/* ── Global refresh ── */}
           <button
             className={`app-nav-icon-btn${navRefreshOk ? ' ok' : ''}`}
             onClick={handleNavRefresh}
@@ -79,8 +104,14 @@ export default function App() {
             }
           </button>
 
-          {/* ── Avatar ── */}
-          <div className="app-nav-avatar" role="img" aria-label="Account" />
+          <button
+            className="app-nav-icon-btn"
+            onClick={handleLogout}
+            title={`Sign out (${authState.user.username})`}
+            aria-label="Sign out"
+          >
+            <LogOut size={15} />
+          </button>
 
         </div>
       </nav>

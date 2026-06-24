@@ -30,12 +30,28 @@ Yieldly is a local stock portfolio tracker for managing multiple portfolios, tra
 npm install
 ```
 
-2. Start the app in development mode:
+2. Create your superuser account:
+```bash
+npm run user:create
+```
+This will prompt you for a username and password (minimum 8 characters).
+
+3. Start the app in development mode:
 ```bash
 npm run dev
 ```
 
-3. Open `http://localhost:2080`
+4. Open `http://localhost:2080` and sign in.
+
+Alternatively, if you skip step 2, the first time you open the app in a browser you'll be presented with a setup screen to create your account.
+
+### Resetting Your Password
+
+If you forget your password, reset it from the command line:
+```bash
+npm run user:reset-password
+```
+This invalidates all active sessions.
 
 ## Production Build
 
@@ -51,9 +67,11 @@ npm run start:prod
 
 ## Environment Variables
 
-The app loads `.env` automatically. Optional variables include:
+The app loads `.env` automatically. Copy `.env.example` to `.env` to get started.
 
 - `NODE_ENV=production` - serves the built client from `client/dist`
+- `SESSION_SECRET` - secret key for signing session cookies (required for production — without it, sessions are lost on server restart)
+- `TRUST_PROXY=1` - set when running behind a reverse proxy with HTTPS (enables secure cookies)
 
 ## Supported Transaction Types
 
@@ -83,6 +101,16 @@ Date,Symbol,Portfolio,Type,Quantity,Share Price,Total
 Supported type codes for imports depend on the app UI and database mapping. The app currently recognizes the transaction types listed above.
 
 ## API Endpoints
+
+All API routes except `/api/auth/*` require authentication (return 401 if no active session).
+
+### Authentication
+
+- `GET /api/auth/session` - Check authentication status
+- `POST /api/auth/setup` - Create the superuser (only works when no user exists)
+- `POST /api/auth/login` - Sign in
+- `POST /api/auth/logout` - Sign out
+- `POST /api/change-password` - Change password (requires authentication and current password)
 
 ### Portfolios
 
@@ -124,8 +152,12 @@ yieldly/
 ├── client/              # React frontend used in production builds
 ├── public/              # Static development UI
 ├── lib/                 # Shared server-side helpers
+│   ├── compute.js           # Holdings computation (ACB, return, yield)
+│   ├── parse.js             # CSV parsing utilities
+│   └── session-store.js     # SQLite-backed express-session store
 ├── database.js              # SQLite schema and migrations
 ├── server.js                # Express API server
+├── manage-user.js           # CLI tool for user account management
 ├── yieldly.db               # Local SQLite database (git-ignored)
 ├── portfolios.json          # Auto-generated portfolio backup (git-ignored)
 └── portfolios.example.json  # Example seed file — copy to portfolios.json to pre-seed
@@ -135,7 +167,7 @@ yieldly/
 
 - The database is created automatically on first run.
 - Portfolio metadata is backed up to `portfolios.json` (git-ignored) on every write so it can be restored if the database is recreated. Copy `portfolios.example.json` to `portfolios.json` to pre-seed portfolios on a fresh install.
-- The app is designed to run locally, not as a hosted multi-user service.
+- The app supports a single superuser with session-based authentication. All API routes (except `/api/auth/*`) require an active session.
 
 ## License
 

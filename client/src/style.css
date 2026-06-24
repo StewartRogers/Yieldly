@@ -2381,3 +2381,83 @@ table.tbl.matrix .dim { color: var(--faint); }
 @media (max-width: 640px) {
   .home-hero-section { margin: -28px -16px 0; }
 }
+
+/* ===== LOGIN / SETUP PAGE ===== */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 36px 32px 32px;
+  box-shadow: var(--shadow-lg-tc);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.login-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.login-subtitle {
+  text-align: center;
+  color: var(--tc-muted);
+  font-size: 14px;
+  margin-top: -8px;
+}
+
+.login-error {
+  background: var(--loss-bg);
+  color: var(--loss);
+  border: 1px solid rgba(248,113,113,.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.login-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tc-muted);
+}
+
+.login-hint {
+  font-size: 12px;
+  color: var(--faint);
+  margin-top: -8px;
+}
+
+.login-btn {
+  margin-top: 4px;
+  height: 40px !important;
+  font-size: 14px !important;
+  width: 100%;
+}

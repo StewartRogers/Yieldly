@@ -28,6 +28,10 @@ node test.js          # or: npm test
 
 # Same suite with branch/line coverage of lib/compute.js (text + HTML report)
 npm run coverage
+
+# User management (interactive prompts)
+npm run user:create           # Create the superuser account
+npm run user:reset-password   # Reset the superuser password
 ```
 
 `test.js` is the only test suite: 37 numbered scenarios (~141 assertions) validating `lib/compute.js` against an in-memory SQLite DB via a hand-rolled `check()`/`checkEq()` harness (no Jest/Mocha). It is a flat script with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios in the file. Coverage is via `c8` (V8 coverage, no source changes); `lib/compute.js` is at 100% statements/branches/lines and the HTML report lands in `coverage/`. Playwright is installed under `client/` but no E2E tests or config exist yet.
@@ -41,7 +45,7 @@ Vite proxies `/api/*` to the Express server, so the client always calls `/api/..
 
 ## Architecture
 
-This is a local single-user portfolio tracker with no authentication.
+This is a single-user portfolio tracker with session-based authentication (one superuser).
 
 **Server (`server.js`, Node/Express, CommonJS)**
 - All API routes live in `server.js`. No router files — everything is registered directly on `app`.
@@ -56,10 +60,13 @@ This is a local single-user portfolio tracker with no authentication.
 - `portfolios` — id, name, code (unique), display_order, cash_balance
 - `transactions` — portfolio_id, ticker, type (`BUY|SELL|DIVIDEND|DIVIDEND_REINVEST|CONTRIBUTION|WITHDRAWAL`), quantity, price, total, commission, date
 - `stock_info` — portfolio_id + ticker (unique pair), market_price, dividend_frequency, dividend_per_share, dividend_yield, last_dividend_date, sector, investment_type
+- `users` — id, username (unique), password_hash (bcrypt)
+- `sessions` — sid, sess (JSON), expired (epoch ms) — SQLite-backed session store
 
 **Client (`client/`, React + Vite, ES modules)**
 - All API calls go through `client/src/api/client.js` — a thin `fetch` wrapper with a shared `request()` helper. Never add raw `fetch('/api/...')` calls in components; import from this module instead.
-- Pages: `Home`, `Summary`, `Portfolios`, `Transactions`, `Dividends`, `Import`
+- Auth state managed in `App.jsx` — if not authenticated, renders `Login` page instead of the app. `api/client.js` fires an `onUnauthorized` callback on 401 responses to force re-login.
+- Pages: `Home`, `Summary`, `Portfolios`, `Transactions`, `Dividends`, `Import`, `Login`
 - Global state in `App.jsx`: `portfolios` list and `pricesTick` counter. Pages receive these as props. When `pricesTick` increments (after a price refresh), price-sensitive pages re-fetch via `useEffect([pricesTick])`.
 - Styling uses Tailwind v4 + a custom design system with CSS custom properties (`--ink`, `--inset`, `--line-2`, etc.). Shadcn/ui components live in `client/src/components/ui/`.
 - `client/src/utils/format.js` — shared currency/percentage formatters used across all pages.

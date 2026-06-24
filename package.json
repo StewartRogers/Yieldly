@@ -8,8 +8,12 @@
     "dev": "concurrently \"node server.js\" \"npm run dev --prefix client\"",
     "build": "npm run build --prefix client",
     "start:prod": "cross-env NODE_ENV=production node server.js",
-    "test": "node test.js",
-    "coverage": "c8 --include=lib/compute.js --reporter=text --reporter=html node test.js"
+    "test": "node test.js && node test-auth.js",
+    "test:math": "node test.js",
+    "test:auth": "node test-auth.js",
+    "coverage": "c8 --include=lib/compute.js --reporter=text --reporter=html node test.js",
+    "user:create": "node manage-user.js create",
+    "user:reset-password": "node manage-user.js reset-password"
   },
   "keywords": [
     "stocks",
@@ -19,9 +23,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.10.0",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "express-session": "^1.19.0"
   },
   "devDependencies": {
     "c8": "^11.0.0",
