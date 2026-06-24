@@ -8,6 +8,8 @@ Project-specific slash commands that extend Claude's behaviour for this codebase
 |---|---|---|
 | `ui-design` | `/ui-design <description>` | Apply the Yieldly fintech design system to a component or page |
 | `skill-review` | `/skill-review <skill-name>` | Review a skill file for quality issues and recommend improvements |
+| `finance-auditor` | `/finance-auditor [code\|diff\|reconcile]` | Audit financial math and reconcile portfolio totals against the live DB |
+| `test-engineer` | `/test-engineer <what to test>` | Create, improve, and review automated tests (backend math, API, Playwright E2E) |
 
 ## Structure
 
