@@ -9,5 +9,6 @@ coverage/
 portfolios.json
 .DS_Store
 .env
+.env*.local
 npm-debug.log*
 .claude/settings.local.json
