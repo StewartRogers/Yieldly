@@ -1,10 +1,14 @@
 require('dotenv').config();
 const express = require('express');
+const session = require('express-session');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const db = require('./database');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
+const SQLiteSessionStore = require('./lib/session-store');
 
 const PORTFOLIOS_BACKUP = path.join(__dirname, 'portfolios.json');
 
@@ -68,12 +72,133 @@ function queryHoldings(portfolioId) {
 // Middleware
 app.use(express.json({ limit: '10mb' }));
 
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.SESSION_SECRET) {
+  console.warn('WARNING: SESSION_SECRET not set — sessions will not persist across server restarts. Set SESSION_SECRET in .env for production.');
+}
+
+app.use(session({
+  store: new SQLiteSessionStore(db),
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' && process.env.TRUST_PROXY === '1',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+}));
+
+if (process.env.TRUST_PROXY === '1') {
+  app.set('trust proxy', 1);
+}
+
 // Serve React build in production, vanilla app in development
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'client', 'dist')));
 } else {
   app.use(express.static('public'));
 }
+
+// ===== AUTHENTICATION =====
+
+app.get('/api/auth/session', (req, res) => {
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+  if (userCount === 0) {
+    return res.json({ authenticated: false, needsSetup: true });
+  }
+  if (req.session.userId) {
+    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.session.userId);
+    if (user) return res.json({ authenticated: true, user: { id: user.id, username: user.username } });
+  }
+  res.json({ authenticated: false, needsSetup: false });
+});
+
+app.post('/api/auth/setup', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || typeof username !== 'string' || username.trim().length < 2) {
+      return res.status(400).json({ error: 'Username must be at least 2 characters' });
+    }
+    if (!password || typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    const hash = await bcrypt.hash(password, 10);
+    const atomicInsert = db.transaction(() => {
+      const count = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+      if (count > 0) return null;
+      return db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username.trim(), hash);
+    });
+    const result = atomicInsert();
+    if (!result) return res.status(403).json({ error: 'Setup already completed' });
+    req.session.regenerate((err) => {
+      if (err) return serverError(res, err);
+      req.session.userId = result.lastInsertRowid;
+      res.json({ success: true, user: { id: result.lastInsertRowid, username: username.trim() } });
+    });
+  } catch (error) {
+    serverError(res, error);
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+    const user = db.prepare('SELECT id, username, password_hash FROM users WHERE username = ?').get(username.trim());
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    req.session.regenerate((err) => {
+      if (err) return serverError(res, err);
+      req.session.userId = user.id;
+      res.json({ success: true, user: { id: user.id, username: user.username } });
+    });
+  } catch (error) {
+    serverError(res, error);
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) return serverError(res, err);
+    res.clearCookie('connect.sid');
+    res.json({ success: true });
+  });
+});
+
+// Auth guard — all routes below this require authentication
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth/')) return next();
+  if (!req.session.userId) return res.status(401).json({ error: 'Authentication required' });
+  next();
+});
+
+app.post('/api/change-password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current and new password are required' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+    const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.session.userId);
+    if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.session.userId);
+    const currentSid = req.sessionID;
+    db.prepare('DELETE FROM sessions WHERE sid != ?').run(currentSid);
+    res.json({ success: true });
+  } catch (error) {
+    serverError(res, error);
+  }
+});
 
 // API Routes
 
