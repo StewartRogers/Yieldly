@@ -700,6 +700,117 @@ section('30. Multiple Cash Dividends Accumulate');
   check('return = -$20',                       h.return,         -20.00);
 }
 
+// ── 31. Yield-First Path — Missing Frequency (multiplier 0) ──────────────────
+section('31. Yield-First — No Frequency');
+{
+  const pid = makePortfolio('T31');
+  buy(pid, 'YLD.TO', 200, 25.00);   // $5000 cost
+
+  // dividend_yield set, but NO dividend_frequency → multiplier = 0
+  setInfo(pid, 'YLD.TO', {
+    market_price: 25.00,
+    dividend_yield: 5.0
+  });
+  const [h] = getHoldings(pid);
+
+  // market_value = 5000 → yield-first path
+  // annual_payout = 5000 × 5% = 250 (still computed)
+  // multiplier 0 → next_payout and div_per_share collapse to 0
+  check('annual_payout = $250',       h.annual_payout,       250.00);
+  check('next_payout = 0 (no freq)',  h.next_payout,           0);
+  check('div_per_share = 0 (no freq)', h.dividend_per_share,   0);
+  check('dividend_yield = 5.0%',      h.dividend_yield,        5.0);
+}
+
+// ── 32. Yield Set but No Market Price → Per-Share Fallback ────────────────────
+section('32. Yield Without Price → Fallback');
+{
+  const pid = makePortfolio('T32');
+  buy(pid, 'NPR.TO', 100, 10.00);   // $1000 cost, no market price set
+
+  // yield is stored, but with no market_price the yield-first guard
+  // (marketValue > 0) fails, so the per-share fallback path is used
+  setInfo(pid, 'NPR.TO', {
+    dividend_yield: 4.0,
+    dividend_per_share: 0.05,
+    dividend_frequency: 'Monthly'
+  });
+  const [h] = getHoldings(pid);
+
+  // market_value = 0 → fallback path despite stored yield
+  // next_payout = 100 × 0.05 = 5 ; annual = 5 × 12 = 60
+  // div_per_share = stored 0.05 ; yield = 0 (no market value)
+  check('market_value = 0',           h.market_value,          0);
+  check('next_payout = $5 (per-share)', h.next_payout,         5.00);
+  check('annual_payout = $60',        h.annual_payout,        60.00);
+  check('div_per_share = $0.05',      h.dividend_per_share,    0.05);
+  check('dividend_yield = 0',         h.dividend_yield,        0);
+}
+
+// ── 33. Both Yield and Per-Share Set → Yield-First Wins ───────────────────────
+section('33. Yield Beats Per-Share');
+{
+  const pid = makePortfolio('T33');
+  buy(pid, 'DUP.TO', 100, 20.00);   // $2000 cost
+
+  // both fields populated; yield-first must take priority and the
+  // stored per-share value (0.50) must be ignored
+  setInfo(pid, 'DUP.TO', {
+    market_price: 20.00,
+    dividend_yield: 6.0,
+    dividend_per_share: 0.50,
+    dividend_frequency: 'Quarterly'
+  });
+  const [h] = getHoldings(pid);
+
+  // yield path: annual = 2000 × 6% = 120 ; next = 120/4 = 30
+  // div_per_share = next/shares = 30/100 = 0.30 (NOT the stored 0.50)
+  check('annual_payout = $120',       h.annual_payout,       120.00);
+  check('next_payout = $30',          h.next_payout,          30.00);
+  check('div_per_share = $0.30 (derived)', h.dividend_per_share, 0.30);
+  check('dividend_yield = 6.0%',      h.dividend_yield,        6.0);
+}
+
+// ── 34. Unknown Frequency String in Per-Share Fallback ────────────────────────
+section('34. Unknown Frequency → Multiplier 0');
+{
+  const pid = makePortfolio('T34');
+  buy(pid, 'UNK.TO', 100, 10.00);   // $1000 cost
+
+  // 'Weekly' is not in FREQ_MAP → multiplier 0
+  setInfo(pid, 'UNK.TO', {
+    market_price: 10.00,
+    dividend_per_share: 0.10,
+    dividend_frequency: 'Weekly'
+  });
+  const [h] = getHoldings(pid);
+
+  // fallback path: next_payout = 100 × 0.10 = 10
+  // annual_payout = 10 × 0 = 0 ; yield = 0/1000 = 0
+  check('next_payout = $10',          h.next_payout,          10.00);
+  check('annual_payout = 0 (bad freq)', h.annual_payout,       0);
+  check('div_per_share = $0.10',      h.dividend_per_share,    0.10);
+  check('dividend_yield = 0',         h.dividend_yield,        0);
+}
+
+// ── 35. Negative Return % on a Loss Position ──────────────────────────────────
+section('35. Negative Return %');
+{
+  const pid = makePortfolio('T35');
+  buy(pid, 'LOSS.TO', 100, 50.00, 10.00);   // $5000 cost + $10 commission
+
+  setInfo(pid, 'LOSS.TO', { market_price: 30.00 });   // price dropped
+  const [h] = getHoldings(pid);
+
+  // acb = (5000 + 10) × 100/100 = 5010
+  // market_value = 100 × 30 = 3000
+  // return = 3000 + 0 + 0 - 5000 = -2000
+  // return_percent = -2000 / 5010 × 100 = -39.9202%
+  check('acb = $5010',                h.acb,               5010.00);
+  check('return = -$2000',            h.return,           -2000.00);
+  check('return_percent ≈ -39.92%',   h.return_percent,    -39.9202, 0.001);
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 const total = passed + failed;
