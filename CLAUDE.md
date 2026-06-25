@@ -23,18 +23,31 @@ npm run build
 # Production server (serves built client as static files)
 npm run start:prod
 
-# Backend math test suite (in-memory SQLite, no server needed)
-node test.js          # or: npm test
+# Full backend test suite (all three suites, in-memory SQLite, no live server)
+npm test
 
-# Same suite with branch/line coverage of lib/compute.js (text + HTML report)
+# Individual suites
+npm run test:math     # test.js      — computeHoldings math
+npm run test:full     # test-full.js — broad math/CSV/monthly-ACB/validation coverage
+npm run test:auth     # test-auth.js — auth routes + guard against the real app
+
+# Branch/line coverage of lib/compute.js (text + HTML report)
 npm run coverage
+
+# Apply schema to the configured database (local file, or Turso if env is set)
+npm run db:migrate
 
 # User management (interactive prompts)
 npm run user:create           # Create the superuser account
 npm run user:reset-password   # Reset the superuser password
 ```
 
-`test.js` is the only test suite: 37 numbered scenarios (~141 assertions) validating `lib/compute.js` against an in-memory SQLite DB via a hand-rolled `check()`/`checkEq()` harness (no Jest/Mocha). It is a flat script with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios in the file. Coverage is via `c8` (V8 coverage, no source changes); `lib/compute.js` is at 100% statements/branches/lines and the HTML report lands in `coverage/`. Playwright is installed under `client/` but no E2E tests or config exist yet.
+There are three flat-script test suites (no Jest/Mocha), all using a hand-rolled `check()`/`checkEq()` harness:
+- `test.js` (~141 assertions) — `computeHoldings` math.
+- `test-full.js` (~220 assertions) — broader math, CSV import, `computeMonthlyACB`, and validation rules.
+- `test-auth.js` (~52 assertions) — boots the **real async app** (`createApp(await createDb(...))`) over an ephemeral HTTP port to exercise the auth routes, the auth guard, JWT cookies, cascade delete, and login rate-limiting.
+
+`test.js`/`test-full.js` validate the **driver-agnostic** money math, so they run synchronously on `better-sqlite3` (a devDependency) for a tight, await-free harness, importing the shared `HOLDINGS_SQL`/`GROUP_ORDER` from `lib/holdings.js` so the aggregation can't drift. `test-auth.js` exercises the **real** async libSQL schema + app (backed by a temp-file libSQL DB — `:memory:` is per-connection in libSQL and would not be shared across an interactive transaction). They are flat scripts with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios. Coverage (`npm run coverage`) is via `c8` over `test.js`; `lib/compute.js` is at 100% statements/branches/lines, HTML report in `coverage/`. Playwright is installed under `client/` but no E2E tests exist yet.
 
 ## Ports
 
@@ -45,23 +58,34 @@ Vite proxies `/api/*` to the Express server, so the client always calls `/api/..
 
 ## Architecture
 
-This is a single-user portfolio tracker with session-based authentication (one superuser).
+This is a single-user portfolio tracker with stateless JWT authentication (one superuser).
 
-**Server (`server.js`, Node/Express, CommonJS)**
-- All API routes live in `server.js`. No router files — everything is registered directly on `app`.
-- Database access via `better-sqlite3` (synchronous). All queries use parameterized statements.
-- `database.js` initializes the DB and runs all schema migrations on startup. Migrations use `pragma_table_info` guards so they're safe to re-run.
-- `lib/compute.js` — pure function `computeHoldings(rows)` that derives return, ACB, yield, and payout from raw DB rows. No DB dependency; used by the `/summary` and `/overview` endpoints.
-- `lib/parse.js` — `parseCSVLine` and `parseDate` utilities used by the CSV import route.
-- Market prices are fetched from TMX (Toronto Stock Exchange GraphQL API) via `fetchTMXQuote`. Tickers are validated with `/^[A-Z0-9.]{1,12}$/` before interpolation.
-- `portfolios.json` is a startup backup of the portfolios table, written on server start and auto-restored if the DB is empty.
+**Persistence — libSQL, environment-switched**
+- Data access is **async** (libSQL via `@libsql/client`). `database.js` `createDb(url?)` resolves the connection by env: `TURSO_DATABASE_URL` (+ `TURSO_AUTH_TOKEN`) → remote **Turso** (hosted/Vercel); otherwise a local `file:yieldly.db`; pass an explicit url (e.g. a temp file) in tests. It returns a thin async wrapper exposing better-sqlite3-style `get/all/run/exec/transaction` so route code stays readable.
+- `runMigrations(db)` is idempotent (`CREATE TABLE IF NOT EXISTS`, single round-trip), safe to run on every cold start. No incremental ALTER history (that was the old better-sqlite3 build).
 
-**Database schema (SQLite at `yieldly.db`)**
+**Server (Node/Express, CommonJS) — factored for testability**
+- `server.js` — thin local entrypoint: `await createDb()`, restore/back up `portfolios.json`, enforce `SESSION_SECRET`, `app.listen`. No routes.
+- `api/index.js` — **Vercel serverless entrypoint**: builds the app once per warm instance against Turso, `secureCookies`/`trustProxy` on. Requires `SESSION_SECRET` + `TURSO_DATABASE_URL`.
+- `app.js` exports `createApp(db, options)` — registers **all** routes against the injected async `db`. No module-load side effects. Options: `sessionSecret`, `secureCookies`, `trustProxy`, `backupPortfolios`, `serveClient`, `rateLimit`, `verbose`. Also exports pure `computeMonthlyACB(rows, now?)` and the market-data fetchers.
+- `lib/auth.js` — **stateless JWT** auth: `signToken`/`verifyToken` + httpOnly `token` cookie. No sessions table; verification is a signature check (no per-request DB hit — important on serverless). Trade-off: logout clears the cookie and tokens expire; there's no server-side revocation list.
+- `lib/holdings.js` — `HOLDINGS_SQL` + `GROUP_ORDER` + async `prepareHoldings(db)`: single source of truth for the holdings aggregation, shared by `app.js` and the (sync) math test suites.
+- `lib/compute.js` — pure `computeHoldings(rows)`; no DB dependency; used by `/summary` and `/overview`.
+- `lib/parse.js` — `parseCSVLine` / `parseDate` for the CSV import route.
+- `lib/portfolios-backup.js` — async `makePortfoliosBackup` / `restorePortfoliosIfEmpty`. `portfolios.json` is a **local-file-only** convenience (portfolio names/codes/order, not the ledger); a no-op on Vercel (ephemeral FS) where Turso's own backups are the source of truth.
+- Market prices: TMX (TSX GraphQL) via `fetchTMXQuote`, Yahoo Finance for US tickers. Tickers validated with `/^[A-Z0-9.]{1,12}$/`.
+- **Security**: `helmet` (CSP deferred to the platform), `express-rate-limit` on `/api/auth/login` + `/api/auth/setup`, write-route validation (transaction-type whitelist + finite-number checks), portfolio delete cascades explicitly (not relying on the FK pragma), and `SESSION_SECRET` (the JWT secret) is required in production — `server.js`/`api/index.js` refuse to start without it.
+
+**Database schema (libSQL: local `file:yieldly.db` or Turso)**
 - `portfolios` — id, name, code (unique), display_order, cash_balance
-- `transactions` — portfolio_id, ticker, type (`BUY|SELL|DIVIDEND|DIVIDEND_REINVEST|CONTRIBUTION|WITHDRAWAL`), quantity, price, total, commission, date
+- `transactions` — portfolio_id, ticker, type (`BUY|SELL|DIVIDEND|DIVIDEND_REINVEST|CONTRIBUTION|WITHDRAWAL`), quantity, price, total, commission, date, market
 - `stock_info` — portfolio_id + ticker (unique pair), market_price, dividend_frequency, dividend_per_share, dividend_yield, last_dividend_date, sector, investment_type
 - `users` — id, username (unique), password_hash (bcrypt)
-- `sessions` — sid, sess (JSON), expired (epoch ms) — SQLite-backed session store
+- (No `sessions` table — auth is stateless JWT.)
+
+**Deployment (Vercel + Turso)**
+- `vercel.json` builds the client (`client/dist`), routes `/api/*` to `api/index.js`, and falls back to `index.html` for SPA routes.
+- Provision a Turso DB, set `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `SESSION_SECRET` in Vercel env, run `npm run db:migrate` once, then create the superuser. See README for the full sequence.
 
 **Client (`client/`, React + Vite, ES modules)**
 - All API calls go through `client/src/api/client.js` — a thin `fetch` wrapper with a shared `request()` helper. Never add raw `fetch('/api/...')` calls in components; import from this module instead.
@@ -80,13 +104,13 @@ The money math is the heart of this app, and several rules are non-obvious and e
 - `DIVIDEND` (cash) accumulates `dividends_paid`; `DIVIDEND_REINVEST` instead adds shares and buy cost. `cash_balance` is a **manual** field — cash-flow transactions do not update it.
 - The holdings query filters `HAVING shares > 0`, so fully-sold positions never appear in `/summary` or `/overview`.
 
-Run `node test.js` after touching `lib/compute.js` or the `HOLDINGS_SQL` aggregation in `server.js`.
+Run `npm test` after touching `lib/compute.js` or the `HOLDINGS_SQL` aggregation in `lib/holdings.js`.
 
 ## Project skills
 
 Invoke these on demand (`/<name>`); they are not automatic:
 - `/finance-auditor` — audits the math and reconciles portfolio totals against the live DB.
-- `/test-engineer` — creates/updates tests following the `test.js` conventions.
+- `/test-engineer` — creates/updates tests following the `test.js`/`test-full.js`/`test-auth.js` conventions.
 - `/ui-design` — see below.
 
 ## UI Work

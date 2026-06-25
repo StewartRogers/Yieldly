@@ -1,18 +1,21 @@
 #!/usr/bin/env node
+'use strict';
 
+require('dotenv').config();
 const readline = require('readline');
 const bcrypt = require('bcryptjs');
-const db = require('./database');
+const { createDb } = require('./database');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise(resolve => rl.question(q, resolve));
 
 async function main() {
   const action = process.argv[2];
+  const db = await createDb();
 
   if (action === 'create') {
-    const existing = db.prepare('SELECT COUNT(*) as count FROM users').get();
-    if (existing.count > 0) {
+    const existing = await db.get('SELECT COUNT(*) as count FROM users');
+    if (Number(existing.count) > 0) {
       console.log('A user already exists. Use "reset-password" to change the password.');
       process.exit(1);
     }
@@ -27,11 +30,11 @@ async function main() {
       process.exit(1);
     }
     const hash = await bcrypt.hash(password, 10);
-    db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username.trim(), hash);
+    await db.run('INSERT INTO users (username, password_hash) VALUES (?, ?)', username.trim(), hash);
     console.log(`User "${username.trim()}" created.`);
 
   } else if (action === 'reset-password') {
-    const user = db.prepare('SELECT id, username FROM users LIMIT 1').get();
+    const user = await db.get('SELECT id, username FROM users LIMIT 1');
     if (!user) {
       console.log('No user exists. Use "create" to set one up.');
       process.exit(1);
@@ -43,9 +46,10 @@ async function main() {
       process.exit(1);
     }
     const hash = await bcrypt.hash(password, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
-    db.prepare('DELETE FROM sessions').run();
-    console.log('Password updated. All sessions have been invalidated.');
+    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hash, user.id);
+    // Stateless JWT auth: there is no server-side session list to clear here.
+    // Outstanding tokens on other devices expire naturally.
+    console.log('Password updated.');
 
   } else {
     console.log('Yieldly user management');
