@@ -47,11 +47,32 @@ function wrap(client) {
   };
 }
 
+/** True if `column` already exists on `table`. */
+async function columnExists(db, table, column) {
+  // table/column are trusted internal literals, never user input.
+  const rows = await db.all(`PRAGMA table_info(${table})`);
+  return rows.some((r) => r.name === column);
+}
+
+/** Idempotent `ALTER TABLE ... ADD COLUMN` for upgrading older databases. */
+async function addColumnIfMissing(db, table, column, definition) {
+  if (!(await columnExists(db, table, column))) {
+    await db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 /**
- * Create the schema. Idempotent (`IF NOT EXISTS`) and a single round-trip, so
- * it is safe to call on every connection / cold start. Reflects the final
- * shape of the tables (no incremental ALTER history — that lived in the old
- * better-sqlite3 build and is no longer needed for a fresh libSQL/Turso DB).
+ * Create and upgrade the schema. Safe to call on every connection / cold start.
+ *
+ * Two layers:
+ *  1. `CREATE TABLE IF NOT EXISTS` defines the final table shape — a fresh
+ *     local/Turso DB is fully provisioned in one round-trip.
+ *  2. Guarded incremental migrations bring a *pre-existing* DB (created before
+ *     a column or the widened CHECK constraint existed) up to that same shape.
+ *     Without these, an older `yieldly.db` — or an older dump imported into
+ *     Turso — would be missing columns the routes read/write (`cash_balance`,
+ *     `commission`, `market`, `dividend_yield`, …) and fail with `no such
+ *     column` / CHECK errors.
  *
  * No `sessions` table: authentication is now stateless JWT (see lib/auth.js).
  */
@@ -103,7 +124,52 @@ async function runMigrations(db) {
       password_hash TEXT NOT NULL,
       created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+  `);
 
+  // --- Incremental column adds for databases created before these existed ---
+  await addColumnIfMissing(db, 'portfolios', 'display_order', 'INTEGER DEFAULT 0');
+  await addColumnIfMissing(db, 'portfolios', 'cash_balance', 'REAL');
+  await addColumnIfMissing(db, 'transactions', 'commission', 'REAL DEFAULT 0');
+  await addColumnIfMissing(db, 'transactions', 'market', "TEXT DEFAULT 'TMX'");
+  await addColumnIfMissing(db, 'stock_info', 'sector', 'TEXT');
+  await addColumnIfMissing(db, 'stock_info', 'investment_type', 'TEXT');
+  await addColumnIfMissing(db, 'stock_info', 'dividend_yield', 'REAL');
+
+  // --- Widen the transactions.type CHECK constraint (CONTRIBUTION/WITHDRAWAL) ---
+  // Old DBs were created with a 4-type CHECK; a constraint can't be altered in
+  // place, so rebuild the table (now that all columns above exist) when the
+  // stored DDL predates the cash-flow types.
+  const txDef = await db.get(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`
+  );
+  if (txDef && txDef.sql && !String(txDef.sql).includes('CONTRIBUTION')) {
+    await db.exec(`
+      PRAGMA foreign_keys=OFF;
+      CREATE TABLE transactions_new (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        portfolio_id INTEGER NOT NULL,
+        ticker       TEXT NOT NULL DEFAULT 'CASH',
+        type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL')),
+        quantity     REAL NOT NULL DEFAULT 0,
+        price        REAL NOT NULL DEFAULT 0,
+        total        REAL NOT NULL DEFAULT 0,
+        commission   REAL DEFAULT 0,
+        date         TEXT NOT NULL,
+        market       TEXT DEFAULT 'TMX',
+        created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
+      );
+      INSERT INTO transactions_new (id, portfolio_id, ticker, type, quantity, price, total, commission, date, market, created_at)
+      SELECT id, portfolio_id, ticker, type, quantity, price, total, COALESCE(commission,0), date, COALESCE(market,'TMX'), created_at
+      FROM transactions;
+      DROP TABLE transactions;
+      ALTER TABLE transactions_new RENAME TO transactions;
+      PRAGMA foreign_keys=ON;
+    `);
+  }
+
+  // --- Indexes (last: a table rebuild above drops the table's old indexes) ---
+  await db.exec(`
     CREATE INDEX IF NOT EXISTS idx_transactions_portfolio ON transactions(portfolio_id);
     CREATE INDEX IF NOT EXISTS idx_transactions_portfolio_ticker ON transactions(portfolio_id, ticker);
   `);
