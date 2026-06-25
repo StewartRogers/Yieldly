@@ -126,6 +126,7 @@ function createApp(db, options = {}) {
       // Atomic "first user wins": count + insert inside one write transaction.
       let userId;
       const tx = await db.transaction('write');
+      let committed = false;
       try {
         const count = Number((await tx.execute('SELECT COUNT(*) as count FROM users')).rows[0].count);
         if (count > 0) {
@@ -137,9 +138,12 @@ function createApp(db, options = {}) {
           args: [username.trim(), hash],
         });
         await tx.commit();
+        committed = true;
         userId = Number(result.lastInsertRowid);
       } catch (e) {
-        await tx.rollback();
+        // Only roll back if commit didn't already finalize the tx — calling
+        // rollback on a committed tx throws and would mask the real error.
+        if (!committed) await tx.rollback();
         throw e;
       }
 
@@ -303,13 +307,15 @@ function createApp(db, options = {}) {
       if (!exists) return res.status(404).json({ error: 'Portfolio not found' });
 
       const tx = await db.transaction('write');
+      let committed = false;
       try {
         await tx.execute({ sql: 'DELETE FROM stock_info WHERE portfolio_id = ?', args: [id] });
         await tx.execute({ sql: 'DELETE FROM transactions WHERE portfolio_id = ?', args: [id] });
         await tx.execute({ sql: 'DELETE FROM portfolios WHERE id = ?', args: [id] });
         await tx.commit();
+        committed = true;
       } catch (e) {
-        await tx.rollback();
+        if (!committed) await tx.rollback();
         throw e;
       }
 
@@ -441,34 +447,41 @@ function createApp(db, options = {}) {
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const errors = [];
 
+      // Dedup the network fetch per (ticker, market): the same ticker can be
+      // held on different exchanges across portfolios and must be quoted from
+      // the matching source (TMX vs Yahoo) with the matching response shape, so
+      // the market is part of the cache key, not just the ticker.
+      const quoteKey = (ticker, market) => `${ticker} ${market ?? ''}`;
       const uniqueHoldings = [];
       const seen = new Set();
       for (const h of holdingRows) {
-        if (!seen.has(h.ticker)) { seen.add(h.ticker); uniqueHoldings.push(h); }
+        const k = quoteKey(h.ticker, h.market);
+        if (!seen.has(k)) { seen.add(k); uniqueHoldings.push(h); }
       }
 
       const quotes = {};
       for (let i = 0; i < uniqueHoldings.length; i++) {
         const { ticker, market } = uniqueHoldings[i];
         const isUS = market === 'NYSE' || market === 'NASDAQ';
+        const key = quoteKey(ticker, market);
         try {
           if (isUS) {
-            quotes[ticker] = await fetchYahooQuote(ticker);
-            console.log(`${ticker} (${market} via Yahoo): $${quotes[ticker]?.price?.toFixed(2)}`);
+            quotes[key] = await fetchYahooQuote(ticker);
+            console.log(`${ticker} (${market} via Yahoo): $${quotes[key]?.price?.toFixed(2)}`);
           } else {
-            quotes[ticker] = await fetchTMXQuote(ticker);
-            console.log(`${ticker} (TMX): $${quotes[ticker]?.price?.toFixed(2)}`);
+            quotes[key] = await fetchTMXQuote(ticker);
+            console.log(`${ticker} (TMX): $${quotes[key]?.price?.toFixed(2)}`);
           }
         } catch (e) {
           errors.push({ ticker, error: e.message });
-          quotes[ticker] = null;
+          quotes[key] = null;
         }
         if (i < uniqueHoldings.length - 1) await wait(300);
       }
 
       let updated = 0;
       for (const { portfolio_id, ticker, market } of holdingRows) {
-        const q = quotes[ticker];
+        const q = quotes[quoteKey(ticker, market)];
         if (!q) continue;
         const isUS = market === 'NYSE' || market === 'NASDAQ';
         if (isUS) {
@@ -482,7 +495,7 @@ function createApp(db, options = {}) {
         updated++;
       }
 
-      res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueHoldings.length} unique tickers)`,
+      res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueHoldings.length} unique quotes)`,
                  updated, total: holdingRows.length, errors: errors.length ? errors : undefined });
     } catch (error) {
       serverError(res, error);
@@ -707,6 +720,11 @@ function createApp(db, options = {}) {
 
           const [dateStr, symbol, portfolioCode, typeCode, quantityStr, priceStr, totalStr] = parts;
 
+          // Uppercase the ticker to match every other write path (POST
+          // /transactions, PUT .../stocks). The holdings GROUP BY t.ticker is
+          // case-sensitive, so a lowercase import would split one position into
+          // two case-variant holdings.
+          const cleanTicker = symbol.trim().toUpperCase();
           const cleanPortfolioCode = portfolioCode.toUpperCase().trim();
           const portfolio = await db.get('SELECT id, code FROM portfolios WHERE code = ?', cleanPortfolioCode);
           if (!portfolio) {
@@ -724,8 +742,8 @@ function createApp(db, options = {}) {
 
           const duplicate = await db.get(`
             SELECT id FROM transactions
-            WHERE portfolio_id = ? AND ticker = ? AND type = ? AND date = ? AND quantity = ? AND price = ?
-          `, portfolio.id, symbol, type, parsedDate, quantity, price);
+            WHERE portfolio_id = ? AND ticker = ? AND type = ? AND date = ? AND quantity = ? AND price = ? AND total = ?
+          `, portfolio.id, cleanTicker, type, parsedDate, quantity, price, total);
 
           if (duplicate) {
             errors.push({ line: i + 1, error: 'Duplicate transaction (skipped)', data: line });
@@ -735,7 +753,7 @@ function createApp(db, options = {}) {
           await db.run(`
             INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-          `, portfolio.id, symbol, type, quantity, price, total, parsedDate);
+          `, portfolio.id, cleanTicker, type, quantity, price, total, parsedDate);
           imported.push({ line: i + 1, symbol, portfolio: portfolioCode, date: parsedDate });
         } catch (error) {
           errors.push({ line: i + 1, error: error.message, data: line });
