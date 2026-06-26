@@ -91,3 +91,16 @@ export const getDividendsMonthly = () =>
 // ── Import ──────────────────────────────────────────────────────────────────
 export const importCsv = (csvData) =>
   request('/api/import/csv', { method: 'POST', body: json({ csvData }) })
+
+// ── Full backup (complete export / import) ───────────────────────────────────
+// Whole-portfolio snapshot for server-to-server moves — distinct from the CSV
+// transaction import above. Carries portfolios, transactions, and stock_info.
+export const exportData = () =>
+  request('/api/export')
+
+// Row counts only (no data) — used by the restore confirmation.
+export const getDataCounts = () =>
+  request('/api/export/counts')
+
+export const importData = (data) =>
+  request('/api/import', { method: 'POST', body: json(data) })
