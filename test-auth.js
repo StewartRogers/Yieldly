@@ -344,6 +344,158 @@ async function run() {
       limited.close();
     }
   }
+
+  // ── 23-26. Full backup (complete export / import) ──────────────────────────
+  // Runs against a dedicated app so the destructive replace-all import can't
+  // disturb the shared main-suite DB. Sets up a user + portfolio + transactions
+  // + stock_info, then exercises export, the auth guard, replace-all import,
+  // round-trip fidelity, and payload validation.
+  const backup = await bootApp();
+  try {
+    // 23. Export shape + auth guard
+    section('23. Full backup – export shape & auth guard');
+    const noauth = await req('GET', '/api/export', null, null, backup.base);
+    checkEq('export without token → 401', noauth.status, 401);
+
+    const setup = await req('POST', '/api/auth/setup', { username: 'owner', password: 'backuppass123' }, null, backup.base);
+    const cookie = extractToken(setup.cookie);
+
+    const p = await req('POST', '/api/portfolios', { name: 'Registered', code: 'REG' }, cookie, backup.base);
+    const pid = p.body.id;
+    await req('POST', '/api/transactions',
+      { portfolio_id: pid, ticker: 'RY.TO', type: 'BUY', quantity: 10, price: 100, total: 1000, date: '2024-01-02' }, cookie, backup.base);
+    await req('POST', '/api/transactions',
+      { portfolio_id: pid, ticker: 'RY.TO', type: 'DIVIDEND', quantity: 0, price: 0, total: 12, date: '2024-03-15' }, cookie, backup.base);
+    await req('PUT', `/api/portfolios/${pid}/stocks/RY.TO`,
+      { sector: 'Financials', investment_type: 'Stock', dividend_per_share: 1.2 }, cookie, backup.base);
+
+    const exp = await req('GET', '/api/export', null, cookie, backup.base);
+    checkEq('export → 200', exp.status, 200);
+    checkEq('version = 1', exp.body.version, 1);
+    checkTruthy('exportedAt present', exp.body.exportedAt);
+    checkEq('1 portfolio exported', exp.body.portfolios.length, 1);
+    checkEq('2 transactions exported', exp.body.transactions.length, 2);
+    checkEq('1 stock_info exported', exp.body.stock_info.length, 1);
+    checkEq('stock_info sector carried', exp.body.stock_info[0].sector, 'Financials');
+    checkEq('portfolio code carried', exp.body.portfolios[0].code, 'REG');
+
+    // 24. Import auth guard + validation
+    section('24. Full backup – import auth guard & validation');
+    const impNoAuth = await req('POST', '/api/import', { version: 1, portfolios: [], transactions: [], stock_info: [] }, null, backup.base);
+    checkEq('import without token → 401', impNoAuth.status, 401);
+
+    const badVersion = await req('POST', '/api/import', { version: 99, portfolios: [], transactions: [], stock_info: [] }, cookie, backup.base);
+    checkEq('wrong version → 400', badVersion.status, 400);
+
+    const missingArrays = await req('POST', '/api/import', { version: 1 }, cookie, backup.base);
+    checkEq('missing arrays → 400', missingArrays.status, 400);
+
+    const badType = await req('POST', '/api/import', {
+      version: 1,
+      portfolios: [{ id: 1, name: 'X', code: 'X' }],
+      transactions: [{ id: 1, portfolio_id: 1, ticker: 'X', type: 'FROB', quantity: 1, price: 1, total: 1, date: '2024-01-01' }],
+      stock_info: [],
+    }, cookie, backup.base);
+    checkEq('invalid tx type → 400', badType.status, 400);
+
+    const orphan = await req('POST', '/api/import', {
+      version: 1,
+      portfolios: [{ id: 1, name: 'X', code: 'X' }],
+      transactions: [{ id: 1, portfolio_id: 999, ticker: 'X', type: 'BUY', quantity: 1, price: 1, total: 1, date: '2024-01-01' }],
+      stock_info: [],
+    }, cookie, backup.base);
+    checkEq('orphan portfolio_id → 400', orphan.status, 400);
+
+    const missingTicker = await req('POST', '/api/import', {
+      version: 1,
+      portfolios: [{ id: 1, name: 'X', code: 'X' }],
+      transactions: [{ id: 1, portfolio_id: 1, type: 'BUY', quantity: 1, price: 1, total: 1, date: '2024-01-01' }],
+      stock_info: [],
+    }, cookie, backup.base);
+    checkEq('missing ticker → 400 (not 500)', missingTicker.status, 400);
+
+    const nullTotal = await req('POST', '/api/import', {
+      version: 1,
+      portfolios: [{ id: 1, name: 'X', code: 'X' }],
+      transactions: [{ id: 1, portfolio_id: 1, ticker: 'X', type: 'BUY', quantity: 1, price: 1, total: null, date: '2024-01-01' }],
+      stock_info: [],
+    }, cookie, backup.base);
+    checkEq('null numeric field → 400 (not 500)', nullTotal.status, 400);
+
+    const dupId = await req('POST', '/api/import', {
+      version: 1,
+      portfolios: [{ id: 1, name: 'A', code: 'A' }, { id: 1, name: 'B', code: 'B' }],
+      transactions: [],
+      stock_info: [],
+    }, cookie, backup.base);
+    checkEq('duplicate portfolio id → 400 (not 500)', dupId.status, 400);
+
+    // Failed imports must not have touched the existing data.
+    const afterBad = await req('GET', '/api/export', null, cookie, backup.base);
+    checkEq('data intact after rejected imports', afterBad.body.portfolios.length, 1);
+
+    // Count endpoint mirrors the export, cheaply.
+    const countsNoAuth = await req('GET', '/api/export/counts', null, null, backup.base);
+    checkEq('counts without token → 401', countsNoAuth.status, 401);
+    const cnt = await req('GET', '/api/export/counts', null, cookie, backup.base);
+    checkEq('counts portfolios = 1', cnt.body.portfolios, 1);
+    checkEq('counts transactions = 2', cnt.body.transactions, 2);
+    checkEq('counts stock_info = 1', cnt.body.stock_info, 1);
+
+    // 25. Round-trip fidelity: export → import same → unchanged
+    section('25. Full backup – round-trip preserves data');
+    const roundtrip = await req('POST', '/api/import', exp.body, cookie, backup.base);
+    checkEq('round-trip import → 200', roundtrip.status, 200);
+    checkEq('imported portfolios count', roundtrip.body.imported.portfolios, 1);
+    checkEq('imported transactions count', roundtrip.body.imported.transactions, 2);
+    const reExp = await req('GET', '/api/export', null, cookie, backup.base);
+    checkEq('still 1 portfolio', reExp.body.portfolios.length, 1);
+    checkEq('still 2 transactions', reExp.body.transactions.length, 2);
+    checkEq('still 1 stock_info', reExp.body.stock_info.length, 1);
+    checkEq('portfolio id preserved', reExp.body.portfolios[0].id, exp.body.portfolios[0].id);
+    checkEq('stock_info sector preserved', reExp.body.stock_info[0].sector, 'Financials');
+
+    // 26. Replace-all semantics: a different backup wipes prior data
+    section('26. Full backup – import replaces all data');
+    const replacement = {
+      version: 1,
+      portfolios: [{ id: 50, name: 'TFSA', code: 'TFSA', display_order: 0, cash_balance: 250 }],
+      transactions: [{ id: 70, portfolio_id: 50, ticker: 'ENB.TO', type: 'BUY', quantity: 5, price: 50, total: 250, commission: 0, date: '2025-02-02', market: 'TMX' }],
+      stock_info: [{ id: 90, portfolio_id: 50, ticker: 'ENB.TO', sector: 'Energy', investment_type: 'Stock' }],
+    };
+    const repRes = await req('POST', '/api/import', replacement, cookie, backup.base);
+    checkEq('replace import → 200', repRes.status, 200);
+    const afterReplace = await req('GET', '/api/export', null, cookie, backup.base);
+    checkEq('old REG portfolio gone', afterReplace.body.portfolios.filter(p => p.code === 'REG').length, 0);
+    checkEq('new TFSA portfolio present', afterReplace.body.portfolios.filter(p => p.code === 'TFSA').length, 1);
+    checkEq('cash_balance carried', afterReplace.body.portfolios[0].cash_balance, 250);
+    checkEq('only replacement transactions', afterReplace.body.transactions.length, 1);
+    checkEq('user still logged in after import', (await req('GET', '/api/auth/session', null, cookie, backup.base)).body.authenticated, true);
+  } finally {
+    backup.close();
+  }
+
+  // 27. Import keeps the portfolios.json backup hook in step (like other mutations)
+  section('27. Full backup – import fires backupPortfolios hook');
+  {
+    let hookCalls = 0;
+    const hooked = await bootApp({ backupPortfolios: async () => { hookCalls += 1; } });
+    try {
+      const s = await req('POST', '/api/auth/setup', { username: 'owner', password: 'backuppass123' }, null, hooked.base);
+      const c = extractToken(s.cookie);
+      const before = hookCalls;
+      const r = await req('POST', '/api/import', {
+        version: 1,
+        portfolios: [{ id: 1, name: 'Main', code: 'MAIN', cash_balance: 0 }],
+        transactions: [],
+        stock_info: [],
+      }, c, hooked.base);
+      checkEq('import → 200', r.status, 200);
+      checkTruthy('backupPortfolios called after import', hookCalls > before);
+    } finally {
+      hooked.close();
+    }
+  }
 }
 
 // ─── Boot and run ────────────────────────────────────────────────────────────

@@ -29,6 +29,74 @@ const toFiniteNumber = (v) => {
   return Number.isFinite(n) ? n : NaN;
 };
 
+// ─── Full backup (complete export/import) ────────────────────────────────────
+// Distinct from the CSV *transaction* import: this is a whole-portfolio
+// snapshot (portfolios + transactions + stock_info) for moving a deployment
+// server-to-server. The `users` table is intentionally excluded — credentials
+// are managed per-server (npm run user:create) and never travel in a backup.
+// IDs are preserved on import so the portfolio_id references stay intact.
+const EXPORT_VERSION = 1;
+
+// Column lists are read from the live schema (PRAGMA) rather than hardcoded, so
+// export/import automatically pick up any column a future migration adds and
+// never silently drop data. `table` is always a trusted internal literal.
+async function tableColumns(db, table) {
+  const rows = await db.all(`PRAGMA table_info(${table})`);
+  return rows.map((r) => r.name);
+}
+
+const insertSQL = (table, cols) =>
+  `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
+const rowArgs = (obj, cols) => cols.map((c) => (obj[c] === undefined ? null : obj[c]));
+
+/**
+ * Validate a parsed backup payload before any DB writes. Returns an array of
+ * human-readable error strings (empty === valid). Checks version, table shape,
+ * transaction-type whitelist, finite numeric fields, and that every
+ * transaction/stock_info row points at a portfolio present in the same file.
+ */
+function validateBackupPayload(payload) {
+  const errors = [];
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return ['Backup must be a JSON object'];
+  }
+  if (payload.version !== EXPORT_VERSION) {
+    errors.push(`Unsupported backup version (expected ${EXPORT_VERSION}, got ${payload.version ?? 'none'})`);
+  }
+  for (const table of ['portfolios', 'transactions', 'stock_info']) {
+    if (!Array.isArray(payload[table])) errors.push(`"${table}" must be an array`);
+  }
+  if (errors.length) return errors; // shape is wrong; deeper checks would be noise
+
+  const portfolioIds = new Set();
+  payload.portfolios.forEach((p, i) => {
+    if (p == null || typeof p !== 'object') return errors.push(`portfolios[${i}] is not an object`);
+    if (p.id == null) return errors.push(`portfolios[${i}] is missing id`);
+    if (portfolioIds.has(p.id)) errors.push(`portfolios[${i}] has duplicate id ${p.id}`);
+    if (!p.name || !p.code) errors.push(`portfolios[${i}] is missing name/code`);
+    portfolioIds.add(p.id);
+  });
+  payload.transactions.forEach((t, i) => {
+    if (t == null || typeof t !== 'object') return errors.push(`transactions[${i}] is not an object`);
+    if (!TRANSACTION_TYPES.has(t.type)) errors.push(`transactions[${i}] has invalid type "${t.type}"`);
+    if (!portfolioIds.has(t.portfolio_id)) errors.push(`transactions[${i}] references unknown portfolio_id ${t.portfolio_id}`);
+    if (!t.ticker) errors.push(`transactions[${i}] is missing ticker`);
+    for (const f of ['quantity', 'price', 'total']) {
+      // toFiniteNumber returns null for missing/null/'' — reject those too, not
+      // just NaN, so a null lands as a 400 here rather than a NOT NULL 500 at insert.
+      const n = toFiniteNumber(t[f]);
+      if (n === null || Number.isNaN(n)) errors.push(`transactions[${i}].${f} must be a number`);
+    }
+    if (!t.date) errors.push(`transactions[${i}] is missing date`);
+  });
+  payload.stock_info.forEach((s, i) => {
+    if (s == null || typeof s !== 'object') return errors.push(`stock_info[${i}] is not an object`);
+    if (!portfolioIds.has(s.portfolio_id)) errors.push(`stock_info[${i}] references unknown portfolio_id ${s.portfolio_id}`);
+    if (!s.ticker) errors.push(`stock_info[${i}] is missing ticker`);
+  });
+  return errors;
+}
+
 /**
  * Build the Express application around an already-open database wrapper
  * (see database.js / createDb). All data access is async (libSQL). No
@@ -72,6 +140,11 @@ function createApp(db, options = {}) {
   // to the built client's asset hashes); helmet's default CSP would block the SPA.
   app.use(helmet({ contentSecurityPolicy: false }));
 
+  // A full backup can be larger than any normal request body. Give the import
+  // route a higher cap (registered first, so the global parser below sees the
+  // body already parsed and skips it) — otherwise an export that succeeds could
+  // exceed the 10mb limit and fail to re-import with a 413.
+  app.use('/api/import', express.json({ limit: '50mb' }));
   app.use(express.json({ limit: '10mb' }));
   app.use(cookieParser());
 
@@ -767,6 +840,104 @@ function createApp(db, options = {}) {
         imported: imported.length,
         errors: errors.length,
         details: { imported, errors }
+      });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // ===== FULL BACKUP (complete export / import) =====
+  // A whole-portfolio snapshot for moving a deployment server-to-server.
+  // NOT the CSV transaction import above — this carries portfolios (incl.
+  // cash balances + ordering) and stock_info (dividends/sector/type) too.
+
+  app.get('/api/export', async (req, res) => {
+    try {
+      // SELECT * so the export inherently includes every column the schema has.
+      const [portfolios, transactions, stock_info] = await Promise.all([
+        db.all('SELECT * FROM portfolios ORDER BY id'),
+        db.all('SELECT * FROM transactions ORDER BY id'),
+        db.all('SELECT * FROM stock_info ORDER BY id'),
+      ]);
+      res.json({
+        version: EXPORT_VERSION,
+        exportedAt: new Date().toISOString(),
+        portfolios,
+        transactions,
+        stock_info,
+      });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // Lightweight row counts for the restore confirmation, so the client doesn't
+  // have to download the whole dataset just to show "what will be deleted".
+  app.get('/api/export/counts', async (req, res) => {
+    try {
+      const [p, t, s] = await Promise.all([
+        db.get('SELECT COUNT(*) AS c FROM portfolios'),
+        db.get('SELECT COUNT(*) AS c FROM transactions'),
+        db.get('SELECT COUNT(*) AS c FROM stock_info'),
+      ]);
+      res.json({ portfolios: Number(p.c), transactions: Number(t.c), stock_info: Number(s.c) });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  app.post('/api/import', async (req, res) => {
+    try {
+      const payload = req.body;
+      const errors = validateBackupPayload(payload);
+      if (errors.length) {
+        return res.status(400).json({ error: 'Invalid backup file', details: errors.slice(0, 20) });
+      }
+
+      // Insert columns are read from the live schema so they never drift from
+      // the table definitions (a future migration column flows through here).
+      const [pCols, tCols, sCols] = await Promise.all([
+        tableColumns(db, 'portfolios'),
+        tableColumns(db, 'transactions'),
+        tableColumns(db, 'stock_info'),
+      ]);
+
+      // Replace-all semantics, atomic: a bad row aborts the whole import so the
+      // DB is never left half-migrated. Children deleted before parents; parents
+      // inserted before children. `users` is left untouched (caller stays logged in).
+      const tx = await db.transaction('write');
+      let committed = false;
+      try {
+        await tx.execute('DELETE FROM stock_info');
+        await tx.execute('DELETE FROM transactions');
+        await tx.execute('DELETE FROM portfolios');
+        for (const p of payload.portfolios) {
+          await tx.execute({ sql: insertSQL('portfolios', pCols), args: rowArgs(p, pCols) });
+        }
+        for (const t of payload.transactions) {
+          await tx.execute({ sql: insertSQL('transactions', tCols), args: rowArgs(t, tCols) });
+        }
+        for (const s of payload.stock_info) {
+          await tx.execute({ sql: insertSQL('stock_info', sCols), args: rowArgs(s, sCols) });
+        }
+        await tx.commit();
+        committed = true;
+      } catch (e) {
+        if (!committed) await tx.rollback();
+        throw e;
+      }
+
+      // Keep the local portfolios.json snapshot in step, like every other
+      // portfolio-mutating route (no-op on serverless).
+      await backupPortfolios();
+
+      res.json({
+        success: true,
+        imported: {
+          portfolios: payload.portfolios.length,
+          transactions: payload.transactions.length,
+          stock_info: payload.stock_info.length,
+        },
       });
     } catch (error) {
       serverError(res, error);
