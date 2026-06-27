@@ -3,7 +3,7 @@
 require('dotenv').config();
 const path = require('path');
 const { createApp } = require('./app');
-const { createDb } = require('./database');
+const { createDb, tursoUrl } = require('./database');
 const { makePortfoliosBackup, restorePortfoliosIfEmpty } = require('./lib/portfolios-backup');
 
 const PORT = 2085;
@@ -31,7 +31,7 @@ async function main() {
   const backupPortfolios = makePortfoliosBackup(db, PORTFOLIOS_BACKUP);
   await restorePortfoliosIfEmpty(db, PORTFOLIOS_BACKUP);
 
-  console.log('Database ready', process.env.TURSO_DATABASE_URL ? '(Turso)' : '(local file)');
+  console.log('Database ready', tursoUrl() ? '(Turso)' : '(local file)');
 
   const app = createApp(db, {
     sessionSecret: SESSION_SECRET,

@@ -696,11 +696,18 @@ function createApp(db, options = {}) {
         return res.status(400).json({ error: 'Invalid transaction type' });
       }
 
-      // Numeric fields must parse to finite numbers when present.
+      // Numeric fields must parse to finite, non-negative numbers when present.
+      // A negative quantity is especially dangerous: HOLDINGS_SQL nets SELL as
+      // -quantity, so a negative SELL would ADD shares and corrupt ACB/returns.
       const numericFields = { quantity, price, total, commission };
       for (const [field, value] of Object.entries(numericFields)) {
-        if (value !== undefined && Number.isNaN(toFiniteNumber(value))) {
+        if (value === undefined) continue;
+        const n = toFiniteNumber(value);
+        if (Number.isNaN(n)) {
           return res.status(400).json({ error: `${field} must be a number` });
+        }
+        if (n < 0) {
+          return res.status(400).json({ error: `${field} cannot be negative` });
         }
       }
 
@@ -778,6 +785,13 @@ function createApp(db, options = {}) {
 
       const typeMap = { 'D': 'DIVIDEND', 'B': 'BUY', 'S': 'SELL', 'DR': 'DIVIDEND_REINVEST' };
 
+      // Preload portfolios once (keyed by upper-cased code) instead of querying
+      // the DB for every CSV row — a per-row lookup is one remote round-trip per
+      // line, which is the dominant cost on a large import against Turso.
+      const portfoliosByCode = new Map(
+        (await db.all('SELECT id, code FROM portfolios')).map(p => [p.code.toUpperCase(), p])
+      );
+
       // Skip header row
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -799,10 +813,10 @@ function createApp(db, options = {}) {
           // two case-variant holdings.
           const cleanTicker = symbol.trim().toUpperCase();
           const cleanPortfolioCode = portfolioCode.toUpperCase().trim();
-          const portfolio = await db.get('SELECT id, code FROM portfolios WHERE code = ?', cleanPortfolioCode);
+          const portfolio = portfoliosByCode.get(cleanPortfolioCode);
           if (!portfolio) {
-            const allPortfolios = await db.all('SELECT code FROM portfolios');
-            errors.push({ line: i + 1, error: `Portfolio '${cleanPortfolioCode}' not found. Available portfolios: ${allPortfolios.map(p => p.code).join(', ')}`, data: line });
+            const available = [...portfoliosByCode.values()].map(p => p.code).join(', ');
+            errors.push({ line: i + 1, error: `Portfolio '${cleanPortfolioCode}' not found. Available portfolios: ${available}`, data: line });
             continue;
           }
 
@@ -812,6 +826,13 @@ function createApp(db, options = {}) {
           const quantity = parseFloat(quantityStr.replace(/[$\s,]/g, '')) || 0;
           const price = parseFloat(priceStr.replace(/[$\s,]/g, '')) || 0;
           const total = parseFloat(totalStr.replace(/[$\s,]/g, '')) || 0;
+
+          // Guard against negatives — a negative SELL quantity would add shares
+          // in the holdings aggregation and corrupt ACB/returns.
+          if (quantity < 0 || price < 0 || total < 0) {
+            errors.push({ line: i + 1, error: 'Negative quantity, price, or total is not allowed', data: line });
+            continue;
+          }
 
           const duplicate = await db.get(`
             SELECT id FROM transactions
@@ -997,8 +1018,13 @@ async function getYahooSession() {
     headers: { 'User-Agent': UA },
     redirect: 'manual',
   });
-  const rawCookie = cookieRes.headers.get('set-cookie') || '';
-  const cookie = rawCookie.split(',').map(s => s.trim().split(';')[0]).filter(Boolean).join('; ');
+  // Use getSetCookie() so each cookie stays a discrete string — splitting the
+  // combined header on ',' would break on an Expires date's comma (e.g.
+  // "expires=Wed, 21-Oct-2026 …") and produce a malformed Cookie header.
+  const setCookies = typeof cookieRes.headers.getSetCookie === 'function'
+    ? cookieRes.headers.getSetCookie()
+    : [cookieRes.headers.get('set-cookie') || ''];
+  const cookie = setCookies.map(c => c.split(';')[0].trim()).filter(Boolean).join('; ');
 
   const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
     headers: { 'User-Agent': UA, 'Cookie': cookie },

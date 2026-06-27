@@ -24,7 +24,7 @@ function getApp() {
         throw new Error('SESSION_SECRET is not set');
       }
       if (!tursoUrl()) {
-        throw new Error('TURSO_DATABASE_URL is not set');
+        throw new Error('TURSO_DATABASE_URL (or yieldly_storage_TURSO_DATABASE_URL) is not set');
       }
       // Idempotent (CREATE TABLE IF NOT EXISTS); cheap to run on cold start.
       const db = await createDb();

@@ -198,7 +198,12 @@ function tursoAuthToken() {
  */
 async function createDb(url, { migrate = true } = {}) {
   const resolvedUrl = url || tursoUrl() || `file:${DEFAULT_DB_FILE}`;
-  const authToken = tursoAuthToken();
+  // Only a remote libSQL/Turso URL takes an auth token. Never attach one to a
+  // local file:/:memory: DB — libSQL rejects a token on a local URL, which would
+  // otherwise make tests/dev fail on any machine that happens to have Turso env
+  // vars exported.
+  const isLocal = /^(file:|:memory:)/.test(resolvedUrl);
+  const authToken = isLocal ? '' : tursoAuthToken();
   const client = createClient(authToken ? { url: resolvedUrl, authToken } : { url: resolvedUrl });
   const db = wrap(client);
   if (migrate) await runMigrations(db);
