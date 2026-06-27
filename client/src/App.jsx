@@ -9,11 +9,12 @@ import Portfolios from './pages/Portfolios'
 import Transactions from './pages/Transactions'
 import Import from './pages/Import'
 import Login from './pages/Login'
+import { Button } from '@/components/ui/button'
 
 const navCls = ({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')
 
 export default function App() {
-  const [authState, setAuthState] = useState({ loading: true, user: null, needsSetup: false })
+  const [authState, setAuthState] = useState({ loading: true, user: null, needsSetup: false, error: null })
   const [portfolios, setPortfolios] = useState([])
 
   const [pricesTick,     setPricesTick]     = useState(0)
@@ -23,26 +24,42 @@ export default function App() {
   const loadPortfolios = () =>
     getPortfolios().then(setPortfolios).catch(console.error)
 
-  useEffect(() => {
-    setOnUnauthorized(() => setAuthState({ loading: false, user: null, needsSetup: false }))
+  // Distinguish "session check failed" (backend 500 / network) from "needs
+  // login": a failed check sets `error` and shows a retry screen rather than
+  // silently rendering the login form, which would mask a real server problem.
+  const checkSession = () => {
     getSession()
       .then(data => {
-        setAuthState({ loading: false, user: data.authenticated ? data.user : null, needsSetup: data.needsSetup })
+        setAuthState({ loading: false, user: data.authenticated ? data.user : null, needsSetup: !!data.needsSetup, error: null })
         if (data.authenticated) loadPortfolios()
       })
-      .catch(() => setAuthState({ loading: false, user: null, needsSetup: false }))
+      .catch(e => setAuthState({ loading: false, user: null, needsSetup: false, error: e?.message || 'Could not reach the server.' }))
+  }
+
+  // Re-run the session check on demand (retry button): flip to the loading
+  // screen first, then re-check. setState here is fine — it's an event handler.
+  const retrySession = () => {
+    setAuthState(s => ({ ...s, loading: true, error: null }))
+    checkSession()
+  }
+
+  useEffect(() => {
+    setOnUnauthorized(() => setAuthState({ loading: false, user: null, needsSetup: false, error: null }))
+    checkSession()
+    // Run once on mount — checkSession is stable for our purposes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleAuth = async (username, password) => {
     const authenticate = authState.needsSetup ? setupAccount : login
     const data = await authenticate(username, password)
-    setAuthState({ loading: false, user: data.user, needsSetup: false })
+    setAuthState({ loading: false, user: data.user, needsSetup: false, error: null })
     loadPortfolios()
   }
 
   const handleLogout = async () => {
     try { await logout() } catch { /* proceed anyway */ }
-    setAuthState({ loading: false, user: null, needsSetup: false })
+    setAuthState({ loading: false, user: null, needsSetup: false, error: null })
     setPortfolios([])
   }
 
@@ -64,6 +81,18 @@ export default function App() {
 
   if (authState.loading) {
     return <div className="login-page"><p style={{ color: 'var(--tc-muted)' }}>Loading...</p></div>
+  }
+
+  if (authState.error) {
+    return (
+      <div className="login-page">
+        <div style={{ maxWidth: '22rem', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <p style={{ fontWeight: 600 }}>We couldn’t load your session</p>
+          <p style={{ color: 'var(--tc-muted)', fontSize: '0.875rem' }}>{authState.error}</p>
+          <Button onClick={retrySession} className="w-fit mx-auto">Try again</Button>
+        </div>
+      </div>
+    )
   }
 
   if (!authState.user) {
