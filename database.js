@@ -175,9 +175,21 @@ async function runMigrations(db) {
   `);
 }
 
+// Vercel's Turso storage integration provisions its env vars under the store
+// name as a prefix (`yieldly_storage_TURSO_DATABASE_URL`, …). Accept either the
+// plain names (manual setup, local `.env`) or the integration-prefixed ones, so
+// the app works no matter how the Turso connection was wired up.
+function tursoUrl() {
+  return process.env.TURSO_DATABASE_URL || process.env.yieldly_storage_TURSO_DATABASE_URL || '';
+}
+function tursoAuthToken() {
+  return process.env.TURSO_AUTH_TOKEN || process.env.yieldly_storage_TURSO_AUTH_TOKEN || '';
+}
+
 /**
  * Open a database connection, switched purely by environment:
- *   - TURSO_DATABASE_URL set  → remote Turso (Vercel/hosted), with TURSO_AUTH_TOKEN
+ *   - Turso URL set (TURSO_DATABASE_URL or the yieldly_storage_-prefixed var
+ *     from the Vercel integration) → remote Turso, with its matching auth token
  *   - otherwise               → local `file:` libSQL database (dev)
  *   - pass ':memory:' explicitly → ephemeral in-memory DB (tests)
  *
@@ -185,12 +197,12 @@ async function runMigrations(db) {
  * { migrate: false } to skip (e.g. when migrations are applied at deploy time).
  */
 async function createDb(url, { migrate = true } = {}) {
-  const resolvedUrl = url || process.env.TURSO_DATABASE_URL || `file:${DEFAULT_DB_FILE}`;
-  const authToken = process.env.TURSO_AUTH_TOKEN;
+  const resolvedUrl = url || tursoUrl() || `file:${DEFAULT_DB_FILE}`;
+  const authToken = tursoAuthToken();
   const client = createClient(authToken ? { url: resolvedUrl, authToken } : { url: resolvedUrl });
   const db = wrap(client);
   if (migrate) await runMigrations(db);
   return db;
 }
 
-module.exports = { createDb, runMigrations, wrap, DEFAULT_DB_FILE };
+module.exports = { createDb, runMigrations, wrap, DEFAULT_DB_FILE, tursoUrl, tursoAuthToken };

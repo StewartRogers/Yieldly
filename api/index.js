@@ -5,14 +5,15 @@
  *
  * Vercel routes `/api/*` to this function (see vercel.json). The Express app is
  * built once per warm instance and reused across invocations. Persistence is
- * remote Turso, configured via TURSO_DATABASE_URL / TURSO_AUTH_TOKEN.
+ * remote Turso, configured via TURSO_DATABASE_URL / TURSO_AUTH_TOKEN (or the
+ * yieldly_storage_-prefixed vars the Vercel Turso integration provisions).
  *
  * Local development does NOT use this file — it runs server.js directly against
  * a local `file:` libSQL database.
  */
 
 const { createApp } = require('../app');
-const { createDb } = require('../database');
+const { createDb, tursoUrl } = require('../database');
 
 let appPromise = null;
 
@@ -22,7 +23,7 @@ function getApp() {
       if (!process.env.SESSION_SECRET) {
         throw new Error('SESSION_SECRET is not set');
       }
-      if (!process.env.TURSO_DATABASE_URL) {
+      if (!tursoUrl()) {
         throw new Error('TURSO_DATABASE_URL is not set');
       }
       // Idempotent (CREATE TABLE IF NOT EXISTS); cheap to run on cold start.
