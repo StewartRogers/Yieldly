@@ -12,10 +12,10 @@
  */
 
 require('dotenv').config();
-const { createDb } = require('../database');
+const { createDb, tursoUrl } = require('../database');
 
 (async () => {
-  const target = process.env.TURSO_DATABASE_URL || 'local file (yieldly.db)';
+  const target = tursoUrl() || 'local file (yieldly.db)';
   const db = await createDb(); // createDb runs migrations
   await db.close();
   console.log(`Schema applied to ${target}.`);
