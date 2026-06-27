@@ -10,8 +10,8 @@ const path = require('path');
 
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
-const { prepareHoldings } = require('./lib/holdings');
-const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie } = require('./lib/auth');
+const { prepareHoldings, NET_SHARES } = require('./lib/holdings');
+const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
 
 const noop = async () => {};
 
@@ -188,41 +188,16 @@ function createApp(db, options = {}) {
   app.post('/api/auth/setup', authLimiter, async (req, res) => {
     try {
       const { username, password } = req.body;
-      if (!username || typeof username !== 'string' || username.trim().length < 2) {
-        return res.status(400).json({ error: 'Username must be at least 2 characters' });
-      }
-      if (!password || typeof password !== 'string' || password.length < 8) {
-        return res.status(400).json({ error: 'Password must be at least 8 characters' });
-      }
-      const hash = await bcrypt.hash(password, 10);
-
-      // Atomic "first user wins": count + insert inside one write transaction.
-      let userId;
-      const tx = await db.transaction('write');
-      let committed = false;
-      try {
-        const count = Number((await tx.execute('SELECT COUNT(*) as count FROM users')).rows[0].count);
-        if (count > 0) {
-          await tx.rollback();
-          return res.status(403).json({ error: 'Setup already completed' });
-        }
-        const result = await tx.execute({
-          sql: 'INSERT INTO users (username, password_hash) VALUES (?, ?)',
-          args: [username.trim(), hash],
-        });
-        await tx.commit();
-        committed = true;
-        userId = Number(result.lastInsertRowid);
-      } catch (e) {
-        // Only roll back if commit didn't already finalize the tx — calling
-        // rollback on a committed tx throws and would mask the real error.
-        if (!committed) await tx.rollback();
-        throw e;
+      // Atomic "first user wins" creation lives in lib/auth.createFirstUser,
+      // shared with the manage-user CLI.
+      const created = await createFirstUser(db, username, password);
+      if (created.error) {
+        return res.status(created.status).json({ error: created.error });
       }
 
-      const token = signToken(sessionSecret, { userId, username: username.trim() });
+      const token = signToken(sessionSecret, { userId: created.userId, username: created.username });
       setAuthCookie(res, token, secureCookies);
-      res.json({ success: true, user: { id: userId, username: username.trim() } });
+      res.json({ success: true, user: { id: created.userId, username: created.username } });
     } catch (error) {
       serverError(res, error);
     }
@@ -380,15 +355,15 @@ function createApp(db, options = {}) {
       if (!exists) return res.status(404).json({ error: 'Portfolio not found' });
 
       const tx = await db.transaction('write');
-      let committed = false;
       try {
         await tx.execute({ sql: 'DELETE FROM stock_info WHERE portfolio_id = ?', args: [id] });
         await tx.execute({ sql: 'DELETE FROM transactions WHERE portfolio_id = ?', args: [id] });
         await tx.execute({ sql: 'DELETE FROM portfolios WHERE id = ?', args: [id] });
+        // Nothing fallible runs after commit, so a rollback in catch can only be
+        // reached on a pre-commit failure — no "committed" flag needed.
         await tx.commit();
-        committed = true;
       } catch (e) {
-        if (!committed) await tx.rollback();
+        await tx.rollback();
         throw e;
       }
 
@@ -461,8 +436,7 @@ function createApp(db, options = {}) {
         FROM transactions t
         WHERE portfolio_id = ? AND ticker != 'CASH'
         GROUP BY ticker
-        HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
-                        WHEN type = 'SELL' THEN -quantity ELSE 0 END) > 0
+        HAVING ${NET_SHARES} > 0
       `, portfolioId);
 
       if (!holdingRows.length) return res.json({ message: 'No holdings to update', updated: 0 });
@@ -510,8 +484,7 @@ function createApp(db, options = {}) {
         FROM transactions t
         WHERE ticker != 'CASH'
         GROUP BY portfolio_id, ticker
-        HAVING SUM(CASE WHEN type IN ('BUY','DIVIDEND_REINVEST') THEN quantity
-                        WHEN type = 'SELL' THEN -quantity ELSE 0 END) > 0
+        HAVING ${NET_SHARES} > 0
       `);
 
       if (!holdingRows.length) return res.json({ message: 'No holdings to update', updated: 0 });

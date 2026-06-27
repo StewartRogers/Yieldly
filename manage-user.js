@@ -6,6 +6,8 @@ const readline = require('readline');
 const bcrypt = require('bcryptjs');
 const { createDb } = require('./database');
 
+const { createFirstUser } = require('./lib/auth');
+
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise(resolve => rl.question(q, resolve));
 
@@ -14,24 +16,21 @@ async function main() {
   const db = await createDb();
 
   if (action === 'create') {
+    // Courtesy pre-check so we don't prompt for credentials we can't use; the
+    // authoritative atomic guard lives in createFirstUser.
     const existing = await db.get('SELECT COUNT(*) as count FROM users');
     if (Number(existing.count) > 0) {
       console.log('A user already exists. Use "reset-password" to change the password.');
       process.exit(1);
     }
     const username = await ask('Username: ');
-    if (!username || username.trim().length < 2) {
-      console.error('Username must be at least 2 characters.');
-      process.exit(1);
-    }
     const password = await ask('Password (min 8 chars): ');
-    if (!password || password.length < 8) {
-      console.error('Password must be at least 8 characters.');
+    const created = await createFirstUser(db, username, password);
+    if (created.error) {
+      console.error(created.error);
       process.exit(1);
     }
-    const hash = await bcrypt.hash(password, 10);
-    await db.run('INSERT INTO users (username, password_hash) VALUES (?, ?)', username.trim(), hash);
-    console.log(`User "${username.trim()}" created.`);
+    console.log(`User "${created.username}" created.`);
 
   } else if (action === 'reset-password') {
     const user = await db.get('SELECT id, username FROM users LIMIT 1');
