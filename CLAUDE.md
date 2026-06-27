@@ -45,7 +45,7 @@ npm run user:reset-password   # Reset the superuser password
 There are three flat-script test suites (no Jest/Mocha), all using a hand-rolled `check()`/`checkEq()` harness:
 - `test.js` (~141 assertions) — `computeHoldings` math.
 - `test-full.js` (~220 assertions) — broader math, CSV import, `computeMonthlyACB`, and validation rules.
-- `test-auth.js` (~52 assertions) — boots the **real async app** (`createApp(await createDb(...))`) over an ephemeral HTTP port to exercise the auth routes, the auth guard, JWT cookies, cascade delete, and login rate-limiting.
+- `test-auth.js` (~90 assertions) — boots the **real async app** (`createApp(await createDb(...))`) over an ephemeral HTTP port to exercise the auth routes, the auth guard, JWT cookies, cascade delete, login rate-limiting, and the full backup export/import.
 
 `test.js`/`test-full.js` validate the **driver-agnostic** money math, so they run synchronously on `better-sqlite3` (a devDependency) for a tight, await-free harness, importing the shared `HOLDINGS_SQL`/`GROUP_ORDER` from `lib/holdings.js` so the aggregation can't drift. `test-auth.js` exercises the **real** async libSQL schema + app (backed by a temp-file libSQL DB — `:memory:` is per-connection in libSQL and would not be shared across an interactive transaction). They are flat scripts with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios. Coverage (`npm run coverage`) is via `c8` over `test.js`; `lib/compute.js` is at 100% statements/branches/lines, HTML report in `coverage/`. Playwright is installed under `client/` but no E2E tests exist yet.
 
@@ -61,8 +61,8 @@ Vite proxies `/api/*` to the Express server, so the client always calls `/api/..
 This is a single-user portfolio tracker with stateless JWT authentication (one superuser).
 
 **Persistence — libSQL, environment-switched**
-- Data access is **async** (libSQL via `@libsql/client`). `database.js` `createDb(url?)` resolves the connection by env: `TURSO_DATABASE_URL` (+ `TURSO_AUTH_TOKEN`) → remote **Turso** (hosted/Vercel); otherwise a local `file:yieldly.db`; pass an explicit url (e.g. a temp file) in tests. It returns a thin async wrapper exposing better-sqlite3-style `get/all/run/exec/transaction` so route code stays readable.
-- `runMigrations(db)` is idempotent (`CREATE TABLE IF NOT EXISTS`, single round-trip), safe to run on every cold start. No incremental ALTER history (that was the old better-sqlite3 build).
+- Data access is **async** (libSQL via `@libsql/client`). `database.js` `createDb(url?)` resolves the connection by env via `tursoUrl()`/`tursoAuthToken()`: `TURSO_DATABASE_URL` (+ `TURSO_AUTH_TOKEN`) **or** the Vercel Turso integration's `yieldly_storage_`-prefixed equivalents → remote **Turso** (hosted/Vercel); otherwise a local `file:yieldly.db`; pass an explicit url (e.g. a temp file) in tests. A token is only attached to remote URLs, never a local `file:`/`:memory:` DB. It returns a thin async wrapper exposing better-sqlite3-style `get/all/run/exec/transaction` so route code stays readable.
+- `runMigrations(db)` is idempotent and safe to run on every cold start. It has two layers: `CREATE TABLE IF NOT EXISTS` defines the final shape, then guarded incremental migrations (`addColumnIfMissing` for ~7 columns + a `transactions` table rebuild to widen the `type` CHECK constraint) upgrade a pre-existing DB created before those existed.
 
 **Server (Node/Express, CommonJS) — factored for testability**
 - `server.js` — thin local entrypoint: `await createDb()`, restore/back up `portfolios.json`, enforce `SESSION_SECRET`, `app.listen`. No routes.
@@ -74,7 +74,7 @@ This is a single-user portfolio tracker with stateless JWT authentication (one s
 - `lib/parse.js` — `parseCSVLine` / `parseDate` for the CSV import route.
 - `lib/portfolios-backup.js` — async `makePortfoliosBackup` / `restorePortfoliosIfEmpty`. `portfolios.json` is a **local-file-only** convenience (portfolio names/codes/order, not the ledger); a no-op on Vercel (ephemeral FS) where Turso's own backups are the source of truth.
 - Market prices: TMX (TSX GraphQL) via `fetchTMXQuote`, Yahoo Finance for US tickers. Tickers validated with `/^[A-Z0-9.]{1,12}$/`.
-- **Security**: `helmet` (CSP deferred to the platform), `express-rate-limit` on `/api/auth/login` + `/api/auth/setup`, write-route validation (transaction-type whitelist + finite-number checks), portfolio delete cascades explicitly (not relying on the FK pragma), and `SESSION_SECRET` (the JWT secret) is required in production — `server.js`/`api/index.js` refuse to start without it.
+- **Security**: `helmet` (CSP deferred to the platform), `express-rate-limit` on `/api/auth/login` + `/api/auth/setup`, write-route validation (transaction-type whitelist + finite, non-negative number checks), portfolio delete cascades explicitly (not relying on the FK pragma), and `SESSION_SECRET` (the JWT secret) is required in production — `server.js`/`api/index.js` refuse to start without it.
 
 **Database schema (libSQL: local `file:yieldly.db` or Turso)**
 - `portfolios` — id, name, code (unique), display_order, cash_balance

@@ -8,7 +8,8 @@ Yieldly is a local stock portfolio tracker for managing multiple portfolios, tra
 - Track buys, sells, dividends, dividend reinvestments, contributions, and withdrawals
 - View holdings, average cost, sale totals, dividends paid, and estimated market value
 - Store manual stock details such as market price, dividend yield, sector, and investment type
-- Refresh stock prices and dividend data from TMX for supported tickers
+- Refresh stock prices and dividend data from TMX (Canadian) and Yahoo Finance (US) for supported tickers
+- Export and re-import a full account backup (portfolios, transactions, and stock info)
 - Import historical transactions from CSV
 - Keep data locally in SQLite with automatic persistence across restarts
 
@@ -142,6 +143,7 @@ All API routes except `/api/auth/*` require authentication (return 401 without a
 
 - `GET /api/portfolios` - List all portfolios
 - `POST /api/portfolios` - Create a portfolio
+- `PUT /api/portfolios/:id` - Rename a portfolio (update name/code)
 - `PUT /api/portfolios/:id/order` - Update portfolio display order
 - `PUT /api/portfolios/:id/cash-balance` - Set or clear a manual cash balance
 - `DELETE /api/portfolios/:id` - Delete a portfolio
@@ -149,7 +151,7 @@ All API routes except `/api/auth/*` require authentication (return 401 without a
 - `GET /api/portfolios/:id/transactions` - Get all transactions for one portfolio
 - `GET /api/portfolios/:id/transactions/ticker/:ticker` - Get transactions for one ticker
 - `PUT /api/portfolios/:portfolioId/stocks/:ticker` - Update manual stock info
-- `POST /api/portfolios/:portfolioId/refresh-prices` - Refresh TMX quote data for one portfolio
+- `POST /api/portfolios/:portfolioId/refresh-prices` - Refresh quote data (TMX + Yahoo Finance) for one portfolio
 
 ### Transactions
 
@@ -163,13 +165,16 @@ All API routes except `/api/auth/*` require authentication (return 401 without a
 - `GET /api/summary/monthly-acb` - Monthly average cost basis trend
 - `GET /api/dividends/monthly` - Monthly dividend totals by portfolio
 
-### Import
+### Import / Export (full backup)
 
 - `POST /api/import/csv` - Import transactions from CSV
+- `GET /api/export` - Export a full account backup (portfolios, transactions, stock info) as JSON
+- `GET /api/export/counts` - Row counts for the current account (preview before export/import)
+- `POST /api/import` - Restore a full account backup, replacing all existing data
 
 ### Refresh
 
-- `POST /api/refresh-all-prices` - Refresh TMX quote data for every holding across all portfolios
+- `POST /api/refresh-all-prices` - Refresh quote data (TMX + Yahoo Finance) for every holding across all portfolios
 
 ## Project Structure
 
