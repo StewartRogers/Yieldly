@@ -524,7 +524,7 @@ function createApp(db, options = {}) {
       // held on different exchanges across portfolios and must be quoted from
       // the matching source (TMX vs Yahoo) with the matching response shape, so
       // the market is part of the cache key, not just the ticker.
-      const quoteKey = (ticker, market) => `${ticker} ${market ?? ''}`;
+      const quoteKey = (ticker, market) => `${ticker}|${market ?? ''}`;
       const uniqueHoldings = [];
       const seen = new Set();
       for (const h of holdingRows) {
