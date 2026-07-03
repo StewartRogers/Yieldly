@@ -111,6 +111,7 @@ function validateBackupPayload(payload) {
  *   serveClient     {'production'|'development'|false} static asset strategy
  *   rateLimit       {{windowMs,max}|false} auth rate-limit config (false disables)
  *   verbose         {boolean}  emit per-row CSV import logs (default false)
+ *   cronSecret      {string}   bearer token required on /api/cron/* routes (unset = disabled)
  */
 function createApp(db, options = {}) {
   const {
@@ -121,6 +122,7 @@ function createApp(db, options = {}) {
     serveClient = false,
     rateLimit: rateLimitOpts,
     verbose = false,
+    cronSecret,
   } = options;
 
   const holdings = prepareHoldings(db);
@@ -228,7 +230,9 @@ function createApp(db, options = {}) {
 
   // Auth guard — all routes below this require a valid token
   app.use('/api', (req, res, next) => {
-    if (req.path.startsWith('/auth/')) return next();
+    // /cron/* routes are hit by Vercel Cron (no session cookie); they're
+    // instead guarded by their own CRON_SECRET bearer-token check.
+    if (req.path.startsWith('/auth/') || req.path.startsWith('/cron/')) return next();
     const payload = verifyToken(sessionSecret, req.cookies[TOKEN_COOKIE]);
     if (!payload) return res.status(401).json({ error: 'Authentication required' });
     req.userId = payload.userId;
@@ -425,6 +429,80 @@ function createApp(db, options = {}) {
        marketPrice ?? null, dividendYield ?? null, payDate ?? null);
   }
 
+  // Shared by POST /api/refresh-all-prices and the daily snapshot cron: fetch
+  // fresh quotes for every held ticker across every portfolio and upsert
+  // stock_info. Extracted so a snapshot always reflects a fresh price pull,
+  // not whatever the user last happened to click "Refresh" on.
+  async function performRefreshAllPrices() {
+    const holdingRows = await db.all(`
+      SELECT DISTINCT portfolio_id, ticker,
+        (SELECT market FROM transactions t2
+         WHERE t2.portfolio_id = t.portfolio_id AND t2.ticker = t.ticker AND t2.market IS NOT NULL
+         ORDER BY t2.id DESC LIMIT 1) AS market
+      FROM transactions t
+      WHERE ticker != 'CASH'
+      GROUP BY portfolio_id, ticker
+      HAVING ${NET_SHARES} > 0
+    `);
+
+    if (!holdingRows.length) return { message: 'No holdings to update', updated: 0 };
+
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const errors = [];
+
+    // Dedup the network fetch per (ticker, market): the same ticker can be
+    // held on different exchanges across portfolios and must be quoted from
+    // the matching source (TMX vs Yahoo) with the matching response shape, so
+    // the market is part of the cache key, not just the ticker.
+    const quoteKey = (ticker, market) => `${ticker}|${market ?? ''}`;
+    const uniqueHoldings = [];
+    const seen = new Set();
+    for (const h of holdingRows) {
+      const k = quoteKey(h.ticker, h.market);
+      if (!seen.has(k)) { seen.add(k); uniqueHoldings.push(h); }
+    }
+
+    const quotes = {};
+    for (let i = 0; i < uniqueHoldings.length; i++) {
+      const { ticker, market } = uniqueHoldings[i];
+      const isUS = market === 'NYSE' || market === 'NASDAQ';
+      const key = quoteKey(ticker, market);
+      try {
+        if (isUS) {
+          quotes[key] = await fetchYahooQuote(ticker);
+          console.log(`${ticker} (${market} via Yahoo): $${quotes[key]?.price?.toFixed(2)}`);
+        } else {
+          quotes[key] = await fetchTMXQuote(ticker);
+          console.log(`${ticker} (TMX): $${quotes[key]?.price?.toFixed(2)}`);
+        }
+      } catch (e) {
+        errors.push({ ticker, error: e.message });
+        quotes[key] = null;
+      }
+      if (i < uniqueHoldings.length - 1) await wait(300);
+    }
+
+    let updated = 0;
+    for (const { portfolio_id, ticker, market } of holdingRows) {
+      const q = quotes[quoteKey(ticker, market)];
+      if (!q) continue;
+      const isUS = market === 'NYSE' || market === 'NASDAQ';
+      if (isUS) {
+        await upsertStockInfo(portfolio_id, ticker, q.price, q.dividendYield, null);
+      } else {
+        const price    = q.price         != null ? parseFloat(q.price)         : null;
+        const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
+        const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today ? q.dividendPayDate : null;
+        await upsertStockInfo(portfolio_id, ticker, price, divYield, payDate);
+      }
+      updated++;
+    }
+
+    return { message: `Updated ${updated} stock-portfolio entries (${uniqueHoldings.length} unique quotes)`,
+               updated, total: holdingRows.length, errors: errors.length ? errors : undefined };
+  }
+
   app.post('/api/portfolios/:portfolioId/refresh-prices', async (req, res) => {
     try {
       const portfolioId = req.params.portfolioId;
@@ -476,73 +554,52 @@ function createApp(db, options = {}) {
 
   app.post('/api/refresh-all-prices', async (req, res) => {
     try {
-      const holdingRows = await db.all(`
-        SELECT DISTINCT portfolio_id, ticker,
-          (SELECT market FROM transactions t2
-           WHERE t2.portfolio_id = t.portfolio_id AND t2.ticker = t.ticker AND t2.market IS NOT NULL
-           ORDER BY t2.id DESC LIMIT 1) AS market
-        FROM transactions t
-        WHERE ticker != 'CASH'
-        GROUP BY portfolio_id, ticker
-        HAVING ${NET_SHARES} > 0
-      `);
+      res.json(await performRefreshAllPrices());
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
 
-      if (!holdingRows.length) return res.json({ message: 'No holdings to update', updated: 0 });
+  // ===== SCHEDULED SNAPSHOT (Vercel Cron) =====
+  // Vercel Cron issues a GET request carrying `Authorization: Bearer
+  // $CRON_SECRET` when CRON_SECRET is configured on the project (see
+  // vercel.json). This route is excluded from the JWT auth guard above and
+  // instead checks that header itself. Disabled (always 401) if cronSecret
+  // wasn't passed to createApp.
 
-      const wait = ms => new Promise(r => setTimeout(r, ms));
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const errors = [];
+  app.get('/api/cron/snapshot-values', async (req, res) => {
+    if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    try {
+      // Best-effort: a stale-but-present price beats no snapshot at all, so a
+      // TMX/Yahoo outage shouldn't abort the snapshot.
+      const priceRefresh = await performRefreshAllPrices().catch(e => ({ error: e.message }));
 
-      // Dedup the network fetch per (ticker, market): the same ticker can be
-      // held on different exchanges across portfolios and must be quoted from
-      // the matching source (TMX vs Yahoo) with the matching response shape, so
-      // the market is part of the cache key, not just the ticker.
-      const quoteKey = (ticker, market) => `${ticker}|${market ?? ''}`;
-      const uniqueHoldings = [];
-      const seen = new Set();
-      for (const h of holdingRows) {
-        const k = quoteKey(h.ticker, h.market);
-        if (!seen.has(k)) { seen.add(k); uniqueHoldings.push(h); }
+      const portfolios = await db.all('SELECT * FROM portfolios');
+      // Calendar date in America/New_York, independent of the UTC time the
+      // function actually runs at (Vercel Cron schedules are UTC-only).
+      const snapshotDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+      let written = 0;
+      for (const p of portfolios) {
+        const holdings = computeHoldings(await queryHoldings(p.id));
+        const marketValue = holdings.reduce((s, h) => s + h.market_value, 0);
+        const cash = p.cash_balance ?? 0;
+        const total = marketValue + cash;
+        await db.run(`
+          INSERT INTO portfolio_value_snapshots (portfolio_id, snapshot_date, market_value, cash_balance, total_value, source)
+          VALUES (?, ?, ?, ?, ?, 'cron')
+          ON CONFLICT(portfolio_id, snapshot_date) DO UPDATE SET
+            market_value = excluded.market_value,
+            cash_balance = excluded.cash_balance,
+            total_value  = excluded.total_value,
+            source       = 'cron'
+        `, p.id, snapshotDate, marketValue, cash, total);
+        written++;
       }
 
-      const quotes = {};
-      for (let i = 0; i < uniqueHoldings.length; i++) {
-        const { ticker, market } = uniqueHoldings[i];
-        const isUS = market === 'NYSE' || market === 'NASDAQ';
-        const key = quoteKey(ticker, market);
-        try {
-          if (isUS) {
-            quotes[key] = await fetchYahooQuote(ticker);
-            console.log(`${ticker} (${market} via Yahoo): $${quotes[key]?.price?.toFixed(2)}`);
-          } else {
-            quotes[key] = await fetchTMXQuote(ticker);
-            console.log(`${ticker} (TMX): $${quotes[key]?.price?.toFixed(2)}`);
-          }
-        } catch (e) {
-          errors.push({ ticker, error: e.message });
-          quotes[key] = null;
-        }
-        if (i < uniqueHoldings.length - 1) await wait(300);
-      }
-
-      let updated = 0;
-      for (const { portfolio_id, ticker, market } of holdingRows) {
-        const q = quotes[quoteKey(ticker, market)];
-        if (!q) continue;
-        const isUS = market === 'NYSE' || market === 'NASDAQ';
-        if (isUS) {
-          await upsertStockInfo(portfolio_id, ticker, q.price, q.dividendYield, null);
-        } else {
-          const price    = q.price         != null ? parseFloat(q.price)         : null;
-          const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
-          const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today ? q.dividendPayDate : null;
-          await upsertStockInfo(portfolio_id, ticker, price, divYield, payDate);
-        }
-        updated++;
-      }
-
-      res.json({ message: `Updated ${updated} stock-portfolio entries (${uniqueHoldings.length} unique quotes)`,
-                 updated, total: holdingRows.length, errors: errors.length ? errors : undefined });
+      res.json({ message: `Snapshot recorded for ${written} portfolio(s) on ${snapshotDate}`, snapshotDate, written, priceRefresh });
     } catch (error) {
       serverError(res, error);
     }
@@ -580,6 +637,89 @@ function createApp(db, options = {}) {
         ORDER BY p.code, year, month
       `);
       res.json(rows);
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  app.get('/api/contributions/monthly', async (req, res) => {
+    try {
+      const rows = await db.all(`
+        SELECT
+          p.code  AS portfolio_code,
+          CAST(strftime('%Y', t.date) AS INTEGER) AS year,
+          CAST(strftime('%m', t.date) AS INTEGER) AS month,
+          SUM(t.total) AS total
+        FROM transactions t
+        JOIN portfolios p ON t.portfolio_id = p.id
+        WHERE t.type = 'CONTRIBUTION'
+        GROUP BY p.code, year, month
+        ORDER BY p.code, year, month
+      `);
+      res.json(rows);
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // ===== PORTFOLIO VALUE HISTORY (daily snapshots) =====
+
+  app.get('/api/summary/value-snapshots', async (req, res) => {
+    try {
+      const rows = await db.all(`
+        SELECT p.code AS portfolio_code, s.snapshot_date AS date, s.total_value, s.source
+        FROM portfolio_value_snapshots s
+        JOIN portfolios p ON p.id = s.portfolio_id
+        ORDER BY p.code, s.snapshot_date
+      `);
+      res.json(rows);
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  app.put('/api/portfolios/:portfolioId/value-snapshots/:date', async (req, res) => {
+    try {
+      const { portfolioId, date } = req.params;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'date must be in YYYY-MM-DD format' });
+      }
+      const totalValue = toFiniteNumber(req.body.total_value);
+      if (totalValue === null || Number.isNaN(totalValue)) {
+        return res.status(400).json({ error: 'total_value must be a number' });
+      }
+      if (totalValue < 0) {
+        return res.status(400).json({ error: 'total_value cannot be negative' });
+      }
+
+      const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolioId);
+      if (!portfolio) return res.status(404).json({ error: 'Portfolio not found' });
+
+      await db.run(`
+        INSERT INTO portfolio_value_snapshots (portfolio_id, snapshot_date, market_value, cash_balance, total_value, source)
+        VALUES (?, ?, NULL, NULL, ?, 'manual')
+        ON CONFLICT(portfolio_id, snapshot_date) DO UPDATE SET
+          market_value = NULL,
+          cash_balance = NULL,
+          total_value  = excluded.total_value,
+          source       = 'manual'
+      `, portfolioId, date, totalValue);
+
+      res.json({ message: 'Snapshot saved', portfolio_id: Number(portfolioId), date, total_value: totalValue, source: 'manual' });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  app.delete('/api/portfolios/:portfolioId/value-snapshots/:date', async (req, res) => {
+    try {
+      const { portfolioId, date } = req.params;
+      const result = await db.run(
+        'DELETE FROM portfolio_value_snapshots WHERE portfolio_id = ? AND snapshot_date = ?',
+        portfolioId, date
+      );
+      if (result.changes === 0) return res.status(404).json({ error: 'Snapshot not found' });
+      res.json({ message: 'Snapshot deleted' });
     } catch (error) {
       serverError(res, error);
     }

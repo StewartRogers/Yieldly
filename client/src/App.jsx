@@ -4,6 +4,7 @@ import { RefreshCw, Check, LogOut } from 'lucide-react'
 import { getPortfolios, refreshAllPrices, getSession, login, logout, setupAccount, setOnUnauthorized } from './api/client'
 import Home from './pages/Home'
 import Summary from './pages/Summary'
+import History from './pages/History'
 import Dividends from './pages/Dividends'
 import Portfolios from './pages/Portfolios'
 import Transactions from './pages/Transactions'
@@ -112,6 +113,7 @@ export default function App() {
           <div className="app-nav-links">
             <NavLink to="/" end className={navCls}>Home</NavLink>
             <NavLink to="/summary"      className={navCls}>Summary</NavLink>
+            <NavLink to="/history"      className={navCls}>History</NavLink>
             <NavLink to="/dividends"    className={navCls}>Dividends</NavLink>
             <NavLink to="/portfolios"   className={navCls}>Portfolios</NavLink>
             <NavLink to="/transactions" className={navCls}>Transactions</NavLink>
@@ -149,6 +151,7 @@ export default function App() {
         <Routes>
           <Route path="/"             element={<Home />} />
           <Route path="/summary"      element={<Summary      pricesTick={pricesTick} />} />
+          <Route path="/history"      element={<History      portfolios={portfolios} />} />
           <Route path="/dividends"    element={<Dividends    portfolios={portfolios} />} />
           <Route path="/portfolios"   element={<Portfolios   portfolios={portfolios} onPortfoliosChange={loadPortfolios} pricesTick={pricesTick} />} />
           <Route path="/transactions" element={<Transactions portfolios={portfolios} />} />
