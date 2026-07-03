@@ -12,6 +12,13 @@ async function request(url, options = {}) {
     _onUnauthorized?.()
     throw new Error('Session expired')
   }
+  // A 401 here means "no valid session", not a server failure — treat it the
+  // same as the normal `{ authenticated: false }` response so an expired/
+  // missing cookie shows the login form instead of the "couldn't load your
+  // session" error screen.
+  if (res.status === 401 && url === '/api/auth/session') {
+    return { authenticated: false }
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.error || `Request failed (${res.status})`)

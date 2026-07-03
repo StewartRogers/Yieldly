@@ -28,14 +28,20 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
   const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
   const setVal = (key) => (val) => setForm(f => ({ ...f, [key]: val }))
 
+  const toNumberOrNull = (raw) => {
+    if (raw === '') return null
+    const n = parseFloat(raw)
+    return Number.isFinite(n) ? n : null
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
     try {
       await updateStockInfo(portfolioId, holding.ticker, {
-        market_price:       parseFloat(form.marketPrice)       || null,
+        market_price:       toNumberOrNull(form.marketPrice),
         dividend_frequency: form.dividendFrequency             || null,
-        dividend_per_share: parseFloat(form.dividendPerShare)  || null,
+        dividend_per_share: toNumberOrNull(form.dividendPerShare),
         last_dividend_date: form.lastDividendDate              || null,
         sector:             form.sector                        || null,
         investment_type:    form.investmentType                || null,

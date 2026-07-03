@@ -21,6 +21,10 @@ const TRANSACTION_TYPES = new Set([
   'BUY', 'SELL', 'DIVIDEND', 'DIVIDEND_REINVEST', 'CONTRIBUTION', 'WITHDRAWAL',
 ]);
 
+// Same allow-list the market-price fetchers require (see fetchTMXQuote below);
+// enforced here too so a ticker that could never be quoted can't be persisted.
+const TICKER_REGEX = /^[A-Z0-9.]{1,12}$/;
+
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
 // Accepts numbers or numeric strings; rejects NaN/Infinity/garbage.
 const toFiniteNumber = (v) => {
@@ -74,6 +78,9 @@ function validateBackupPayload(payload) {
     if (p.id == null) return errors.push(`portfolios[${i}] is missing id`);
     if (portfolioIds.has(p.id)) errors.push(`portfolios[${i}] has duplicate id ${p.id}`);
     if (!p.name || !p.code) errors.push(`portfolios[${i}] is missing name/code`);
+    if (p.cash_balance !== undefined && p.cash_balance !== null && Number.isNaN(toFiniteNumber(p.cash_balance))) {
+      errors.push(`portfolios[${i}].cash_balance must be a number`);
+    }
     portfolioIds.add(p.id);
   });
   payload.transactions.forEach((t, i) => {
@@ -93,6 +100,11 @@ function validateBackupPayload(payload) {
     if (s == null || typeof s !== 'object') return errors.push(`stock_info[${i}] is not an object`);
     if (!portfolioIds.has(s.portfolio_id)) errors.push(`stock_info[${i}] references unknown portfolio_id ${s.portfolio_id}`);
     if (!s.ticker) errors.push(`stock_info[${i}] is missing ticker`);
+    for (const f of ['market_price', 'dividend_per_share', 'dividend_yield']) {
+      if (s[f] !== undefined && s[f] !== null && Number.isNaN(toFiniteNumber(s[f]))) {
+        errors.push(`stock_info[${i}].${f} must be a number`);
+      }
+    }
   });
   return errors;
 }
@@ -391,6 +403,11 @@ function createApp(db, options = {}) {
         }
       }
 
+      const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolioId);
+      if (!portfolio) {
+        return res.status(404).json({ error: 'Portfolio not found' });
+      }
+
       await db.run(`
         INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_frequency, dividend_per_share, last_dividend_date, sector, investment_type, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -429,21 +446,23 @@ function createApp(db, options = {}) {
        marketPrice ?? null, dividendYield ?? null, payDate ?? null);
   }
 
-  // Shared by POST /api/refresh-all-prices and the daily snapshot cron: fetch
-  // fresh quotes for every held ticker across every portfolio and upsert
-  // stock_info. Extracted so a snapshot always reflects a fresh price pull,
-  // not whatever the user last happened to click "Refresh" on.
-  async function performRefreshAllPrices() {
+  // Shared by POST /api/refresh-all-prices, POST /api/portfolios/:id/refresh-prices,
+  // and the daily snapshot cron: fetch fresh quotes for every held ticker (across
+  // every portfolio, or just one when portfolioId is given) and upsert stock_info.
+  // Extracted so all three call sites can't drift on dedup/error-shape behavior.
+  async function performRefreshPrices(portfolioId) {
+    const where = portfolioId ? `ticker != 'CASH' AND t.portfolio_id = ?` : `ticker != 'CASH'`;
+    const params = portfolioId ? [portfolioId] : [];
     const holdingRows = await db.all(`
       SELECT DISTINCT portfolio_id, ticker,
         (SELECT market FROM transactions t2
          WHERE t2.portfolio_id = t.portfolio_id AND t2.ticker = t.ticker AND t2.market IS NOT NULL
          ORDER BY t2.id DESC LIMIT 1) AS market
       FROM transactions t
-      WHERE ticker != 'CASH'
+      WHERE ${where}
       GROUP BY portfolio_id, ticker
       HAVING ${NET_SHARES} > 0
-    `);
+    `, ...params);
 
     if (!holdingRows.length) return { message: 'No holdings to update', updated: 0 };
 
@@ -499,54 +518,15 @@ function createApp(db, options = {}) {
       updated++;
     }
 
-    return { message: `Updated ${updated} stock-portfolio entries (${uniqueHoldings.length} unique quotes)`,
-               updated, total: holdingRows.length, errors: errors.length ? errors : undefined };
+    const message = portfolioId
+      ? `Updated ${updated} of ${holdingRows.length} stocks`
+      : `Updated ${updated} stock-portfolio entries (${uniqueHoldings.length} unique quotes)`;
+    return { message, updated, total: holdingRows.length, errors: errors.length ? errors : undefined };
   }
 
   app.post('/api/portfolios/:portfolioId/refresh-prices', async (req, res) => {
     try {
-      const portfolioId = req.params.portfolioId;
-      const holdingRows = await db.all(`
-        SELECT ticker,
-          (SELECT market FROM transactions t2
-           WHERE t2.portfolio_id = t.portfolio_id AND t2.ticker = t.ticker AND t2.market IS NOT NULL
-           ORDER BY t2.id DESC LIMIT 1) AS market
-        FROM transactions t
-        WHERE portfolio_id = ? AND ticker != 'CASH'
-        GROUP BY ticker
-        HAVING ${NET_SHARES} > 0
-      `, portfolioId);
-
-      if (!holdingRows.length) return res.json({ message: 'No holdings to update', updated: 0 });
-
-      const wait = ms => new Promise(r => setTimeout(r, ms));
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      let updated = 0; const errors = [];
-
-      for (let i = 0; i < holdingRows.length; i++) {
-        const { ticker, market } = holdingRows[i];
-        const isUS = market === 'NYSE' || market === 'NASDAQ';
-        try {
-          if (isUS) {
-            const q = await fetchYahooQuote(ticker);
-            await upsertStockInfo(portfolioId, ticker, q.price, q.dividendYield, null);
-            console.log(`${ticker} (${market} via Yahoo): $${q.price?.toFixed(2)} yield=${q.dividendYield}%`);
-          } else {
-            const q = await fetchTMXQuote(ticker);
-            if (!q) { errors.push({ ticker, error: 'No data from TMX' }); continue; }
-            const price    = q.price         != null ? parseFloat(q.price)         : null;
-            const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
-            const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today ? q.dividendPayDate : null;
-            await upsertStockInfo(portfolioId, ticker, price, divYield, payDate);
-            console.log(`${ticker} (TMX): $${price?.toFixed(2)} yield=${divYield}%`);
-          }
-          updated++;
-        } catch (e) { errors.push({ ticker, error: e.message }); }
-        if (i < holdingRows.length - 1) await wait(300);
-      }
-
-      res.json({ message: `Updated ${updated} of ${holdingRows.length} stocks`, updated,
-                 total: holdingRows.length, errors: errors.length ? errors : undefined });
+      res.json(await performRefreshPrices(req.params.portfolioId));
     } catch (error) {
       serverError(res, error);
     }
@@ -554,7 +534,7 @@ function createApp(db, options = {}) {
 
   app.post('/api/refresh-all-prices', async (req, res) => {
     try {
-      res.json(await performRefreshAllPrices());
+      res.json(await performRefreshPrices());
     } catch (error) {
       serverError(res, error);
     }
@@ -568,13 +548,16 @@ function createApp(db, options = {}) {
   // wasn't passed to createApp.
 
   app.get('/api/cron/snapshot-values', async (req, res) => {
-    if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+    const expected = Buffer.from(`Bearer ${cronSecret ?? ''}`);
+    const actual = Buffer.from(req.headers.authorization ?? '');
+    const authorized = cronSecret && expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+    if (!authorized) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     try {
       // Best-effort: a stale-but-present price beats no snapshot at all, so a
       // TMX/Yahoo outage shouldn't abort the snapshot.
-      const priceRefresh = await performRefreshAllPrices().catch(e => ({ error: e.message }));
+      const priceRefresh = await performRefreshPrices().catch(e => ({ error: e.message }));
 
       const portfolios = await db.all('SELECT * FROM portfolios');
       // Calendar date in America/New_York, independent of the UTC time the
@@ -808,6 +791,13 @@ function createApp(db, options = {}) {
       if (!TRANSACTION_TYPES.has(normalizedType)) {
         return res.status(400).json({ error: 'Invalid transaction type' });
       }
+      if (finalTicker !== 'CASH' && !TICKER_REGEX.test(finalTicker.toUpperCase())) {
+        return res.status(400).json({ error: 'Invalid ticker' });
+      }
+      const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolio_id);
+      if (!portfolio) {
+        return res.status(404).json({ error: 'Portfolio not found' });
+      }
 
       // Numeric fields must parse to finite, non-negative numbers when present.
       // A negative quantity is especially dangerous: HOLDINGS_SQL nets SELL as
@@ -925,6 +915,10 @@ function createApp(db, options = {}) {
           // case-sensitive, so a lowercase import would split one position into
           // two case-variant holdings.
           const cleanTicker = symbol.trim().toUpperCase();
+          if (!TICKER_REGEX.test(cleanTicker)) {
+            errors.push({ line: i + 1, error: `Invalid ticker '${cleanTicker}'`, data: line });
+            continue;
+          }
           const cleanPortfolioCode = portfolioCode.toUpperCase().trim();
           const portfolio = portfoliosByCode.get(cleanPortfolioCode);
           if (!portfolio) {
