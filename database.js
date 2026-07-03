@@ -124,6 +124,19 @@ async function runMigrations(db) {
       password_hash TEXT NOT NULL,
       created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS portfolio_value_snapshots (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      portfolio_id  INTEGER NOT NULL,
+      snapshot_date TEXT NOT NULL,
+      market_value  REAL,
+      cash_balance  REAL,
+      total_value   REAL NOT NULL,
+      source        TEXT NOT NULL DEFAULT 'cron' CHECK(source IN ('cron','manual')),
+      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(portfolio_id, snapshot_date),
+      FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
+    );
   `);
 
   // --- Incremental column adds for databases created before these existed ---

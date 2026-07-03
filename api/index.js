@@ -34,6 +34,7 @@ function getApp() {
         trustProxy: true,
         serveClient: false, // static client is served by Vercel's CDN
         rateLimit: { windowMs: 15 * 60 * 1000, max: 10 },
+        cronSecret: process.env.CRON_SECRET,
       });
     })().catch((err) => {
       appPromise = null; // allow a retry on the next invocation

@@ -43,10 +43,10 @@ function cleanupTempDbs() {
 
 let BASE;
 
-function req(method, path, body, cookie, base = BASE) {
+function req(method, path, body, cookie, base = BASE, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, base);
-    const opts = { method, hostname: url.hostname, port: url.port, path: url.pathname, headers: {} };
+    const opts = { method, hostname: url.hostname, port: url.port, path: url.pathname, headers: { ...extraHeaders } };
     if (body) {
       const payload = JSON.stringify(body);
       opts.headers['Content-Type'] = 'application/json';
@@ -495,6 +495,83 @@ async function run() {
     } finally {
       hooked.close();
     }
+  }
+
+  // ── 28-33. Portfolio value snapshots (cron + manual backfill) ──────────────
+  // Runs against a dedicated app with a CRON_SECRET configured so the cron
+  // route's bearer-token guard can be exercised without touching the shared
+  // main-suite DB. The seeded portfolio has cash only (no transactions), so
+  // performRefreshAllPrices() short-circuits with zero holdings and the cron
+  // handler never makes a real network call to TMX/Yahoo.
+  const CRON_SECRET = 'test-cron-secret';
+  const snap = await bootApp({ cronSecret: CRON_SECRET });
+  try {
+    const setup = await req('POST', '/api/auth/setup', { username: 'owner', password: 'snappass123' }, null, snap.base);
+    const cookie = extractToken(setup.cookie);
+    const p = await req('POST', '/api/portfolios', { name: 'Snapshot', code: 'SNAP' }, cookie, snap.base);
+    const pid = p.body.id;
+    await req('PUT', `/api/portfolios/${pid}/cash-balance`, { cash_balance: 500 }, cookie, snap.base);
+
+    section('28. Cron snapshot – bearer token guard');
+    const noHeader = await req('GET', '/api/cron/snapshot-values', null, null, snap.base);
+    checkEq('no Authorization header → 401', noHeader.status, 401);
+
+    const wrongHeader = await req('GET', '/api/cron/snapshot-values', null, null, snap.base,
+      { Authorization: 'Bearer wrong-secret' });
+    checkEq('wrong bearer token → 401', wrongHeader.status, 401);
+
+    section('29. Cron snapshot – records a row per portfolio');
+    const run1 = await req('GET', '/api/cron/snapshot-values', null, null, snap.base,
+      { Authorization: `Bearer ${CRON_SECRET}` });
+    checkEq('status = 200', run1.status, 200);
+    checkEq('1 portfolio written', run1.body.written, 1);
+
+    const rows1 = await req('GET', '/api/summary/value-snapshots', null, cookie, snap.base);
+    checkEq('1 snapshot row', rows1.body.length, 1);
+    checkEq('portfolio code', rows1.body[0].portfolio_code, 'SNAP');
+    check('total_value = cash balance (no holdings)', rows1.body[0].total_value, 500);
+    checkEq('source = cron', rows1.body[0].source, 'cron');
+
+    section('30. Cron snapshot – idempotent same-day re-run');
+    await req('PUT', `/api/portfolios/${pid}/cash-balance`, { cash_balance: 750 }, cookie, snap.base);
+    const run2 = await req('GET', '/api/cron/snapshot-values', null, null, snap.base,
+      { Authorization: `Bearer ${CRON_SECRET}` });
+    checkEq('re-run status = 200', run2.status, 200);
+    const rows2 = await req('GET', '/api/summary/value-snapshots', null, cookie, snap.base);
+    checkEq('still 1 snapshot row (upsert, not duplicate)', rows2.body.length, 1);
+    check('total_value updated to new cash balance', rows2.body[0].total_value, 750);
+
+    section('31. Manual value-snapshot – auth guard & validation');
+    const noAuth = await req('PUT', `/api/portfolios/${pid}/value-snapshots/2020-01-31`, { total_value: 100 }, null, snap.base);
+    checkEq('no cookie → 401', noAuth.status, 401);
+
+    const badDate = await req('PUT', `/api/portfolios/${pid}/value-snapshots/not-a-date`, { total_value: 100 }, cookie, snap.base);
+    checkEq('malformed date → 400', badDate.status, 400);
+
+    const badValue = await req('PUT', `/api/portfolios/${pid}/value-snapshots/2020-01-31`, { total_value: 'abc' }, cookie, snap.base);
+    checkEq('non-numeric total_value → 400', badValue.status, 400);
+
+    const negValue = await req('PUT', `/api/portfolios/${pid}/value-snapshots/2020-01-31`, { total_value: -5 }, cookie, snap.base);
+    checkEq('negative total_value → 400', negValue.status, 400);
+
+    section('32. Manual value-snapshot – backfill a historical value');
+    const backfill = await req('PUT', `/api/portfolios/${pid}/value-snapshots/2020-01-31`, { total_value: 12345 }, cookie, snap.base);
+    checkEq('backfill → 200', backfill.status, 200);
+
+    const rows3 = await req('GET', '/api/summary/value-snapshots', null, cookie, snap.base);
+    const backfilled = rows3.body.find(r => r.date === '2020-01-31');
+    checkTruthy('backfilled row present', backfilled);
+    check('backfilled total_value', backfilled.total_value, 12345);
+    checkEq('backfilled source = manual', backfilled.source, 'manual');
+    checkEq('cron row untouched by backfill', rows3.body.length, 2);
+
+    section('33. Manual value-snapshot – delete');
+    const del = await req('DELETE', `/api/portfolios/${pid}/value-snapshots/2020-01-31`, null, cookie, snap.base);
+    checkEq('delete → 200', del.status, 200);
+    const rows4 = await req('GET', '/api/summary/value-snapshots', null, cookie, snap.base);
+    checkEq('backfilled row gone', rows4.body.some(r => r.date === '2020-01-31'), false);
+  } finally {
+    snap.close();
   }
 }
 

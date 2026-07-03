@@ -88,6 +88,19 @@ export const getMonthlyAcb = () =>
 export const getDividendsMonthly = () =>
   request('/api/dividends/monthly')
 
+export const getContributionsMonthly = () =>
+  request('/api/contributions/monthly')
+
+// ── Portfolio value history (daily snapshots) ──────────────────────────────
+export const getValueSnapshots = () =>
+  request('/api/summary/value-snapshots')
+
+export const setValueSnapshot = (portfolioId, date, total_value) =>
+  request(`/api/portfolios/${portfolioId}/value-snapshots/${date}`, { method: 'PUT', body: json({ total_value }) })
+
+export const deleteValueSnapshot = (portfolioId, date) =>
+  request(`/api/portfolios/${portfolioId}/value-snapshots/${date}`, { method: 'DELETE' })
+
 // ── Import ──────────────────────────────────────────────────────────────────
 export const importCsv = (csvData) =>
   request('/api/import/csv', { method: 'POST', body: json({ csvData }) })
