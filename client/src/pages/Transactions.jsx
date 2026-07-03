@@ -231,8 +231,10 @@ export default function Transactions({ portfolios }) {
 
   const deleteTxn = async (id) => {
     if (!confirm('Delete this transaction?')) return
-    await deleteTransaction(id)
-    loadAllTxns()
+    try {
+      await deleteTransaction(id)
+      loadAllTxns()
+    } catch (err) { alert(err.message) }
   }
 
   const filteredTxns = historyFilter === 'ALL'
