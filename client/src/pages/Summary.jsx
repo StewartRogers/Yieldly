@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { RefreshCw, PenLine, Check } from 'lucide-react'
-import { fmtCurrency } from '../utils/format'
+import { fmtCurrency, fmtCurrencyTrim } from '../utils/format'
 import { Input } from '@/components/ui/input'
 import { getOverview, refreshAllPrices, updateCashBalance } from '../api/client'
 
@@ -59,7 +59,7 @@ function CashCell({ portfolio, onRefresh }) {
   return (
     <td style={{ textAlign: 'right' }} onClick={startEdit} title="Click to edit" className="cursor-pointer select-none">
       <span className="editable num">
-        {fmtCurrency(portfolio.cash)}
+        {fmtCurrencyTrim(portfolio.cash)}
         <span className="pen"><PenLine size={10} /></span>
       </span>
     </td>
@@ -92,9 +92,9 @@ function OverviewTable({ data, onRefresh, totalCash, totalInv, totalMkt }) {
                 <tr key={p.id}>
                   <td>{p.name || p.code}</td>
                   <CashCell portfolio={p} onRefresh={onRefresh} />
-                  <td className="num">{fmtCurrency(p.cash_invested)}</td>
-                  <td className="num">{p.market_value > 0 ? fmtCurrency(p.market_value) : '—'}</td>
-                  <td className="num">{p.cash !== null || p.market_value > 0 ? fmtCurrency(total) : '—'}</td>
+                  <td className="num">{fmtCurrencyTrim(p.cash_invested)}</td>
+                  <td className="num">{p.market_value > 0 ? fmtCurrencyTrim(p.market_value) : '—'}</td>
+                  <td className="num">{p.cash !== null || p.market_value > 0 ? fmtCurrencyTrim(total) : '—'}</td>
                 </tr>
               )
             })}
@@ -102,13 +102,13 @@ function OverviewTable({ data, onRefresh, totalCash, totalInv, totalMkt }) {
               <td>Grand total</td>
               <td style={{ textAlign: 'right' }}>
                 <span className="editable num" style={{ cursor: 'default' }}>
-                  {allCashSet ? fmtCurrency(totalCash) : '—'}
+                  {allCashSet ? fmtCurrencyTrim(totalCash) : '—'}
                   <span className="pen" style={{ visibility: 'hidden' }}><PenLine size={10} /></span>
                 </span>
               </td>
-              <td className="num">{fmtCurrency(totalInv)}</td>
-              <td className="num">{totalMkt > 0 ? fmtCurrency(totalMkt) : '—'}</td>
-              <td className="num">{allCashSet && totalMkt > 0 ? fmtCurrency(totalVal) : '—'}</td>
+              <td className="num">{fmtCurrencyTrim(totalInv)}</td>
+              <td className="num">{totalMkt > 0 ? fmtCurrencyTrim(totalMkt) : '—'}</td>
+              <td className="num">{allCashSet && totalMkt > 0 ? fmtCurrencyTrim(totalVal) : '—'}</td>
             </tr>
           </tbody>
         </table>

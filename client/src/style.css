@@ -2191,8 +2191,12 @@ table.tbl .ticker { font-family: var(--font-display); font-weight: 600; font-siz
 table.tbl .sub { font-size: 11px; color: var(--tc-muted); font-weight: 400; }
 
 /* Matrix table variant */
+table.tbl.matrix { width: auto; table-layout: fixed; }
 table.tbl.matrix td:first-child { font-family: var(--font-display); font-weight: 600; }
 table.tbl.matrix .dim { color: var(--faint); }
+table.tbl.matrix th,
+table.tbl.matrix td { padding: 10px 10px; }
+table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relative; }
 
 /* Inline-editable cell */
 .editable {
