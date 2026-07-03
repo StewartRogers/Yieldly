@@ -1,20 +1,12 @@
 import { useState, useEffect } from 'react'
-import { PenLine, Check } from 'lucide-react'
-import { fmtCurrency } from '../utils/format'
+import { PenLine, Check, Pencil, X } from 'lucide-react'
+import { fmtCurrencyTrim } from '../utils/format'
+import { buildPivot, sumPivots, pivotValue, momChange, yearTotal, yoyChange } from '../utils/historyMatrix'
 import { Input } from '@/components/ui/input'
 import { getValueSnapshots, getContributionsMonthly, setValueSnapshot } from '../api/client'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-
-function fmtKPI(v) {
-  return v != null ? '$' + Math.round(v).toLocaleString('en-CA') : '—'
-}
-
-function fmtDelta(v) {
-  if (v == null) return <span className="dim">—</span>
-  const sign = v >= 0 ? '▲' : '▼'
-  return <span className={v >= 0 ? 'up' : 'down'}>{sign} {v >= 0 ? '+' : '−'}{fmtCurrency(Math.abs(v))}</span>
-}
+const YEAR_SPAN = 6
 
 function todayISO() {
   return new Date().toLocaleDateString('en-CA')
@@ -26,43 +18,10 @@ function monthEndISO(year, month) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// Per-portfolio pivot: {year: {month: {value, date, source}}} — each cell is
-// the LATEST snapshot dated within that year-month (not carried forward from
-// a prior month), so a month with no data renders blank. This single rule
-// gives end-of-month values for closed months and "latest so far" for the
-// current month, with no special-casing.
-function buildPivot(rows) {
-  const pivot = {}
-  for (const r of rows) {
-    const [y, m] = r.date.split('-').map(Number)
-    if (!pivot[y]) pivot[y] = {}
-    const existing = pivot[y][m]
-    if (!existing || r.date > existing.date) {
-      pivot[y][m] = { value: r.total_value, date: r.date, source: r.source }
-    }
-  }
-  return pivot
-}
-
-// Sum per-portfolio pivots cell-wise for the "All" view. A portfolio with no
-// data for a given month simply contributes 0 to that month's total.
-function sumPivots(pivots) {
-  const all = {}
-  pivots.forEach(pivot => {
-    Object.entries(pivot).forEach(([y, months]) => {
-      if (!all[y]) all[y] = {}
-      Object.entries(months).forEach(([m, cell]) => {
-        if (!all[y][m]) all[y][m] = { value: 0, date: null, source: 'mixed' }
-        all[y][m].value += cell.value
-        if (!all[y][m].date || cell.date > all[y][m].date) all[y][m].date = cell.date
-      })
-    })
-  })
-  return all
-}
-
-function pivotValue(pivot, year, month) {
-  return pivot?.[year]?.[month]?.value ?? null
+function fmtPctChange(v) {
+  if (v == null) return <span className="dim">—</span>
+  const sign = v >= 0 ? '▲' : '▼'
+  return <span className={v >= 0 ? 'up' : 'down'}>{sign} {Math.abs(v).toFixed(1)}%</span>
 }
 
 function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
@@ -110,7 +69,7 @@ function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
   }
 
   if (!editable || disabled) {
-    return <td className="num">{cell ? fmtCurrency(cell.value) : '—'}</td>
+    return <td className="num">{cell ? fmtCurrencyTrim(cell.value) : '—'}</td>
   }
 
   return (
@@ -120,7 +79,7 @@ function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
       title={cell ? 'Click to correct this value' : 'Click to add a value'}
     >
       <span className="editable num">
-        {cell ? fmtCurrency(cell.value) : '—'}
+        {cell ? fmtCurrencyTrim(cell.value) : '—'}
         {cell?.source === 'manual' && <sup title="Manually entered" style={{ marginLeft: 2, color: 'var(--tc-muted)' }}>*</sup>}
         <span className="pen"><PenLine size={10} /></span>
       </span>
@@ -128,24 +87,54 @@ function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
   )
 }
 
+// Widest formatted cell text across the whole matrix (values + headers),
+// used to size every data column identically to the narrowest fit.
+function measureColCh(pivot, years, cashAddsByYear, currentYear, currentMonth) {
+  let maxLen = 'MoM %'.length
+  years.forEach(y => {
+    maxLen = Math.max(maxLen, String(y).length)
+    if (cashAddsByYear[y] > 0) maxLen = Math.max(maxLen, fmtCurrencyTrim(cashAddsByYear[y]).length)
+    for (let m = 1; m <= 12; m++) {
+      const v = pivotValue(pivot, y, m)
+      if (v != null) maxLen = Math.max(maxLen, fmtCurrencyTrim(v).length)
+      const pct = momChange(pivot, y, m)
+      if (pct != null) maxLen = Math.max(maxLen, (Math.abs(pct).toFixed(1) + '%').length + 2)
+    }
+    const total = yearTotal(pivot, y, currentYear, currentMonth)
+    if (total != null) maxLen = Math.max(maxLen, fmtCurrencyTrim(total).length)
+    const yoy = yoyChange(pivot, y, currentYear, currentMonth)
+    if (yoy != null) maxLen = Math.max(maxLen, (Math.abs(yoy).toFixed(1) + '%').length + 2)
+  })
+  return maxLen + 8
+}
+
 function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
   const now         = new Date()
   const currentYear = now.getFullYear()
   const currentMonth = now.getMonth() + 1
 
-  const years = [...new Set([...Object.keys(pivot).map(Number), currentYear])]
-    .sort((a, b) => a - b)
-    .slice(-6)
+  const years = Array.from({ length: YEAR_SPAN }, (_, i) => currentYear - YEAR_SPAN + 1 + i)
+  const lastYear = years[years.length - 1]
 
   const hasCashAdds = years.some(y => cashAddsByYear[y] > 0)
+  const colCh = measureColCh(pivot, years, cashAddsByYear, currentYear, currentMonth)
+  const colStyle = { width: `${colCh}ch`, minWidth: `${colCh}ch`, maxWidth: `${colCh}ch` }
+  const labelCh = (hasCashAdds ? 'Cash Adds' : 'Month').length + 6
+  const labelStyle = { width: `${labelCh}ch`, minWidth: `${labelCh}ch` }
 
   return (
     <div className="tbl-wrap">
       <table className="tbl matrix">
+        <colgroup>
+          <col style={labelStyle} />
+          {years.map(y => <col key={y} style={colStyle} />)}
+          <col style={colStyle} />
+        </colgroup>
         <thead>
           <tr>
             <th>Month</th>
             {years.map(y => <th key={y}>{y}</th>)}
+            <th>MoM %</th>
           </tr>
         </thead>
         <tbody>
@@ -153,8 +142,9 @@ function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
             <tr className="total">
               <td>Cash Adds</td>
               {years.map(y => (
-                <td key={y} className="num">{cashAddsByYear[y] > 0 ? fmtCurrency(cashAddsByYear[y]) : '—'}</td>
+                <td key={y} className="num">{cashAddsByYear[y] > 0 ? fmtCurrencyTrim(cashAddsByYear[y]) : '—'}</td>
               ))}
+              <td className="num dim">—</td>
             </tr>
           )}
           {MONTHS.map((label, i) => {
@@ -176,9 +166,24 @@ function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
                     />
                   )
                 })}
+                <td className="num">{fmtPctChange(momChange(pivot, lastYear, m))}</td>
               </tr>
             )
           })}
+          <tr className="total">
+            <td>Total</td>
+            {years.map(y => (
+              <td key={y} className="num">{fmtCurrencyTrim(yearTotal(pivot, y, currentYear, currentMonth))}</td>
+            ))}
+            <td className="num dim">—</td>
+          </tr>
+          <tr className="total">
+            <td>YoY %</td>
+            {years.map(y => (
+              <td key={y} className="num">{fmtPctChange(yoyChange(pivot, y, currentYear, currentMonth))}</td>
+            ))}
+            <td className="num dim">—</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -189,6 +194,7 @@ export default function History({ portfolios = [] }) {
   const [snapshots, setSnapshots]       = useState(null)
   const [contributions, setContributions] = useState([])
   const [selected, setSelected]         = useState('ALL')
+  const [editMode, setEditMode]         = useState(false)
 
   const load = () => {
     getValueSnapshots().then(setSnapshots).catch(console.error)
@@ -216,34 +222,6 @@ export default function History({ portfolios = [] }) {
     ? sumPivots(selectedCodes.map(c => pivotByCode[c] || {}))
     : (pivotByCode[selected] || {})
 
-  /* Latest value: sum each portfolio's own most recent snapshot (dates need not align). */
-  let latest = null
-  {
-    let total = 0, any = false, latestDate = null
-    selectedCodes.forEach(code => {
-      const rows = rowsByCode[code]
-      if (!rows || !rows.length) return
-      const last = rows[rows.length - 1]
-      total += last.total_value
-      any = true
-      if (!latestDate || last.date > latestDate) latestDate = last.date
-    })
-    if (any) latest = { value: total, date: latestDate }
-  }
-
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() + 1
-  const prevMonthYear  = currentMonth === 1 ? currentYear - 1 : currentYear
-  const prevMonth      = currentMonth === 1 ? 12 : currentMonth - 1
-
-  const changeThisMonth = latest && pivotValue(pivot, prevMonthYear, prevMonth) != null
-    ? latest.value - pivotValue(pivot, prevMonthYear, prevMonth)
-    : null
-  const changeYTD = latest && pivotValue(pivot, currentYear - 1, 12) != null
-    ? latest.value - pivotValue(pivot, currentYear - 1, 12)
-    : null
-
   const filteredContrib = selected === 'ALL'
     ? contributions
     : contributions.filter(c => c.portfolio_code === selected)
@@ -253,8 +231,9 @@ export default function History({ portfolios = [] }) {
   const handleSave = async (year, month, value) => {
     const portfolioId = portfolioIdByCode[selected]
     if (!portfolioId) return
+    const now = new Date()
     const cell = pivot[year]?.[month]
-    const isCurrentMonth = year === currentYear && month === currentMonth
+    const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
     const targetDate = cell?.date || (isCurrentMonth ? todayISO() : monthEndISO(year, month))
     await setValueSnapshot(portfolioId, targetDate, value)
     load()
@@ -274,7 +253,7 @@ export default function History({ portfolios = [] }) {
             <button
               key={p.code}
               className={`pill${selected === p.code ? ' active' : ''}`}
-              onClick={() => setSelected(p.code)}
+              onClick={() => { setSelected(p.code); setEditMode(false) }}
             >
               {p.label}
             </button>
@@ -282,43 +261,38 @@ export default function History({ portfolios = [] }) {
         </div>
       </div>
 
-      {/* ── KPI strip ── */}
-      {snapshots !== null && latest && (
-        <div className="kpis grid-3" style={{ marginBottom: 22 }}>
-          <div className="kpi">
-            <div className="k">Latest value</div>
-            <div className="v num">{fmtKPI(latest.value)}</div>
-            <div className="d">as of {latest.date}</div>
-          </div>
-          <div className="kpi">
-            <div className="k">Change this month</div>
-            <div className="v num">{fmtDelta(changeThisMonth)}</div>
-            <div className="d">vs prior month-end</div>
-          </div>
-          <div className="kpi">
-            <div className="k">Change YTD</div>
-            <div className="v num">{fmtDelta(changeYTD)}</div>
-            <div className="d">vs {currentYear - 1} year-end</div>
-          </div>
-        </div>
-      )}
-
       {/* ── Value matrix ── */}
       <div className="tc-card">
         <div className="tc-card-head">
           <div className="t">Value by month</div>
-          <div className="a">CAD</div>
+          <div className="row" style={{ gap: 12 }}>
+            <div className="a">CAD</div>
+            {selected !== 'ALL' && (
+              <button
+                type="button"
+                className={`tc-btn sm${editMode ? '' : ' ghost'}`}
+                onClick={() => setEditMode(v => !v)}
+              >
+                {editMode ? <><X size={13} /> Done</> : <><Pencil size={13} /> Edit</>}
+              </button>
+            )}
+          </div>
         </div>
         {snapshots === null && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
         )}
         {snapshots !== null && (
-          <ValueMatrix pivot={pivot} cashAddsByYear={cashAddsByYear} editable={selected !== 'ALL'} onSave={handleSave} />
+          <ValueMatrix pivot={pivot} cashAddsByYear={cashAddsByYear} editable={selected !== 'ALL' && editMode} onSave={handleSave} />
         )}
       </div>
 
       <div className="row between" style={{ flexWrap: 'wrap', gap: 18, marginTop: 12 }}>
-        <span className="note"><PenLine size={11} /> Click a cell to backfill or correct a value</span>
+        <span className="note">
+          <PenLine size={11} />
+          {selected === 'ALL'
+            ? ' Switch to a single portfolio to edit values'
+            : editMode ? ' Click a cell to backfill or correct a value' : ' Click Edit to backfill or correct values'}
+        </span>
         <span className="note">* manually entered</span>
       </div>
     </div>
