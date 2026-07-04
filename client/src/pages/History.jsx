@@ -131,13 +131,6 @@ function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
           <col style={colStyle} />
         </colgroup>
         <thead>
-          <tr>
-            <th>Month</th>
-            {years.map(y => <th key={y}>{y}</th>)}
-            <th>MoM %</th>
-          </tr>
-        </thead>
-        <tbody>
           {hasCashFlow && (
             <tr className="total">
               <td>Net cash flow</td>
@@ -147,6 +140,13 @@ function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
               <td className="num dim">—</td>
             </tr>
           )}
+          <tr>
+            <th>Month</th>
+            {years.map(y => <th key={y}>{y}</th>)}
+            <th>MoM %</th>
+          </tr>
+        </thead>
+        <tbody>
           {MONTHS.map((label, i) => {
             const m = i + 1
             return (
