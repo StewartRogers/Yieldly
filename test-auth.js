@@ -573,6 +573,103 @@ async function run() {
   } finally {
     snap.close();
   }
+
+  // ── 34-38. Cash transactions: auto cash_balance + transfers ────────────────
+  // Runs against a dedicated app so cash_balance assertions can't be thrown off
+  // by transactions the shared main-suite DB accumulates elsewhere.
+  const cash = await bootApp();
+  try {
+    const setup = await req('POST', '/api/auth/setup', { username: 'owner', password: 'cashpass123' }, null, cash.base);
+    const cookie = extractToken(setup.cookie);
+    const getBalance = async (pid) => {
+      const list = await req('GET', '/api/portfolios', null, cookie, cash.base);
+      return list.body.find(p => p.id === pid).cash_balance;
+    };
+
+    section('34. CONTRIBUTION/WITHDRAWAL auto-adjust cash_balance');
+    const p1 = await req('POST', '/api/portfolios', { name: 'Cash A', code: 'CASHA' }, cookie, cash.base);
+    const p1id = p1.body.id;
+    checkEq('starts untracked (null)', await getBalance(p1id), null);
+
+    const contrib = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, type: 'CONTRIBUTION', total: 500, date: '2024-01-01' }, cookie, cash.base);
+    checkEq('contribution → 200', contrib.status, 200);
+    check('cash_balance starts tracking from 0 (+500)', await getBalance(p1id), 500);
+
+    const withdraw = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, type: 'WITHDRAWAL', total: 200, date: '2024-01-05' }, cookie, cash.base);
+    checkEq('withdrawal → 200', withdraw.status, 200);
+    check('cash_balance = 500 - 200', await getBalance(p1id), 300);
+
+    const delWithdraw = await req('DELETE', `/api/transactions/${withdraw.body.id}`, null, cookie, cash.base);
+    checkEq('delete withdrawal → 200', delWithdraw.status, 200);
+    check('cash_balance reverts to 500', await getBalance(p1id), 500);
+
+    const delContrib = await req('DELETE', `/api/transactions/${contrib.body.id}`, null, cookie, cash.base);
+    checkEq('delete contribution → 200', delContrib.status, 200);
+    check('cash_balance reverts to 0', await getBalance(p1id), 0);
+
+    section('35. POST /api/transactions rejects TRANSFER_IN/TRANSFER_OUT directly');
+    const directTransfer = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, type: 'TRANSFER_IN', total: 100, date: '2024-01-01' }, cookie, cash.base);
+    checkEq('direct TRANSFER_IN → 400', directTransfer.status, 400);
+
+    section('36. POST /api/transfers – happy path + validation');
+    const p2 = await req('POST', '/api/portfolios', { name: 'Cash B', code: 'CASHB' }, cookie, cash.base);
+    const p2id = p2.body.id;
+
+    const badSame = await req('POST', '/api/transfers',
+      { from_portfolio_id: p1id, to_portfolio_id: p1id, amount: 100, date: '2024-02-01' }, cookie, cash.base);
+    checkEq('same portfolio on both sides → 400', badSame.status, 400);
+
+    const badAmount = await req('POST', '/api/transfers',
+      { from_portfolio_id: p1id, to_portfolio_id: p2id, amount: -50, date: '2024-02-01' }, cookie, cash.base);
+    checkEq('negative amount → 400', badAmount.status, 400);
+
+    const badPortfolio = await req('POST', '/api/transfers',
+      { from_portfolio_id: p1id, to_portfolio_id: 999999, amount: 50, date: '2024-02-01' }, cookie, cash.base);
+    checkEq('nonexistent portfolio → 404', badPortfolio.status, 404);
+
+    const xfer = await req('POST', '/api/transfers',
+      { from_portfolio_id: p1id, to_portfolio_id: p2id, amount: 300, date: '2024-02-01' }, cookie, cash.base);
+    checkEq('transfer → 200', xfer.status, 200);
+    checkEq('from leg type', xfer.body.from.type, 'TRANSFER_OUT');
+    checkEq('to leg type', xfer.body.to.type, 'TRANSFER_IN');
+    check('from cash_balance -= 300', await getBalance(p1id), -300);
+    check('to cash_balance += 300', await getBalance(p2id), 300);
+
+    const fromTxns = await req('GET', `/api/portfolios/${p1id}/transactions`, null, cookie, cash.base);
+    const outRow = fromTxns.body.find(t => t.id === xfer.body.from.id);
+    checkEq('from leg links to CASHB', outRow.transfer_peer_code, 'CASHB');
+    const toTxns = await req('GET', `/api/portfolios/${p2id}/transactions`, null, cookie, cash.base);
+    const inRow = toTxns.body.find(t => t.id === xfer.body.to.id);
+    checkEq('to leg links to CASHA', inRow.transfer_peer_code, 'CASHA');
+
+    section('37. DELETE either leg of a transfer removes both legs and reverses both balances');
+    const delLeg = await req('DELETE', `/api/transactions/${xfer.body.from.id}`, null, cookie, cash.base);
+    checkEq('delete leg → 200', delLeg.status, 200);
+    check('from cash_balance reverts to 0', await getBalance(p1id), 0);
+    check('to cash_balance reverts to 0', await getBalance(p2id), 0);
+    const toTxnsAfter = await req('GET', `/api/portfolios/${p2id}/transactions`, null, cookie, cash.base);
+    checkEq('peer leg also deleted', toTxnsAfter.body.some(t => t.id === xfer.body.to.id), false);
+
+    section('38. GET /api/cashflow/monthly nets contributions/withdrawals/transfers');
+    await req('POST', '/api/transactions',
+      { portfolio_id: p1id, type: 'CONTRIBUTION', total: 1000, date: '2024-03-10' }, cookie, cash.base);
+    await req('POST', '/api/transactions',
+      { portfolio_id: p1id, type: 'WITHDRAWAL', total: 200, date: '2024-03-15' }, cookie, cash.base);
+    await req('POST', '/api/transfers',
+      { from_portfolio_id: p1id, to_portfolio_id: p2id, amount: 300, date: '2024-03-20' }, cookie, cash.base);
+
+    const flow = await req('GET', '/api/cashflow/monthly', null, cookie, cash.base);
+    const casha = flow.body.find(r => r.portfolio_code === 'CASHA' && r.year === 2024 && r.month === 3);
+    const cashb = flow.body.find(r => r.portfolio_code === 'CASHB' && r.year === 2024 && r.month === 3);
+    check('CASHA net = 1000 - 200 - 300', casha.net, 500);
+    check('CASHB net = +300 (transfer in)', cashb.net, 300);
+    check('combined net = external contributions only (transfer cancels)', casha.net + cashb.net, 800);
+  } finally {
+    cash.close();
+  }
 }
 
 // ─── Boot and run ────────────────────────────────────────────────────────────

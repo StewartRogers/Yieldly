@@ -18,8 +18,19 @@ const noop = async () => {};
 // ─── Validation helpers ──────────────────────────────────────────────────────
 
 const TRANSACTION_TYPES = new Set([
-  'BUY', 'SELL', 'DIVIDEND', 'DIVIDEND_REINVEST', 'CONTRIBUTION', 'WITHDRAWAL',
+  'BUY', 'SELL', 'DIVIDEND', 'DIVIDEND_REINVEST', 'CONTRIBUTION', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT',
 ]);
+
+// CONTRIBUTION/WITHDRAWAL move cash_balance by their own total; a transfer's two
+// linked legs (TRANSFER_IN/TRANSFER_OUT, see POST /api/transfers) move it the
+// same way from each side. Shared here so the create and delete/reversal paths
+// can't drift on the sign convention.
+const CASH_BALANCE_DELTA = {
+  CONTRIBUTION: (total) => total,
+  WITHDRAWAL:   (total) => -total,
+  TRANSFER_IN:  (total) => total,
+  TRANSFER_OUT: (total) => -total,
+};
 
 // Same allow-list the market-price fetchers require (see fetchTMXQuote below);
 // enforced here too so a ticker that could never be quoted can't be persisted.
@@ -625,17 +636,25 @@ function createApp(db, options = {}) {
     }
   });
 
-  app.get('/api/contributions/monthly', async (req, res) => {
+  // Net external + inter-portfolio cash flow per portfolio/month: CONTRIBUTION
+  // and TRANSFER_IN add, WITHDRAWAL and TRANSFER_OUT subtract. Summed across all
+  // portfolios, a transfer's two legs cancel out (it's not new money for the
+  // account); summed for one portfolio, they don't (it did change that
+  // portfolio's own cash) — exactly the cash-flow adjustment the History page's
+  // YoY % needs.
+  app.get('/api/cashflow/monthly', async (req, res) => {
     try {
       const rows = await db.all(`
         SELECT
           p.code  AS portfolio_code,
           CAST(strftime('%Y', t.date) AS INTEGER) AS year,
           CAST(strftime('%m', t.date) AS INTEGER) AS month,
-          SUM(t.total) AS total
+          SUM(CASE WHEN t.type IN ('CONTRIBUTION','TRANSFER_IN')  THEN t.total
+                    WHEN t.type IN ('WITHDRAWAL','TRANSFER_OUT') THEN -t.total
+                    ELSE 0 END) AS net
         FROM transactions t
         JOIN portfolios p ON t.portfolio_id = p.id
-        WHERE t.type = 'CONTRIBUTION'
+        WHERE t.type IN ('CONTRIBUTION','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')
         GROUP BY p.code, year, month
         ORDER BY p.code, year, month
       `);
@@ -727,7 +746,10 @@ function createApp(db, options = {}) {
   app.get('/api/portfolios/:portfolioId/transactions', async (req, res) => {
     try {
       const transactions = await db.all(`
-        SELECT t.*, p.code as portfolio_code, p.name as portfolio_name
+        SELECT t.*, p.code as portfolio_code, p.name as portfolio_name,
+          (SELECT p2.code FROM transactions t2
+             JOIN portfolios p2 ON p2.id = t2.portfolio_id
+            WHERE t2.id = t.transfer_peer_id) AS transfer_peer_code
         FROM transactions t
         JOIN portfolios p ON t.portfolio_id = p.id
         WHERE t.portfolio_id = ?
@@ -782,6 +804,9 @@ function createApp(db, options = {}) {
       const { portfolio_id, ticker, type, quantity, price, total, date, commission, market } = req.body;
 
       const normalizedType = typeof type === 'string' ? type.toUpperCase() : type;
+      if (normalizedType === 'TRANSFER_IN' || normalizedType === 'TRANSFER_OUT') {
+        return res.status(400).json({ error: 'Use POST /api/transfers to move cash between portfolios' });
+      }
       const isCashFlow = normalizedType === 'CONTRIBUTION' || normalizedType === 'WITHDRAWAL';
       const finalTicker = (isCashFlow && !ticker) ? 'CASH' : ticker;
 
@@ -821,14 +846,31 @@ function createApp(db, options = {}) {
         return res.status(400).json({ error: 'total could not be computed' });
       }
 
-      const result = await db.run(`
-        INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, commission, date, market)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, portfolio_id, finalTicker.toUpperCase(), normalizedType, finalQuantity, finalPrice, finalTotal,
-         commission ? Number(commission) : 0, date, market || 'TMX');
+      const cashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal) || 0;
+
+      const tx = await db.transaction('write');
+      let result;
+      try {
+        result = await tx.execute({
+          sql: `INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, commission, date, market)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [portfolio_id, finalTicker.toUpperCase(), normalizedType, finalQuantity, finalPrice, finalTotal,
+                 commission ? Number(commission) : 0, date, market || 'TMX'],
+        });
+        if (cashDelta !== 0) {
+          await tx.execute({
+            sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
+            args: [cashDelta, portfolio_id],
+          });
+        }
+        await tx.commit();
+      } catch (e) {
+        await tx.rollback();
+        throw e;
+      }
 
       res.json({
-        id: result.lastInsertRowid,
+        id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid),
         portfolio_id,
         ticker: finalTicker.toUpperCase(),
         type: normalizedType,
@@ -861,11 +903,116 @@ function createApp(db, options = {}) {
 
   app.delete('/api/transactions/:id', async (req, res) => {
     try {
-      const result = await db.run('DELETE FROM transactions WHERE id = ?', req.params.id);
-      if (result.changes === 0) {
+      const row = await db.get('SELECT * FROM transactions WHERE id = ?', req.params.id);
+      if (!row) {
         return res.status(404).json({ error: 'Transaction not found' });
       }
-      res.json({ message: 'Transaction deleted' });
+      // A transfer's two legs (TRANSFER_IN/TRANSFER_OUT) are linked via
+      // transfer_peer_id — deleting either leg must remove both and reverse
+      // both portfolios' cash_balance, so the ledger can't end up with a
+      // dangling half-transfer.
+      const peer = row.transfer_peer_id
+        ? await db.get('SELECT * FROM transactions WHERE id = ?', row.transfer_peer_id)
+        : null;
+
+      const tx = await db.transaction('write');
+      try {
+        await tx.execute({ sql: 'DELETE FROM transactions WHERE id = ?', args: [row.id] });
+        const delta = CASH_BALANCE_DELTA[row.type]?.(row.total) || 0;
+        if (delta !== 0) {
+          await tx.execute({
+            sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) - ? WHERE id = ?',
+            args: [delta, row.portfolio_id],
+          });
+        }
+        if (peer) {
+          await tx.execute({ sql: 'DELETE FROM transactions WHERE id = ?', args: [peer.id] });
+          const peerDelta = CASH_BALANCE_DELTA[peer.type]?.(peer.total) || 0;
+          if (peerDelta !== 0) {
+            await tx.execute({
+              sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) - ? WHERE id = ?',
+              args: [peerDelta, peer.portfolio_id],
+            });
+          }
+        }
+        await tx.commit();
+      } catch (e) {
+        await tx.rollback();
+        throw e;
+      }
+
+      res.json({ message: peer ? 'Transfer deleted' : 'Transaction deleted' });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // Cash moved between two of the user's own portfolios (e.g. RRSP -> TFSA).
+  // Recorded as two linked ledger rows (TRANSFER_OUT / TRANSFER_IN) rather than
+  // a single CONTRIBUTION+WITHDRAWAL pair, so it can be told apart from real
+  // external money and netted out of account-wide cash-flow reporting.
+  app.post('/api/transfers', async (req, res) => {
+    try {
+      const { from_portfolio_id, to_portfolio_id, amount, date } = req.body;
+
+      if (!from_portfolio_id || !to_portfolio_id || !date) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+      if (String(from_portfolio_id) === String(to_portfolio_id)) {
+        return res.status(400).json({ error: 'from_portfolio_id and to_portfolio_id must differ' });
+      }
+      const finalAmount = toFiniteNumber(amount);
+      if (finalAmount === null || Number.isNaN(finalAmount)) {
+        return res.status(400).json({ error: 'amount must be a number' });
+      }
+      if (finalAmount <= 0) {
+        return res.status(400).json({ error: 'amount must be positive' });
+      }
+
+      const [fromPortfolio, toPortfolio] = await Promise.all([
+        db.get('SELECT id FROM portfolios WHERE id = ?', from_portfolio_id),
+        db.get('SELECT id FROM portfolios WHERE id = ?', to_portfolio_id),
+      ]);
+      if (!fromPortfolio || !toPortfolio) {
+        return res.status(404).json({ error: 'Portfolio not found' });
+      }
+
+      const tx = await db.transaction('write');
+      let outId, inId;
+      try {
+        const outResult = await tx.execute({
+          sql: `INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
+                VALUES (?, 'CASH', 'TRANSFER_OUT', 0, 0, ?, ?)`,
+          args: [from_portfolio_id, finalAmount, date],
+        });
+        const inResult = await tx.execute({
+          sql: `INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
+                VALUES (?, 'CASH', 'TRANSFER_IN', 0, 0, ?, ?)`,
+          args: [to_portfolio_id, finalAmount, date],
+        });
+        outId = Number(outResult.lastInsertRowid);
+        inId = Number(inResult.lastInsertRowid);
+        await tx.execute({ sql: 'UPDATE transactions SET transfer_peer_id = ? WHERE id = ?', args: [inId, outId] });
+        await tx.execute({ sql: 'UPDATE transactions SET transfer_peer_id = ? WHERE id = ?', args: [outId, inId] });
+        await tx.execute({
+          sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) - ? WHERE id = ?',
+          args: [finalAmount, from_portfolio_id],
+        });
+        await tx.execute({
+          sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
+          args: [finalAmount, to_portfolio_id],
+        });
+        await tx.commit();
+      } catch (e) {
+        await tx.rollback();
+        throw e;
+      }
+
+      res.json({
+        message: 'Transfer recorded',
+        from: { id: outId, portfolio_id: Number(from_portfolio_id), type: 'TRANSFER_OUT', total: finalAmount, date },
+        to:   { id: inId,  portfolio_id: Number(to_portfolio_id),   type: 'TRANSFER_IN',  total: finalAmount, date },
+      });
     } catch (error) {
       serverError(res, error);
     }

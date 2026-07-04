@@ -85,6 +85,9 @@ export const createTransaction = (data) =>
 export const deleteTransaction = (id) =>
   request(`/api/transactions/${id}`, { method: 'DELETE' })
 
+export const createTransfer = (data) =>
+  request('/api/transfers', { method: 'POST', body: json(data) })
+
 // ── Summary & Dividends ─────────────────────────────────────────────────────
 export const getOverview = () =>
   request('/api/overview')
@@ -95,8 +98,8 @@ export const getMonthlyAcb = () =>
 export const getDividendsMonthly = () =>
   request('/api/dividends/monthly')
 
-export const getContributionsMonthly = () =>
-  request('/api/contributions/monthly')
+export const getCashflowMonthly = () =>
+  request('/api/cashflow/monthly')
 
 // ── Portfolio value history (daily snapshots) ──────────────────────────────
 export const getValueSnapshots = () =>

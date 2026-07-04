@@ -40,7 +40,7 @@ db.exec(`
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     portfolio_id INTEGER NOT NULL,
     ticker       TEXT NOT NULL DEFAULT 'CASH',
-    type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL')),
+    type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')),
     quantity     REAL NOT NULL DEFAULT 0,
     price        REAL NOT NULL DEFAULT 0,
     total        REAL NOT NULL DEFAULT 0,
@@ -96,6 +96,14 @@ function contribution(pid, amount, date = '2024-01-01') {
 function withdrawal(pid, amount, date = '2024-01-01') {
   db.prepare('INSERT INTO transactions (portfolio_id,ticker,type,quantity,price,total,date) VALUES (?,?,?,?,?,?,?)')
     .run(pid, 'CASH', 'WITHDRAWAL', 0, 0, amount, date);
+}
+function transferOut(pid, amount, date = '2024-01-01') {
+  db.prepare('INSERT INTO transactions (portfolio_id,ticker,type,quantity,price,total,date) VALUES (?,?,?,?,?,?,?)')
+    .run(pid, 'CASH', 'TRANSFER_OUT', 0, 0, amount, date);
+}
+function transferIn(pid, amount, date = '2024-01-01') {
+  db.prepare('INSERT INTO transactions (portfolio_id,ticker,type,quantity,price,total,date) VALUES (?,?,?,?,?,?,?)')
+    .run(pid, 'CASH', 'TRANSFER_IN', 0, 0, amount, date);
 }
 function setInfo(pid, ticker, fields) {
   const keys = Object.keys(fields);
@@ -1168,6 +1176,30 @@ section('J2. CONTRIBUTION and WITHDRAWAL do not appear in holdings');
   const pid = mkPortfolio('J2');
   contribution(pid, 10000);
   withdrawal(pid, 2000);
+  buy(pid, 'XEI.TO', 100, 25.00);
+  const holdings = getHoldings(pid);
+  checkEq('1 holding (XEI only)', holdings.length, 1);
+  checkEq('ticker = XEI.TO',      holdings[0].ticker, 'XEI.TO');
+}
+
+section('J1b. TRANSFER_IN/TRANSFER_OUT are valid, storable types (transfer between portfolios)');
+{
+  const from = mkPortfolio('J1B-FROM');
+  const to = mkPortfolio('J1B-TO');
+  transferOut(from, 500);
+  transferIn(to, 500);
+
+  const fromRows = db.prepare('SELECT type FROM transactions WHERE portfolio_id = ?').all(from);
+  const toRows = db.prepare('SELECT type FROM transactions WHERE portfolio_id = ?').all(to);
+  checkEq('from leg = TRANSFER_OUT', fromRows[0].type, 'TRANSFER_OUT');
+  checkEq('to leg = TRANSFER_IN',    toRows[0].type,   'TRANSFER_IN');
+}
+
+section('J2b. TRANSFER_IN/TRANSFER_OUT do not appear in holdings');
+{
+  const pid = mkPortfolio('J2B');
+  transferIn(pid, 10000);
+  transferOut(pid, 2000);
   buy(pid, 'XEI.TO', 100, 25.00);
   const holdings = getHoldings(pid);
   checkEq('1 holding (XEI only)', holdings.length, 1);
