@@ -1077,9 +1077,16 @@ function createApp(db, options = {}) {
           const parsedDate = parseDate(dateStr);
           const type = typeMap[typeCode] || typeCode;
 
-          const quantity = parseFloat(quantityStr.replace(/[$\s,]/g, '')) || 0;
-          const price = parseFloat(priceStr.replace(/[$\s,]/g, '')) || 0;
-          const total = parseFloat(totalStr.replace(/[$\s,]/g, '')) || 0;
+          const quantity = parseFloat(quantityStr.replace(/[$\s,]/g, ''));
+          const price = parseFloat(priceStr.replace(/[$\s,]/g, ''));
+          const total = parseFloat(totalStr.replace(/[$\s,]/g, ''));
+
+          // Reject unparseable numeric fields instead of silently coercing them
+          // to 0 — matches the validation POST /api/transactions applies.
+          if (!Number.isFinite(quantity) || !Number.isFinite(price) || !Number.isFinite(total)) {
+            errors.push({ line: i + 1, error: 'Quantity, price, and total must be numbers', data: line });
+            continue;
+          }
 
           // Guard against negatives — a negative SELL quantity would add shares
           // in the holdings aggregation and corrupt ACB/returns.
