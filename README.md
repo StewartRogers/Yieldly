@@ -109,8 +109,9 @@ To migrate existing local data into Turso, dump `yieldly.db` and import it with 
 - `DIVIDEND_REINVEST`
 - `CONTRIBUTION`
 - `WITHDRAWAL`
+- `TRANSFER_IN` / `TRANSFER_OUT` - the two linked legs of a cash transfer between portfolios (see `POST /api/transfers`); not creatable via `POST /api/transactions`
 
-Cash-flow transactions use `CASH` as the ticker internally.
+Cash-flow transactions use `CASH` as the ticker internally. `CONTRIBUTION`, `WITHDRAWAL`, and transfers automatically adjust the portfolio's `cash_balance` (starting from 0 if it was previously unset).
 
 ## CSV Import
 
@@ -156,8 +157,9 @@ All API routes except `/api/auth/*` and `/api/cron/*` require authentication (re
 
 ### Transactions
 
-- `POST /api/transactions` - Add a transaction
-- `DELETE /api/transactions/:id` - Delete a transaction
+- `POST /api/transactions` - Add a transaction (`CONTRIBUTION`/`WITHDRAWAL` also adjust `cash_balance`; `TRANSFER_IN`/`TRANSFER_OUT` are rejected here - use `POST /api/transfers`)
+- `DELETE /api/transactions/:id` - Delete a transaction, reversing any `cash_balance` change; deleting either leg of a transfer deletes both
+- `POST /api/transfers` - Move cash between two of the user's own portfolios (`from_portfolio_id`, `to_portfolio_id`, `amount`, `date`); records a linked `TRANSFER_OUT`/`TRANSFER_IN` pair and adjusts both portfolios' `cash_balance`
 
 ### Summary and Income
 
@@ -165,7 +167,7 @@ All API routes except `/api/auth/*` and `/api/cron/*` require authentication (re
 - `GET /api/overview` - Portfolio overview with cash and market value fields
 - `GET /api/summary/monthly-acb` - Monthly average cost basis trend
 - `GET /api/dividends/monthly` - Monthly dividend totals by portfolio
-- `GET /api/contributions/monthly` - Monthly contribution (cash add) totals by portfolio
+- `GET /api/cashflow/monthly` - Monthly net external + transfer cash flow by portfolio (`CONTRIBUTION`/`TRANSFER_IN` add, `WITHDRAWAL`/`TRANSFER_OUT` subtract)
 - `GET /api/summary/value-snapshots` - Daily portfolio value snapshots (all portfolios)
 - `PUT /api/portfolios/:portfolioId/value-snapshots/:date` - Set/backfill a portfolio's total value for one date (`date` is `YYYY-MM-DD`)
 - `DELETE /api/portfolios/:portfolioId/value-snapshots/:date` - Delete a snapshot

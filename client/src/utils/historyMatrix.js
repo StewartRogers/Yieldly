@@ -66,10 +66,14 @@ export function yearTotal(pivot, year, currentYear, currentMonth) {
   return null
 }
 
-// Year-over-year % change for `year` vs the year before it.
-export function yoyChange(pivot, year, currentYear, currentMonth) {
+// Year-over-year % change for `year` vs the year before it. `netFlow` is the
+// net external + inter-portfolio cash added during `year` (contributions and
+// transfers-in minus withdrawals and transfers-out) — subtracting it isolates
+// investment growth from money the user simply moved in or out, e.g. a
+// portfolio going 100 -> 110 with $10 contributed is 0% organic growth, not 10%.
+export function yoyChange(pivot, year, currentYear, currentMonth, netFlow = 0) {
   const cur  = yearTotal(pivot, year, currentYear, currentMonth)
   const prev = yearTotal(pivot, year - 1, currentYear, currentMonth)
   if (cur == null || prev == null || prev === 0) return null
-  return ((cur - prev) / prev) * 100
+  return ((cur - prev - netFlow) / prev) * 100
 }

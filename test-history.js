@@ -204,6 +204,30 @@ async function main() {
     checkEq('prior year total of 0 → null (avoid Infinity)', yoyChange(zeroBase, 2025, 2026, 7), null);
   }
 
+  section('19. yoyChange — netFlow subtracts contributed cash to isolate organic growth');
+  {
+    // The worked example from the feature request: 100 -> 110 with $10
+    // contributed during the year is 0% real growth, not +10%.
+    const pivot = buildPivot([
+      { date: '2024-12-31', total_value: 100, source: 'cron' },
+      { date: '2025-12-31', total_value: 110, source: 'cron' },
+    ]);
+    check('no netFlow (default) → +10%', yoyChange(pivot, 2025, 2026, 7), 10);
+    check('$10 net contribution → 0% organic growth', yoyChange(pivot, 2025, 2026, 7, 10), 0);
+    check('a net withdrawal makes organic growth look better', yoyChange(pivot, 2025, 2026, 7, -10), 20);
+  }
+
+  section('20. yoyChange — netFlow on a partial current year (YTD)');
+  {
+    const pivot = buildPivot([
+      { date: '2025-12-31', total_value: 800, source: 'cron' },
+      { date: '2026-04-30', total_value: 900, source: 'cron' }, // latest so far this year
+    ]);
+    // $50 contributed so far this year (through the current month) should be
+    // subtracted from the YTD gain the same way a full year's flow would be.
+    check('2026 YTD with $50 contributed so far → 6.25%', yoyChange(pivot, 2026, 2026, 7, 50), 6.25);
+  }
+
   // ─── Summary ────────────────────────────────────────────────────────────
   const total = passed + failed;
   console.log(`\n${'═'.repeat(58)}`);

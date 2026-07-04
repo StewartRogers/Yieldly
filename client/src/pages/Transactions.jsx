@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { fmtCurrency } from '../utils/format'
-import { getPortfolioTransactions, createTransaction, deleteTransaction } from '../api/client'
+import { getPortfolioTransactions, createTransaction, createTransfer, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,10 @@ import { Trash2 } from 'lucide-react'
 const PER_PAGE = 20
 const CASH_ONLY_TYPES = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
 const CASH_FLOW_TYPES = new Set(['CONTRIBUTION', 'WITHDRAWAL'])
+// 'TRANSFER' is a form-only pseudo-type: submitting it calls createTransfer(),
+// which fans out into a linked TRANSFER_OUT/TRANSFER_IN row pair server-side —
+// those two real types only ever appear in transaction history, never in the form.
+const TRANSFER_LEG_TYPES = new Set(['TRANSFER_IN', 'TRANSFER_OUT'])
 
 const TYPE_BADGE = {
   BUY:               'buy',
@@ -17,6 +21,8 @@ const TYPE_BADGE = {
   DIVIDEND_REINVEST: 'reinvest',
   CONTRIBUTION:      'contrib',
   WITHDRAWAL:        'withdraw',
+  TRANSFER_IN:       'transfer',
+  TRANSFER_OUT:      'transfer',
 }
 
 const TYPE_LABEL = {
@@ -26,6 +32,9 @@ const TYPE_LABEL = {
   DIVIDEND_REINVEST: 'Reinvest',
   CONTRIBUTION:      'Contribution',
   WITHDRAWAL:        'Withdrawal',
+  TRANSFER:          'Transfer',
+  TRANSFER_IN:       'Transfer in',
+  TRANSFER_OUT:      'Transfer out',
 }
 
 const FIELD_LABEL = 'text-[11px] font-semibold uppercase tracking-[.08em] text-foreground/60'
@@ -139,6 +148,7 @@ function TickerCombobox({ value, options, onChange, placeholder, required }) {
 
 export default function Transactions({ portfolios }) {
   const [formPortfolioId, setFormPortfolioId] = useState('')
+  const [toPortfolioId, setToPortfolioId]     = useState('')
   const [type, setType]                       = useState('BUY')
   const [market, setMarket]                   = useState('TMX')
   const [ticker, setTicker]                   = useState('')
@@ -152,7 +162,8 @@ export default function Transactions({ portfolios }) {
   const [page, setPage]                       = useState(1)
   const [loading, setLoading]                 = useState(false)
 
-  const isCashOnly = CASH_ONLY_TYPES.has(type)
+  const isTransfer = type === 'TRANSFER'
+  const isCashOnly = CASH_ONLY_TYPES.has(type) || isTransfer
   const isCashFlow = CASH_FLOW_TYPES.has(type)
 
   // Tickers acquired in the selected portfolio — drives autocomplete + non-Buy validation
@@ -197,6 +208,24 @@ export default function Transactions({ portfolios }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
+    if (isTransfer) {
+      if (!formPortfolioId || !toPortfolioId) { alert('Select both portfolios'); return }
+      if (formPortfolioId === toPortfolioId) { alert('From and To portfolios must differ'); return }
+      const amount = parseFloat(total)
+      if (!(amount > 0)) { alert('Enter a positive amount'); return }
+      try {
+        await createTransfer({
+          from_portfolio_id: parseInt(formPortfolioId),
+          to_portfolio_id:   parseInt(toPortfolioId),
+          amount, date,
+        })
+        setTotal(''); setToPortfolioId(''); setDate(new Date().toISOString().slice(0, 10))
+        loadAllTxns()
+      } catch (err) { alert(err.message) }
+      return
+    }
+
     if (!formPortfolioId) { alert('Select a portfolio'); return }
     // Non-Buy ticketed transactions must reference a stock already held in this portfolio
     if (!isCashFlow && type !== 'BUY') {
@@ -229,10 +258,13 @@ export default function Transactions({ portfolios }) {
     } catch (err) { alert(err.message) }
   }
 
-  const deleteTxn = async (id) => {
-    if (!confirm('Delete this transaction?')) return
+  const deleteTxn = async (t) => {
+    const msg = TRANSFER_LEG_TYPES.has(t.type)
+      ? 'Delete this transfer? This removes both the outgoing and incoming entries.'
+      : 'Delete this transaction?'
+    if (!confirm(msg)) return
     try {
-      await deleteTransaction(id)
+      await deleteTransaction(t.id)
       loadAllTxns()
     } catch (err) { alert(err.message) }
   }
@@ -265,29 +297,68 @@ export default function Transactions({ portfolios }) {
           </div>
           <form onSubmit={handleSubmit} className="col" style={{ gap: 12 }}>
 
-            <div className="tc-field">
-              <label>Portfolio</label>
-              <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
-                <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
-                  {/* base-ui Select.Value shows raw value string, so we render the label ourselves */}
-                  <span className="flex flex-1 text-left text-sm truncate" style={{ color: formPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
-                    {formPortfolioId
-                      ? (() => { const p = portfolios?.find(p => String(p.id) === formPortfolioId); return p ? `${p.code} — ${p.name}` : 'Select…' })()
-                      : 'Select portfolio…'}
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  {portfolios?.map(p => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {!isTransfer ? (
+              <div className="tc-field">
+                <label>Portfolio</label>
+                <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
+                  <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                    {/* base-ui Select.Value shows raw value string, so we render the label ourselves */}
+                    <span className="flex flex-1 text-left text-sm truncate" style={{ color: formPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
+                      {formPortfolioId
+                        ? (() => { const p = portfolios?.find(p => String(p.id) === formPortfolioId); return p ? `${p.code} — ${p.name}` : 'Select…' })()
+                        : 'Select portfolio…'}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {portfolios?.map(p => (
+                      <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="grid-2">
+                <div className="tc-field">
+                  <label>From portfolio</label>
+                  <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
+                    <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                      <span className="flex flex-1 text-left text-sm truncate" style={{ color: formPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
+                        {formPortfolioId
+                          ? (() => { const p = portfolios?.find(p => String(p.id) === formPortfolioId); return p ? p.code : 'Select…' })()
+                          : 'Select…'}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {portfolios?.map(p => (
+                        <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="tc-field">
+                  <label>To portfolio</label>
+                  <Select value={toPortfolioId} onValueChange={setToPortfolioId}>
+                    <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                      <span className="flex flex-1 text-left text-sm truncate" style={{ color: toPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
+                        {toPortfolioId
+                          ? (() => { const p = portfolios?.find(p => String(p.id) === toPortfolioId); return p ? p.code : 'Select…' })()
+                          : 'Select…'}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {portfolios?.map(p => (
+                        <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div className="tc-field">
               <label>Type</label>
               <Select value={type} onValueChange={v => {
-                setType(v); setTicker(''); setQuantity(''); setPrice(''); setTotal('')
+                setType(v); setTicker(''); setQuantity(''); setPrice(''); setTotal(''); setToPortfolioId('')
               }}>
                 <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                   <span className="flex flex-1 text-left text-sm">{TYPE_LABEL[type] ?? type}</span>
@@ -299,11 +370,12 @@ export default function Transactions({ portfolios }) {
                   <SelectItem value="DIVIDEND_REINVEST">Dividend Reinvest</SelectItem>
                   <SelectItem value="CONTRIBUTION">Contribution</SelectItem>
                   <SelectItem value="WITHDRAWAL">Withdrawal</SelectItem>
+                  <SelectItem value="TRANSFER">Transfer</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {!isCashFlow && (
+            {!isCashFlow && !isTransfer && (
               <>
                 <div className="tc-field">
                   <label>Ticker</label>
@@ -381,7 +453,7 @@ export default function Transactions({ portfolios }) {
             {isCashOnly && (
               <div className="grid-2">
                 <div className="tc-field">
-                  <label>{isCashFlow ? 'Amount' : 'Total'}</label>
+                  <label>{(isCashFlow || isTransfer) ? 'Amount' : 'Total'}</label>
                   <Input className="h-9" type="number" step="0.01" placeholder="0.00" value={total}
                     style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                     onChange={e => setTotal(e.target.value)} required />
@@ -399,7 +471,7 @@ export default function Transactions({ portfolios }) {
           </form>
 
           <div className="note" style={{ justifyContent: 'center', textAlign: 'center', lineHeight: 1.5, marginTop: 12 }}>
-            Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal
+            Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal · Transfer
           </div>
         </div>
 
@@ -452,6 +524,11 @@ export default function Transactions({ portfolios }) {
                             <span className="ticker" style={{ color: t.ticker === 'CASH' ? 'var(--faint)' : undefined }}>
                               {t.ticker}
                             </span>
+                            {TRANSFER_LEG_TYPES.has(t.type) && t.transfer_peer_code && (
+                              <div className="muted-txt" style={{ fontSize: 11, marginTop: 2 }}>
+                                {t.type === 'TRANSFER_OUT' ? `→ ${t.transfer_peer_code}` : `← ${t.transfer_peer_code}`}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <span className={`tc-badge ${badgeClass}`}>
@@ -466,9 +543,9 @@ export default function Transactions({ portfolios }) {
                           <td>
                             <button
                               className="tc-btn sm ghost danger"
-                              onClick={() => deleteTxn(t.id)}
-                              title="Delete transaction"
-                              aria-label="Delete transaction"
+                              onClick={() => deleteTxn(t)}
+                              title={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
+                              aria-label={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
                             >
                               <Trash2 size={12} />
                             </button>
@@ -487,8 +564,8 @@ export default function Transactions({ portfolios }) {
 
       {/* ── Badge legend ── */}
       <div className="row mt4" style={{ flexWrap: 'wrap', gap: 14 }}>
-        {['buy','sell','div','reinvest','contrib','withdraw'].map(cls => {
-          const labels = { buy:'Buy', sell:'Sell', div:'Dividend', reinvest:'Reinvest', contrib:'Contribution', withdraw:'Withdrawal' }
+        {['buy','sell','div','reinvest','contrib','withdraw','transfer'].map(cls => {
+          const labels = { buy:'Buy', sell:'Sell', div:'Dividend', reinvest:'Reinvest', contrib:'Contribution', withdraw:'Withdrawal', transfer:'Transfer' }
           return (
             <span key={cls} className={`tc-badge ${cls}`}>
               <span className="dot" />{labels[cls]}

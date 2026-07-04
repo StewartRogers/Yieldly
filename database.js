@@ -91,13 +91,14 @@ async function runMigrations(db) {
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       portfolio_id INTEGER NOT NULL,
       ticker       TEXT NOT NULL DEFAULT 'CASH',
-      type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL')),
+      type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')),
       quantity     REAL NOT NULL DEFAULT 0,
       price        REAL NOT NULL DEFAULT 0,
       total        REAL NOT NULL DEFAULT 0,
       commission   REAL DEFAULT 0,
       date         TEXT NOT NULL,
       market       TEXT DEFAULT 'TMX',
+      transfer_peer_id INTEGER,
       created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
     );
@@ -144,36 +145,39 @@ async function runMigrations(db) {
   await addColumnIfMissing(db, 'portfolios', 'cash_balance', 'REAL');
   await addColumnIfMissing(db, 'transactions', 'commission', 'REAL DEFAULT 0');
   await addColumnIfMissing(db, 'transactions', 'market', "TEXT DEFAULT 'TMX'");
+  await addColumnIfMissing(db, 'transactions', 'transfer_peer_id', 'INTEGER');
   await addColumnIfMissing(db, 'stock_info', 'sector', 'TEXT');
   await addColumnIfMissing(db, 'stock_info', 'investment_type', 'TEXT');
   await addColumnIfMissing(db, 'stock_info', 'dividend_yield', 'REAL');
 
-  // --- Widen the transactions.type CHECK constraint (CONTRIBUTION/WITHDRAWAL) ---
-  // Old DBs were created with a 4-type CHECK; a constraint can't be altered in
-  // place, so rebuild the table (now that all columns above exist) when the
-  // stored DDL predates the cash-flow types.
+  // --- Widen the transactions.type CHECK constraint (cash-flow + transfer types) ---
+  // Old DBs were created with a narrower CHECK; a constraint can't be altered in
+  // place, so rebuild the table (now that all columns above exist, including
+  // transfer_peer_id from the addColumnIfMissing above) when the stored DDL
+  // predates the transfer types.
   const txDef = await db.get(
     `SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`
   );
-  if (txDef && txDef.sql && !String(txDef.sql).includes('CONTRIBUTION')) {
+  if (txDef && txDef.sql && !String(txDef.sql).includes('TRANSFER_IN')) {
     await db.exec(`
       PRAGMA foreign_keys=OFF;
       CREATE TABLE transactions_new (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         portfolio_id INTEGER NOT NULL,
         ticker       TEXT NOT NULL DEFAULT 'CASH',
-        type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL')),
+        type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')),
         quantity     REAL NOT NULL DEFAULT 0,
         price        REAL NOT NULL DEFAULT 0,
         total        REAL NOT NULL DEFAULT 0,
         commission   REAL DEFAULT 0,
         date         TEXT NOT NULL,
         market       TEXT DEFAULT 'TMX',
+        transfer_peer_id INTEGER,
         created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
       );
-      INSERT INTO transactions_new (id, portfolio_id, ticker, type, quantity, price, total, commission, date, market, created_at)
-      SELECT id, portfolio_id, ticker, type, quantity, price, total, COALESCE(commission,0), date, COALESCE(market,'TMX'), created_at
+      INSERT INTO transactions_new (id, portfolio_id, ticker, type, quantity, price, total, commission, date, market, transfer_peer_id, created_at)
+      SELECT id, portfolio_id, ticker, type, quantity, price, total, COALESCE(commission,0), date, COALESCE(market,'TMX'), transfer_peer_id, created_at
       FROM transactions;
       DROP TABLE transactions;
       ALTER TABLE transactions_new RENAME TO transactions;

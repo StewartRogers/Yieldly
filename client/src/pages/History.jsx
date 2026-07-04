@@ -3,7 +3,7 @@ import { PenLine, Check, Pencil, X } from 'lucide-react'
 import { fmtCurrencyTrim } from '../utils/format'
 import { buildPivot, sumPivots, pivotValue, momChange, yearTotal, yoyChange } from '../utils/historyMatrix'
 import { Input } from '@/components/ui/input'
-import { getValueSnapshots, getContributionsMonthly, setValueSnapshot } from '../api/client'
+import { getValueSnapshots, getCashflowMonthly, setValueSnapshot } from '../api/client'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const YEAR_SPAN = 6
@@ -89,11 +89,11 @@ function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
 
 // Widest formatted cell text across the whole matrix (values + headers),
 // used to size every data column identically to the narrowest fit.
-function measureColCh(pivot, years, cashAddsByYear, currentYear, currentMonth) {
+function measureColCh(pivot, years, netCashFlowByYear, currentYear, currentMonth) {
   let maxLen = 'MoM %'.length
   years.forEach(y => {
     maxLen = Math.max(maxLen, String(y).length)
-    if (cashAddsByYear[y] > 0) maxLen = Math.max(maxLen, fmtCurrencyTrim(cashAddsByYear[y]).length)
+    if (netCashFlowByYear[y]) maxLen = Math.max(maxLen, fmtCurrencyTrim(netCashFlowByYear[y]).length)
     for (let m = 1; m <= 12; m++) {
       const v = pivotValue(pivot, y, m)
       if (v != null) maxLen = Math.max(maxLen, fmtCurrencyTrim(v).length)
@@ -102,13 +102,13 @@ function measureColCh(pivot, years, cashAddsByYear, currentYear, currentMonth) {
     }
     const total = yearTotal(pivot, y, currentYear, currentMonth)
     if (total != null) maxLen = Math.max(maxLen, fmtCurrencyTrim(total).length)
-    const yoy = yoyChange(pivot, y, currentYear, currentMonth)
+    const yoy = yoyChange(pivot, y, currentYear, currentMonth, netCashFlowByYear[y] || 0)
     if (yoy != null) maxLen = Math.max(maxLen, (Math.abs(yoy).toFixed(1) + '%').length + 2)
   })
   return maxLen + 8
 }
 
-function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
+function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
   const now         = new Date()
   const currentYear = now.getFullYear()
   const currentMonth = now.getMonth() + 1
@@ -116,10 +116,10 @@ function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
   const years = Array.from({ length: YEAR_SPAN }, (_, i) => currentYear - YEAR_SPAN + 1 + i)
   const lastYear = years[years.length - 1]
 
-  const hasCashAdds = years.some(y => cashAddsByYear[y] > 0)
-  const colCh = measureColCh(pivot, years, cashAddsByYear, currentYear, currentMonth)
+  const hasCashFlow = years.some(y => netCashFlowByYear[y])
+  const colCh = measureColCh(pivot, years, netCashFlowByYear, currentYear, currentMonth)
   const colStyle = { width: `${colCh}ch`, minWidth: `${colCh}ch`, maxWidth: `${colCh}ch` }
-  const labelCh = (hasCashAdds ? 'Cash Adds' : 'Month').length + 6
+  const labelCh = (hasCashFlow ? 'Net cash flow' : 'Month').length + 6
   const labelStyle = { width: `${labelCh}ch`, minWidth: `${labelCh}ch` }
 
   return (
@@ -138,11 +138,11 @@ function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
           </tr>
         </thead>
         <tbody>
-          {hasCashAdds && (
+          {hasCashFlow && (
             <tr className="total">
-              <td>Cash Adds</td>
+              <td>Net cash flow</td>
               {years.map(y => (
-                <td key={y} className="num">{cashAddsByYear[y] > 0 ? fmtCurrencyTrim(cashAddsByYear[y]) : '—'}</td>
+                <td key={y} className="num">{netCashFlowByYear[y] ? fmtCurrencyTrim(netCashFlowByYear[y]) : '—'}</td>
               ))}
               <td className="num dim">—</td>
             </tr>
@@ -180,7 +180,7 @@ function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
           <tr className="total">
             <td>YoY %</td>
             {years.map(y => (
-              <td key={y} className="num">{fmtPctChange(yoyChange(pivot, y, currentYear, currentMonth))}</td>
+              <td key={y} className="num">{fmtPctChange(yoyChange(pivot, y, currentYear, currentMonth, netCashFlowByYear[y] || 0))}</td>
             ))}
             <td className="num dim">—</td>
           </tr>
@@ -192,13 +192,13 @@ function ValueMatrix({ pivot, cashAddsByYear, editable, onSave }) {
 
 export default function History({ portfolios = [] }) {
   const [snapshots, setSnapshots]       = useState(null)
-  const [contributions, setContributions] = useState([])
+  const [cashflow, setCashflow]         = useState([])
   const [selected, setSelected]         = useState('ALL')
   const [editMode, setEditMode]         = useState(false)
 
   const load = () => {
     getValueSnapshots().then(setSnapshots).catch(console.error)
-    getContributionsMonthly().then(setContributions).catch(console.error)
+    getCashflowMonthly().then(setCashflow).catch(console.error)
   }
 
   useEffect(() => { load() }, [])
@@ -222,11 +222,20 @@ export default function History({ portfolios = [] }) {
     ? sumPivots(selectedCodes.map(c => pivotByCode[c] || {}))
     : (pivotByCode[selected] || {})
 
-  const filteredContrib = selected === 'ALL'
-    ? contributions
-    : contributions.filter(c => c.portfolio_code === selected)
-  const cashAddsByYear = {}
-  filteredContrib.forEach(c => { cashAddsByYear[c.year] = (cashAddsByYear[c.year] || 0) + c.total })
+  const now          = new Date()
+  const currentYear  = now.getFullYear()
+  const currentMonth = now.getMonth() + 1
+
+  const filteredCashflow = selected === 'ALL'
+    ? cashflow
+    : cashflow.filter(c => c.portfolio_code === selected)
+  // Only count months through the current one for the current year, so a
+  // partial-year net flow lines up with yearTotal's YTD walk-back semantics.
+  const netCashFlowByYear = {}
+  filteredCashflow.forEach(c => {
+    if (c.year === currentYear && c.month > currentMonth) return
+    netCashFlowByYear[c.year] = (netCashFlowByYear[c.year] || 0) + c.net
+  })
 
   const handleSave = async (year, month, value) => {
     const portfolioId = portfolioIdByCode[selected]
@@ -282,7 +291,7 @@ export default function History({ portfolios = [] }) {
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
         )}
         {snapshots !== null && (
-          <ValueMatrix pivot={pivot} cashAddsByYear={cashAddsByYear} editable={selected !== 'ALL' && editMode} onSave={handleSave} />
+          <ValueMatrix pivot={pivot} netCashFlowByYear={netCashFlowByYear} editable={selected !== 'ALL' && editMode} onSave={handleSave} />
         )}
       </div>
 
