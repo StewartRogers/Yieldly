@@ -4,6 +4,7 @@ import { getPortfolioTransactions, createTransaction, createTransfer, deleteTran
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { useToast } from '@/components/ui/toast'
 import { Trash2 } from 'lucide-react'
 
 const PER_PAGE = 20
@@ -147,6 +148,7 @@ function TickerCombobox({ value, options, onChange, placeholder, required }) {
 }
 
 export default function Transactions({ portfolios }) {
+  const toast = useToast()
   const [formPortfolioId, setFormPortfolioId] = useState('')
   const [toPortfolioId, setToPortfolioId]     = useState('')
   const [type, setType]                       = useState('BUY')
@@ -210,10 +212,10 @@ export default function Transactions({ portfolios }) {
     e.preventDefault()
 
     if (isTransfer) {
-      if (!formPortfolioId || !toPortfolioId) { alert('Select both portfolios'); return }
-      if (formPortfolioId === toPortfolioId) { alert('From and To portfolios must differ'); return }
+      if (!formPortfolioId || !toPortfolioId) { toast.error('Select both portfolios'); return }
+      if (formPortfolioId === toPortfolioId) { toast.error('From and To portfolios must differ'); return }
       const amount = parseFloat(total)
-      if (!(amount > 0)) { alert('Enter a positive amount'); return }
+      if (!(amount > 0)) { toast.error('Enter a positive amount'); return }
       try {
         await createTransfer({
           from_portfolio_id: parseInt(formPortfolioId),
@@ -222,16 +224,16 @@ export default function Transactions({ portfolios }) {
         })
         setTotal(''); setToPortfolioId(''); setDate(new Date().toISOString().slice(0, 10))
         loadAllTxns()
-      } catch (err) { alert(err.message) }
+      } catch (err) { toast.error(err.message) }
       return
     }
 
-    if (!formPortfolioId) { alert('Select a portfolio'); return }
+    if (!formPortfolioId) { toast.error('Select a portfolio'); return }
     // Non-Buy ticketed transactions must reference a stock already held in this portfolio
     if (!isCashFlow && type !== 'BUY') {
       const tk = ticker.trim().toUpperCase()
       if (!ownedTickers.includes(tk)) {
-        alert(`You don't own ${tk || 'that stock'} in this portfolio. Add a Buy transaction first, or pick an existing holding.`)
+        toast.error(`You don't own ${tk || 'that stock'} in this portfolio. Add a Buy transaction first, or pick an existing holding.`)
         return
       }
     }
@@ -255,7 +257,7 @@ export default function Transactions({ portfolios }) {
       setTicker(''); setQuantity(''); setPrice(''); setTotal('')
       setCommission(''); setDate(new Date().toISOString().slice(0, 10)); setMarket('TMX')
       loadAllTxns()
-    } catch (err) { alert(err.message) }
+    } catch (err) { toast.error(err.message) }
   }
 
   const deleteTxn = async (t) => {
@@ -266,7 +268,7 @@ export default function Transactions({ portfolios }) {
     try {
       await deleteTransaction(t.id)
       loadAllTxns()
-    } catch (err) { alert(err.message) }
+    } catch (err) { toast.error(err.message) }
   }
 
   const filteredTxns = historyFilter === 'ALL'
