@@ -3,9 +3,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import { useToast } from '@/components/ui/toast'
 import { updateStockInfo } from '../api/client'
 
 export default function StockInfoModal({ holding, portfolioId, onClose, onSaved }) {
+  const toast = useToast()
   const [form, setForm] = useState({
     marketPrice: '', dividendFrequency: '', dividendPerShare: '',
     lastDividendDate: '', sector: '', investmentType: ''
@@ -49,7 +51,7 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
       onSaved()
       onClose()
     } catch (err) {
-      alert(err.message)
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }

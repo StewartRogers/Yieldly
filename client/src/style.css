@@ -2467,3 +2467,59 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
   font-size: 14px !important;
   width: 100%;
 }
+
+/* Toasts — replaces alert() for in-app error/success messaging. */
+.toast-stack {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 380px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast { animation: toast-in .15s ease-out; }
+}
+
+.toast--error   { border-color: rgba(248,113,113,.3); }
+.toast--success { border-color: rgba(74,222,128,.3); }
+
+.toast-icon { flex-shrink: 0; margin-top: 1px; }
+.toast--error   .toast-icon { color: var(--loss); }
+.toast--success .toast-icon { color: var(--gain); }
+
+.toast-msg { flex: 1; }
+
+.toast-close {
+  flex-shrink: 0;
+  display: flex;
+  background: none;
+  border: none;
+  padding: 2px;
+  color: var(--tc-muted);
+  cursor: pointer;
+}
+.toast-close:hover { color: var(--ink); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
