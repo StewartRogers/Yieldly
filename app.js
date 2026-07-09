@@ -32,9 +32,10 @@ const CASH_BALANCE_DELTA = {
   TRANSFER_OUT: (total) => -total,
 };
 
-// Same allow-list the market-price fetchers require (see fetchTMXQuote below);
-// enforced here too so a ticker that could never be quoted can't be persisted.
-const TICKER_REGEX = /^[A-Z0-9.]{1,12}$/;
+// Same allow-list the market-price fetchers require (see fetchTMXQuote below),
+// plus '-' for TSX unit-trust tickers (e.g. REI-UN.TO) which normalizeTicker()
+// converts to '.' before quoting.
+const TICKER_REGEX = /^[A-Z0-9.-]{1,12}$/;
 
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
 // Accepts numbers or numeric strings; rejects NaN/Infinity/garbage.

@@ -73,7 +73,7 @@ This is a single-user portfolio tracker with stateless JWT authentication (one s
 - `lib/compute.js` — pure `computeHoldings(rows)`; no DB dependency; used by `/summary` and `/overview`.
 - `lib/parse.js` — `parseCSVLine` / `parseDate` for the CSV import route.
 - `lib/portfolios-backup.js` — async `makePortfoliosBackup` / `restorePortfoliosIfEmpty`. `portfolios.json` is a **local-file-only** convenience (portfolio names/codes/order, not the ledger); a no-op on Vercel (ephemeral FS) where Turso's own backups are the source of truth.
-- Market prices: TMX (TSX GraphQL) via `fetchTMXQuote`, Yahoo Finance for US tickers. Tickers validated with `/^[A-Z0-9.]{1,12}$/`.
+- Market prices: TMX (TSX GraphQL) via `fetchTMXQuote`, Yahoo Finance for US tickers. Tickers validated with `/^[A-Z0-9.-]{1,12}$/` (hyphen allowed for TSX unit-trust tickers like `REI-UN.TO`).
 - **Security**: `helmet` (CSP deferred to the platform), `express-rate-limit` on `/api/auth/login` + `/api/auth/setup`, write-route validation (transaction-type whitelist + finite, non-negative number checks), portfolio delete cascades explicitly (not relying on the FK pragma), and `SESSION_SECRET` (the JWT secret) is required in production — `server.js`/`api/index.js` refuse to start without it.
 
 **Database schema (libSQL: local `file:yieldly.db` or Turso)**
