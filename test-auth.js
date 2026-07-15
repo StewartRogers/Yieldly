@@ -667,6 +667,43 @@ async function run() {
     check('CASHA net = 1000 - 200 - 300', casha.net, 500);
     check('CASHB net = +300 (transfer in)', cashb.net, 300);
     check('combined net = external contributions only (transfer cancels)', casha.net + cashb.net, 800);
+
+    section('39. POST /api/transactions – share-ownership/quantity and duplicate guards');
+    const sellNeverOwned = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'SELL', quantity: 10, price: 5, date: '2024-04-01' }, cookie, cash.base);
+    checkEq('SELL a ticker never bought → 400', sellNeverOwned.status, 400);
+
+    const divNeverOwned = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'DIVIDEND', total: 5, date: '2024-04-01' }, cookie, cash.base);
+    checkEq('DIVIDEND on a ticker never bought → 400', divNeverOwned.status, 400);
+
+    const buy = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'BUY', quantity: 10, price: 5, total: 50, date: '2024-04-01' }, cookie, cash.base);
+    checkEq('BUY 10 shares → 200', buy.status, 200);
+
+    const sellTooMany = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'SELL', quantity: 11, price: 6, total: 66, date: '2024-04-02' }, cookie, cash.base);
+    checkEq('SELL more than held → 400', sellTooMany.status, 400);
+
+    const sellAll = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'SELL', quantity: 10, price: 6, total: 60, date: '2024-04-03' }, cookie, cash.base);
+    checkEq('SELL exactly what is held → 200', sellAll.status, 200);
+
+    const sellAfterSoldOut = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'SELL', quantity: 1, price: 6, date: '2024-04-04' }, cookie, cash.base);
+    checkEq('SELL after fully sold out (history shows a past BUY, but 0 held now) → 400', sellAfterSoldOut.status, 400);
+
+    const dupBuy1 = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 5, price: 10, total: 50, date: '2024-04-05' }, cookie, cash.base);
+    checkEq('first BUY → 200', dupBuy1.status, 200);
+
+    const dupBuy2 = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 5, price: 10, total: 50, date: '2024-04-05' }, cookie, cash.base);
+    checkEq('identical BUY same day → 409 (duplicate)', dupBuy2.status, 409);
+
+    const notDupBuy = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 5, price: 10, total: 50, date: '2024-04-06' }, cookie, cash.base);
+    checkEq('same shape but different date → 200 (not a duplicate)', notDupBuy.status, 200);
   } finally {
     cash.close();
   }

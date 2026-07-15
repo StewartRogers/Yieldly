@@ -859,6 +859,40 @@ function createApp(db, options = {}) {
         return res.status(400).json({ error: 'total could not be computed' });
       }
 
+      const finalTickerUpper = finalTicker.toUpperCase();
+
+      // SELL/DIVIDEND/DIVIDEND_REINVEST all presuppose an existing position —
+      // check the *current* net share count (not just "was ever bought", which
+      // would still be true after a position is fully sold to zero).
+      if (normalizedType === 'SELL' || normalizedType === 'DIVIDEND' || normalizedType === 'DIVIDEND_REINVEST') {
+        const row = await db.get(
+          `SELECT COALESCE(${NET_SHARES}, 0) AS shares FROM transactions t
+           WHERE t.portfolio_id = ? AND t.ticker = ?`,
+          portfolio_id, finalTickerUpper,
+        );
+        const currentShares = Number(row?.shares) || 0;
+        if (currentShares <= 0) {
+          return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
+        }
+        if (normalizedType === 'SELL' && finalQuantity > currentShares) {
+          return res.status(400).json({
+            error: `Cannot sell ${finalQuantity} shares of ${finalTickerUpper} — only ${currentShares} held in this portfolio`,
+          });
+        }
+      }
+
+      // Reject an exact duplicate of an existing row (same shape the CSV bulk
+      // import already dedupes on) so a double-click or double-submit doesn't
+      // silently double a position.
+      const duplicate = await db.get(
+        `SELECT id FROM transactions
+         WHERE portfolio_id = ? AND ticker = ? AND type = ? AND date = ? AND quantity = ? AND price = ? AND total = ?`,
+        portfolio_id, finalTickerUpper, normalizedType, date, finalQuantity, finalPrice, finalTotal,
+      );
+      if (duplicate) {
+        return res.status(409).json({ error: 'An identical transaction already exists for this portfolio/ticker/date' });
+      }
+
       const cashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal) || 0;
 
       const tx = await db.transaction('write');
@@ -867,7 +901,7 @@ function createApp(db, options = {}) {
         result = await tx.execute({
           sql: `INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, commission, date, market)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          args: [portfolio_id, finalTicker.toUpperCase(), normalizedType, finalQuantity, finalPrice, finalTotal,
+          args: [portfolio_id, finalTickerUpper, normalizedType, finalQuantity, finalPrice, finalTotal,
                  commission ? Number(commission) : 0, date, market || 'TMX'],
         });
         if (cashDelta !== 0) {

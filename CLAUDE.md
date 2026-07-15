@@ -101,8 +101,9 @@ The money math is the heart of this app, and several rules are non-obvious and e
 - **ACB** includes buy commissions; `buy_price` (avg share price) excludes them. After a partial sell, ACB is prorated: `(buyTotal + buyExpense) × (shares / sharesBought)`.
 - **Return %** uses ACB as the denominator, not all-time buy cost.
 - **Dividends have two mutually exclusive paths** in `computeHoldings`: yield-first (when `stock_info.dividend_yield > 0` and market value > 0) vs per-share fallback. Don't blend them.
-- `DIVIDEND` (cash) accumulates `dividends_paid`; `DIVIDEND_REINVEST` instead adds shares and buy cost. `cash_balance` is a **manual** field — cash-flow transactions do not update it.
+- `DIVIDEND` (cash) accumulates `dividends_paid`; `DIVIDEND_REINVEST` instead adds shares and buy cost. `CONTRIBUTION`/`WITHDRAWAL`/`TRANSFER_IN`/`TRANSFER_OUT` auto-adjust `cash_balance` via `CASH_BALANCE_DELTA`; it can go negative (e.g. a transfer logged before its matching contribution) — that's allowed by design, not validated against.
 - The holdings query filters `HAVING shares > 0`, so fully-sold positions never appear in `/summary` or `/overview`.
+- `POST /api/transactions` rejects `SELL`/`DIVIDEND`/`DIVIDEND_REINVEST` unless the portfolio's *current* net share count for that ticker (via `NET_SHARES`, not "was ever bought") is positive, and rejects a `SELL` quantity exceeding current shares. It also rejects an exact duplicate of an existing row (same portfolio/ticker/type/date/quantity/price/total) with 409.
 
 Run `npm test` after touching `lib/compute.js` or the `HOLDINGS_SQL` aggregation in `lib/holdings.js`.
 
