@@ -35,8 +35,9 @@ async function main() {
 
   const app = createApp(db, {
     sessionSecret: SESSION_SECRET,
-    // Secure cookies require HTTPS termination at a trusted proxy.
-    secureCookies: isProduction && process.env.TRUST_PROXY === '1',
+    // Secure cookies default on in production; TRUST_PROXY separately controls
+    // whether Express trusts X-Forwarded-* headers from a reverse proxy.
+    secureCookies: isProduction,
     trustProxy: process.env.TRUST_PROXY === '1',
     backupPortfolios,
     serveClient: isProduction ? 'production' : 'development',
