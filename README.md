@@ -74,7 +74,7 @@ The app loads `.env` automatically. Copy `.env.example` to `.env` to get started
 - `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` - hosted Turso database. **Omit both for local dev** — the app falls back to a local `file:yieldly.db`.
 - `SESSION_SECRET` - secret key used to sign JWT auth tokens (required in production — `server.js` / the Vercel function refuse to start without it). Generate with `openssl rand -hex 32`.
 - `NODE_ENV=production` - serves the built client from `client/dist` (local production mode)
-- `TRUST_PROXY=1` - set when running behind a reverse proxy with HTTPS (enables secure cookies)
+- `TRUST_PROXY=1` - set when running behind a reverse proxy with HTTPS (trusts `X-Forwarded-*` headers from the proxy). The auth cookie's `Secure` flag is on by default whenever `NODE_ENV=production`, independent of this setting.
 - `DEBUG_IMPORT=1` - log per-row detail during CSV import
 - `CRON_SECRET` - bearer token required on `GET /api/cron/snapshot-values` (the daily portfolio value snapshot). Vercel sends it automatically as `Authorization: Bearer <value>` when a cron job triggers the route. Unset = route disabled. Generate with `openssl rand -hex 32`.
 

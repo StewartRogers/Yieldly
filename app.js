@@ -105,8 +105,17 @@ function validateBackupPayload(payload) {
       // just NaN, so a null lands as a 400 here rather than a NOT NULL 500 at insert.
       const n = toFiniteNumber(t[f]);
       if (n === null || Number.isNaN(n)) errors.push(`transactions[${i}].${f} must be a number`);
+      // A negative SELL quantity would ADD shares instead of removing them and
+      // corrupt ACB/returns, same reasoning as the /api/transactions guard.
+      else if (n < 0) errors.push(`transactions[${i}].${f} must not be negative`);
+    }
+    if (t.commission !== undefined && t.commission !== null) {
+      const c = toFiniteNumber(t.commission);
+      if (c === null || Number.isNaN(c)) errors.push(`transactions[${i}].commission must be a number`);
+      else if (c < 0) errors.push(`transactions[${i}].commission must not be negative`);
     }
     if (!t.date) errors.push(`transactions[${i}] is missing date`);
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(t.date)) errors.push(`transactions[${i}].date must be YYYY-MM-DD`);
   });
   payload.stock_info.forEach((s, i) => {
     if (s == null || typeof s !== 'object') return errors.push(`stock_info[${i}] is not an object`);
@@ -780,7 +789,10 @@ function createApp(db, options = {}) {
           buyTotalById[pid]  = (buyTotalById[pid]  || 0) + h.buy_total;
           saleTotalById[pid] = (saleTotalById[pid] || 0) + h.sale_total;
           if (h.shares > 0) {
-            investedById[pid] = (investedById[pid] || 0) + h.buy_price * h.shares;
+            // h.acb is commission-included ((buyTotal + buyExpense) prorated to
+            // current shares) — h.buy_price excludes commission and would
+            // understate invested capital here.
+            investedById[pid] = (investedById[pid] || 0) + h.acb;
           }
         }
       });
@@ -1031,6 +1043,10 @@ function createApp(db, options = {}) {
       const lines = csvData.trim().split('\n');
       const imported = [];
       const errors = [];
+      // Cap the raw line echoed back in error details so a pathological row
+      // (or one containing unexpected control characters) isn't reflected
+      // back to the client in full.
+      const truncate = (s) => (s.length > 200 ? `${s.slice(0, 200)}…` : s);
 
       if (verbose) console.log(`Processing ${lines.length} lines from CSV`);
 
@@ -1043,6 +1059,15 @@ function createApp(db, options = {}) {
         (await db.all('SELECT id, code FROM portfolios')).map(p => [p.code.toUpperCase(), p])
       );
 
+      // Preload existing transaction keys once too, for the same reason —
+      // otherwise the per-row duplicate check below is one round-trip per line.
+      const dedupeKey = (portfolioId, ticker, type, date, quantity, price, total) =>
+        `${portfolioId}|${ticker}|${type}|${date}|${quantity}|${price}|${total}`;
+      const existingKeys = new Set(
+        (await db.all('SELECT portfolio_id, ticker, type, date, quantity, price, total FROM transactions'))
+          .map(t => dedupeKey(t.portfolio_id, t.ticker, t.type, t.date, t.quantity, t.price, t.total))
+      );
+
       // Skip header row
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -1052,7 +1077,7 @@ function createApp(db, options = {}) {
           // Date, Symbol, Portfolio, Type, Quantity, Share Price, Total (+ optional trailing columns)
           const parts = parseCSVLine(line);
           if (parts.length < 7) {
-            errors.push({ line: i + 1, error: `Invalid CSV format - expected at least 7 columns, got ${parts.length}`, data: line });
+            errors.push({ line: i + 1, error: `Invalid CSV format - expected at least 7 columns, got ${parts.length}`, data: truncate(line) });
             continue;
           }
 
@@ -1064,14 +1089,14 @@ function createApp(db, options = {}) {
           // two case-variant holdings.
           const cleanTicker = symbol.trim().toUpperCase();
           if (!TICKER_REGEX.test(cleanTicker)) {
-            errors.push({ line: i + 1, error: `Invalid ticker '${cleanTicker}'`, data: line });
+            errors.push({ line: i + 1, error: `Invalid ticker '${cleanTicker}'`, data: truncate(line) });
             continue;
           }
           const cleanPortfolioCode = portfolioCode.toUpperCase().trim();
           const portfolio = portfoliosByCode.get(cleanPortfolioCode);
           if (!portfolio) {
             const available = [...portfoliosByCode.values()].map(p => p.code).join(', ');
-            errors.push({ line: i + 1, error: `Portfolio '${cleanPortfolioCode}' not found. Available portfolios: ${available}`, data: line });
+            errors.push({ line: i + 1, error: `Portfolio '${cleanPortfolioCode}' not found. Available portfolios: ${available}`, data: truncate(line) });
             continue;
           }
 
@@ -1085,24 +1110,20 @@ function createApp(db, options = {}) {
           // Reject unparseable numeric fields instead of silently coercing them
           // to 0 — matches the validation POST /api/transactions applies.
           if (!Number.isFinite(quantity) || !Number.isFinite(price) || !Number.isFinite(total)) {
-            errors.push({ line: i + 1, error: 'Quantity, price, and total must be numbers', data: line });
+            errors.push({ line: i + 1, error: 'Quantity, price, and total must be numbers', data: truncate(line) });
             continue;
           }
 
           // Guard against negatives — a negative SELL quantity would add shares
           // in the holdings aggregation and corrupt ACB/returns.
           if (quantity < 0 || price < 0 || total < 0) {
-            errors.push({ line: i + 1, error: 'Negative quantity, price, or total is not allowed', data: line });
+            errors.push({ line: i + 1, error: 'Negative quantity, price, or total is not allowed', data: truncate(line) });
             continue;
           }
 
-          const duplicate = await db.get(`
-            SELECT id FROM transactions
-            WHERE portfolio_id = ? AND ticker = ? AND type = ? AND date = ? AND quantity = ? AND price = ? AND total = ?
-          `, portfolio.id, cleanTicker, type, parsedDate, quantity, price, total);
-
-          if (duplicate) {
-            errors.push({ line: i + 1, error: 'Duplicate transaction (skipped)', data: line });
+          const key = dedupeKey(portfolio.id, cleanTicker, type, parsedDate, quantity, price, total);
+          if (existingKeys.has(key)) {
+            errors.push({ line: i + 1, error: 'Duplicate transaction (skipped)', data: truncate(line) });
             continue;
           }
 
@@ -1110,9 +1131,10 @@ function createApp(db, options = {}) {
             INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `, portfolio.id, cleanTicker, type, quantity, price, total, parsedDate);
+          existingKeys.add(key); // catch duplicates within the same file, not just against the DB
           imported.push({ line: i + 1, symbol, portfolio: portfolioCode, date: parsedDate });
         } catch (error) {
-          errors.push({ line: i + 1, error: error.message, data: line });
+          errors.push({ line: i + 1, error: error.message, data: truncate(line) });
         }
       }
 
@@ -1246,8 +1268,8 @@ function normalizeTicker(ticker) {
 async function fetchTMXQuote(ticker) {
   const symbol = normalizeTicker(ticker);
   if (!/^[A-Z0-9.]{1,12}$/.test(symbol)) throw new Error(`Invalid ticker: ${symbol}`);
-  const query = `{
-    getQuoteBySymbol(symbol: "${symbol}", locale: "en") {
+  const query = `query GetQuote($symbol: String!, $locale: String!) {
+    getQuoteBySymbol(symbol: $symbol, locale: $locale) {
       price
       dividendYield
       dividendPayDate
@@ -1260,7 +1282,7 @@ async function fetchTMXQuote(ticker) {
       'Origin': 'https://money.tmx.com',
       'Referer': 'https://money.tmx.com/'
     },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query, variables: { symbol, locale: 'en' } })
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
@@ -1334,7 +1356,11 @@ async function fetchYahooQuote(ticker, retry = true) {
 
 // ─── Monthly ACB (pure; no DB dependency) ────────────────────────────────────
 
-function computeMonthlyACB(txRows, now = new Date()) {
+function computeMonthlyACB(allTxRows, now = new Date()) {
+  // Guard against malformed dates (e.g. from a corrupted/hand-edited backup
+  // restore) reaching the substring(0, 7) month-key logic below, which assumes
+  // a well-formed YYYY-MM-DD string.
+  const txRows = allTxRows.filter((tx) => typeof tx.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(tx.date));
   if (!txRows.length) return [];
 
   const state = new Map();
