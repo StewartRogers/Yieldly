@@ -72,6 +72,9 @@ export const refreshAllPrices = () =>
 export const updateStockInfo = (portfolioId, ticker, data) =>
   request(`/api/portfolios/${portfolioId}/stocks/${ticker}`, { method: 'PUT', body: json(data) })
 
+export const backfillDividendFrequency = (frequency = 'Quarterly') =>
+  request('/api/stocks/backfill-frequency', { method: 'POST', body: json({ frequency }) })
+
 // ── Transactions ────────────────────────────────────────────────────────────
 export const getPortfolioTransactions = (portfolioId) =>
   request(`/api/portfolios/${portfolioId}/transactions`)

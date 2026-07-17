@@ -12,3 +12,4 @@ portfolios.json
 .env*.local
 npm-debug.log*
 .claude/settings.local.json
+.env*

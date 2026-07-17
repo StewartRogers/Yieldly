@@ -112,7 +112,7 @@ async function bootApp(options = {}) {
     const server = http.createServer(app);
     server.listen(0, () => {
       const { port } = server.address();
-      resolve({ base: `http://127.0.0.1:${port}`, close: () => server.close() });
+      resolve({ base: `http://127.0.0.1:${port}`, close: () => server.close(), db });
     });
   });
 }
@@ -724,6 +724,28 @@ async function run() {
       { portfolio_id: p1id, ticker: 'ABC', type: 'DIVIDEND', total: 5, date: '2024-04-15' }, cookie, cash.base);
     checkEq('second DIVIDEND logged → 200', div2.status, 200);
     checkEq('next_dividend_date overwritten by the latest logged payment', await getAbcNextDate(), '2024-07-15');
+
+    section('41. POST /api/stocks/backfill-frequency — only fills blanks where a yield is already known');
+    await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'GHI', type: 'BUY', quantity: 10, price: 10, total: 100, date: '2024-05-01' }, cookie, cash.base);
+    await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'JKL', type: 'BUY', quantity: 10, price: 10, total: 100, date: '2024-05-01' }, cookie, cash.base);
+    // Simulate a prior TMX refresh: GHI has a known yield, JKL doesn't. Neither
+    // has dividend_frequency set yet (no HTTP route exposes dividend_yield directly,
+    // and a bare BUY doesn't create a stock_info row, so create it via the edit
+    // route first, same as a manual sector/market_price edit would).
+    await req('PUT', `/api/portfolios/${p1id}/stocks/GHI`, { sector: 'Financials' }, cookie, cash.base);
+    await cash.db.run('UPDATE stock_info SET dividend_yield = 3.5 WHERE portfolio_id = ? AND ticker = ?', p1id, 'GHI');
+
+    const backfill = await req('POST', '/api/stocks/backfill-frequency', { frequency: 'Quarterly' }, cookie, cash.base);
+    checkEq('backfill → 200', backfill.status, 200);
+
+    const summaryAfterBackfill = await req('GET', `/api/portfolios/${p1id}/summary`, null, cookie, cash.base);
+    const ghi = summaryAfterBackfill.body.find(h => h.ticker === 'GHI');
+    const jkl = summaryAfterBackfill.body.find(h => h.ticker === 'JKL');
+    checkEq('GHI (has yield, no frequency) → backfilled to Quarterly', ghi?.dividend_frequency, 'Quarterly');
+    checkEq('JKL (no yield at all) → left blank', jkl?.dividend_frequency, '');
+    checkEq('only GHI counted (ABC already had a frequency from section 40)', backfill.body.updated, 1);
   } finally {
     cash.close();
   }

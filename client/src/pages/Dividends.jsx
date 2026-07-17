@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getDividendsMonthly, getUpcomingDividends } from '../api/client'
+import { getDividendsMonthly, getUpcomingDividends, backfillDividendFrequency } from '../api/client'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -231,14 +231,30 @@ function DividendMatrix({ data }) {
 }
 
 export default function Dividends({ portfolios = [] }) {
-  const [allData, setAllData]   = useState(null)
-  const [upcoming, setUpcoming] = useState(null)
-  const [selected, setSelected] = useState('ALL')
+  const [allData, setAllData]     = useState(null)
+  const [upcoming, setUpcoming]   = useState(null)
+  const [selected, setSelected]   = useState('ALL')
+  const [backfilling, setBackfilling] = useState(false)
+  const [backfillMsg, setBackfillMsg] = useState('')
 
   useEffect(() => {
     getDividendsMonthly().then(setAllData).catch(console.error)
     getUpcomingDividends().then(setUpcoming).catch(console.error)
   }, [])
+
+  const runBackfill = async () => {
+    setBackfilling(true)
+    try {
+      const result = await backfillDividendFrequency('Quarterly')
+      setBackfillMsg(result.message)
+      getUpcomingDividends().then(setUpcoming).catch(console.error)
+    } catch (e) {
+      setBackfillMsg(e.message)
+    } finally {
+      setBackfilling(false)
+      setTimeout(() => setBackfillMsg(''), 5000)
+    }
+  }
 
   const codes = portfolios.length
     ? portfolios.map(p => ({ code: p.code, label: p.name || p.code }))
@@ -285,8 +301,21 @@ export default function Dividends({ portfolios = [] }) {
       {/* ── Upcoming payments ── */}
       <div className="tc-card" style={{ marginBottom: 22 }}>
         <div className="tc-card-head">
-          <div className="t">Upcoming payments</div>
-          <div className="a">Soonest first · dates are guesstimated between TMX updates</div>
+          <div>
+            <div className="t">Upcoming payments</div>
+            <div className="a">Soonest first · dates are guesstimated between TMX updates</div>
+          </div>
+          <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+            {backfillMsg && <span className="text-xs" style={{ color: 'var(--tc-muted)' }}>{backfillMsg}</span>}
+            <button
+              className="tc-btn sm"
+              onClick={runBackfill}
+              disabled={backfilling}
+              title="Sets dividend_frequency = Quarterly for any stock TMX already reports a yield for but that has no frequency set yet. Monthly payers (REITs, some ETFs) still need a manual fix afterward."
+            >
+              {backfilling ? 'Filling…' : 'Fill missing frequency (Quarterly)'}
+            </button>
+          </div>
         </div>
         {upcoming === null && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
