@@ -11,7 +11,7 @@ const path = require('path');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
 const { prepareHoldings, NET_SHARES } = require('./lib/holdings');
-const { guessNextDividendDate, shouldAcceptTmxDate } = require('./lib/dividends');
+const { guessNextDividendDate, shouldAcceptTmxDate, INTERVAL_MONTHS } = require('./lib/dividends');
 const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
 
 const noop = async () => {};
@@ -448,6 +448,31 @@ function createApp(db, options = {}) {
       );
 
       res.json({ message: 'Stock info updated' });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // One-click backfill for holdings where TMX has already supplied a
+  // dividend_yield (i.e. it's a known dividend payer) but dividend_frequency
+  // was never set manually. Defaults everything matching to Quarterly, the
+  // overwhelmingly common case — monthly payers (REITs, some ETFs) still need
+  // a manual correction via the stock-info edit modal afterward. Never
+  // touches a row that already has a frequency set.
+  app.post('/api/stocks/backfill-frequency', async (req, res) => {
+    try {
+      const frequency = typeof req.body?.frequency === 'string' && req.body.frequency.trim()
+        ? req.body.frequency.trim()
+        : 'Quarterly';
+      if (!INTERVAL_MONTHS[frequency]) {
+        return res.status(400).json({ error: `frequency must be one of: ${Object.keys(INTERVAL_MONTHS).join(', ')}` });
+      }
+      const result = await db.run(`
+        UPDATE stock_info
+        SET dividend_frequency = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE dividend_frequency IS NULL AND dividend_yield IS NOT NULL AND dividend_yield > 0
+      `, frequency);
+      res.json({ message: `Set ${result.changes} stock(s) to ${frequency}`, updated: result.changes });
     } catch (error) {
       serverError(res, error);
     }
