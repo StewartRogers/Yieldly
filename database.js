@@ -149,6 +149,7 @@ async function runMigrations(db) {
   await addColumnIfMissing(db, 'stock_info', 'sector', 'TEXT');
   await addColumnIfMissing(db, 'stock_info', 'investment_type', 'TEXT');
   await addColumnIfMissing(db, 'stock_info', 'dividend_yield', 'REAL');
+  await addColumnIfMissing(db, 'stock_info', 'next_dividend_date', 'TEXT');
 
   // --- Widen the transactions.type CHECK constraint (cash-flow + transfer types) ---
   // Old DBs were created with a narrower CHECK; a constraint can't be altered in

@@ -48,6 +48,7 @@ db.exec(`
     dividend_frequency TEXT,
     dividend_per_share REAL,
     last_dividend_date TEXT,
+    next_dividend_date TEXT,
     sector TEXT,
     investment_type TEXT,
     PRIMARY KEY (portfolio_id, ticker)

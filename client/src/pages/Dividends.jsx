@@ -1,7 +1,67 @@
 import { useState, useEffect } from 'react'
-import { getDividendsMonthly } from '../api/client'
+import { getDividendsMonthly, getUpcomingDividends } from '../api/client'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+function fmtNextDate(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`)
+  return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function daysAway(dateStr) {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const target = new Date(`${dateStr}T00:00:00`)
+  return Math.round((target - today) / 86400000)
+}
+
+function fmtDaysAway(n) {
+  if (n === 0) return 'Today'
+  if (n === 1) return 'Tomorrow'
+  if (n < 0) return `${Math.abs(n)}d overdue`
+  return `in ${n} days`
+}
+
+function UpcomingDividends({ data }) {
+  if (!data.length) {
+    return <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No upcoming payment dates on file.</p>
+  }
+
+  return (
+    <div className="tbl-wrap">
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Portfolio</th>
+            <th>Next payment</th>
+            <th>Days away</th>
+            <th className="num">Per share</th>
+            <th>Frequency</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map(h => {
+            const n = daysAway(h.next_dividend_date)
+            return (
+              <tr key={`${h.portfolio_code}-${h.ticker}`}>
+                <td>{h.ticker}</td>
+                <td>{h.portfolio_name || h.portfolio_code}</td>
+                <td>{fmtNextDate(h.next_dividend_date)}</td>
+                <td>
+                  <span className={n <= 7 ? 'tag-new' : 'dim'} style={n <= 7 ? { margin: 0 } : undefined}>
+                    {fmtDaysAway(n)}
+                  </span>
+                </td>
+                <td className="num">{fmtDiv(h.dividend_per_share)}</td>
+                <td>{h.dividend_frequency || '—'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 function fmtDiv(v) {
   return v > 0
@@ -170,10 +230,12 @@ function DividendMatrix({ data }) {
 
 export default function Dividends({ portfolios = [] }) {
   const [allData, setAllData]   = useState(null)
+  const [upcoming, setUpcoming] = useState(null)
   const [selected, setSelected] = useState('ALL')
 
   useEffect(() => {
     getDividendsMonthly().then(setAllData).catch(console.error)
+    getUpcomingDividends().then(setUpcoming).catch(console.error)
   }, [])
 
   const codes = portfolios.length
@@ -187,6 +249,12 @@ export default function Dividends({ portfolios = [] }) {
     : selected === 'ALL'
       ? allData
       : allData.filter(d => d.portfolio_code === selected)
+
+  const filteredUpcoming = !upcoming
+    ? []
+    : selected === 'ALL'
+      ? upcoming
+      : upcoming.filter(h => h.portfolio_code === selected)
 
   const pills = [{ code: 'ALL', label: 'All' }, ...codes]
 
@@ -210,6 +278,20 @@ export default function Dividends({ portfolios = [] }) {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* ── Upcoming payments ── */}
+      <div className="tc-card" style={{ marginBottom: 22 }}>
+        <div className="tc-card-head">
+          <div className="t">Upcoming payments</div>
+          <div className="a">Soonest first · dates are guesstimated between TMX updates</div>
+        </div>
+        {upcoming === null && (
+          <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
+        )}
+        {upcoming !== null && (
+          <UpcomingDividends data={filteredUpcoming} />
+        )}
       </div>
 
       {/* ── KPI strip ── */}
