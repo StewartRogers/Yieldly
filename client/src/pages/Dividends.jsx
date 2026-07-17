@@ -36,6 +36,7 @@ function UpcomingDividends({ data }) {
             <th>Next payment</th>
             <th>Days away</th>
             <th className="num">Per share</th>
+            <th className="num">Expected amount</th>
             <th>Frequency</th>
           </tr>
         </thead>
@@ -53,6 +54,7 @@ function UpcomingDividends({ data }) {
                   </span>
                 </td>
                 <td className="num">{fmtDiv(h.dividend_per_share)}</td>
+                <td className="num">{fmtDiv(h.next_payout)}</td>
                 <td>{h.dividend_frequency || '—'}</td>
               </tr>
             )
