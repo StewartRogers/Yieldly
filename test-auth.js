@@ -704,6 +704,26 @@ async function run() {
     const notDupBuy = await req('POST', '/api/transactions',
       { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 5, price: 10, total: 50, date: '2024-04-06' }, cookie, cash.base);
     checkEq('same shape but different date → 200 (not a duplicate)', notDupBuy.status, 200);
+
+    section('40. Logging a DIVIDEND re-derives next_dividend_date from payment date + frequency');
+    await req('PUT', `/api/portfolios/${p1id}/stocks/ABC`,
+      { dividend_frequency: 'Quarterly' }, cookie, cash.base);
+
+    const div1 = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'ABC', type: 'DIVIDEND', total: 5, date: '2024-04-10' }, cookie, cash.base);
+    checkEq('DIVIDEND logged → 200', div1.status, 200);
+
+    const getAbcNextDate = async () => {
+      const summary = await req('GET', `/api/portfolios/${p1id}/summary`, null, cookie, cash.base);
+      return summary.body.find(h => h.ticker === 'ABC')?.next_dividend_date;
+    };
+    checkEq('next_dividend_date = payment date + 3 months (Quarterly)', await getAbcNextDate(), '2024-07-10');
+
+    // A later, earlier-dated dividend re-derives (overwrites) the guess again.
+    const div2 = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'ABC', type: 'DIVIDEND', total: 5, date: '2024-04-15' }, cookie, cash.base);
+    checkEq('second DIVIDEND logged → 200', div2.status, 200);
+    checkEq('next_dividend_date overwritten by the latest logged payment', await getAbcNextDate(), '2024-07-15');
   } finally {
     cash.close();
   }

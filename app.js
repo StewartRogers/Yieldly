@@ -11,6 +11,7 @@ const path = require('path');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
 const { prepareHoldings, NET_SHARES } = require('./lib/holdings');
+const { guessNextDividendDate, shouldAcceptTmxDate } = require('./lib/dividends');
 const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
 
 const noop = async () => {};
@@ -454,17 +455,17 @@ function createApp(db, options = {}) {
 
   // ===== MARKET DATA =====
 
-  async function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, payDate) {
+  async function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, nextDividendDate) {
     await db.run(`
-      INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_yield, last_dividend_date, updated_at)
+      INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_yield, next_dividend_date, updated_at)
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
-        market_price    = COALESCE(?, market_price),
-        dividend_yield  = COALESCE(?, dividend_yield),
-        last_dividend_date = COALESCE(?, last_dividend_date),
-        updated_at      = CURRENT_TIMESTAMP
-    `, portfolioId, ticker, marketPrice ?? null, dividendYield ?? null, payDate ?? null,
-       marketPrice ?? null, dividendYield ?? null, payDate ?? null);
+        market_price       = COALESCE(?, market_price),
+        dividend_yield     = COALESCE(?, dividend_yield),
+        next_dividend_date = COALESCE(?, next_dividend_date),
+        updated_at         = CURRENT_TIMESTAMP
+    `, portfolioId, ticker, marketPrice ?? null, dividendYield ?? null, nextDividendDate ?? null,
+       marketPrice ?? null, dividendYield ?? null, nextDividendDate ?? null);
   }
 
   // Shared by POST /api/refresh-all-prices, POST /api/portfolios/:id/refresh-prices,
@@ -533,8 +534,8 @@ function createApp(db, options = {}) {
       } else {
         const price    = q.price         != null ? parseFloat(q.price)         : null;
         const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
-        const payDate  = q.dividendPayDate && new Date(q.dividendPayDate) > today ? q.dividendPayDate : null;
-        await upsertStockInfo(portfolio_id, ticker, price, divYield, payDate);
+        const nextDividendDate = shouldAcceptTmxDate(q.dividendPayDate, today) ? q.dividendPayDate : null;
+        await upsertStockInfo(portfolio_id, ticker, price, divYield, nextDividendDate);
       }
       updated++;
     }
@@ -640,6 +641,20 @@ function createApp(db, options = {}) {
         GROUP BY p.code, year, month
         ORDER BY p.code, year, month
       `);
+      res.json(rows);
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // Currently-held dividend payers with a known/guesstimated next payment
+  // date, soonest first. Reuses the shared holdings aggregation so each row
+  // carries dividend_per_share/dividend_frequency/dividend_yield for free.
+  app.get('/api/dividends/upcoming', async (req, res) => {
+    try {
+      const rows = computeHoldings(await queryHoldings())
+        .filter(h => h.next_dividend_date)
+        .sort((a, b) => a.next_dividend_date.localeCompare(b.next_dividend_date));
       res.json(rows);
     } catch (error) {
       serverError(res, error);
@@ -895,6 +910,19 @@ function createApp(db, options = {}) {
 
       const cashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal) || 0;
 
+      // A logged dividend payment is real, confirmed data — re-derive the
+      // next-payment guesstimate from it (payment date + frequency interval),
+      // overriding any prior guess. Only applies when stock_info already has a
+      // frequency on file; nothing to guess otherwise.
+      let nextDividendDate = null;
+      if (normalizedType === 'DIVIDEND' || normalizedType === 'DIVIDEND_REINVEST') {
+        const info = await db.get(
+          'SELECT dividend_frequency FROM stock_info WHERE portfolio_id = ? AND ticker = ?',
+          portfolio_id, finalTickerUpper,
+        );
+        nextDividendDate = guessNextDividendDate(date, info?.dividend_frequency);
+      }
+
       const tx = await db.transaction('write');
       let result;
       try {
@@ -908,6 +936,12 @@ function createApp(db, options = {}) {
           await tx.execute({
             sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
             args: [cashDelta, portfolio_id],
+          });
+        }
+        if (nextDividendDate) {
+          await tx.execute({
+            sql: 'UPDATE stock_info SET next_dividend_date = ?, updated_at = CURRENT_TIMESTAMP WHERE portfolio_id = ? AND ticker = ?',
+            args: [nextDividendDate, portfolio_id, finalTickerUpper],
           });
         }
         await tx.commit();

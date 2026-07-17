@@ -18,6 +18,7 @@ const Database = require('better-sqlite3');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
 const { HOLDINGS_SQL, GROUP_ORDER } = require('./lib/holdings');
+const { guessNextDividendDate, shouldAcceptTmxDate } = require('./lib/dividends');
 const { computeMonthlyACB: _computeMonthlyACB } = require('./app');
 
 // ─── In-memory database ──────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ db.exec(`
     dividend_frequency TEXT,
     dividend_per_share REAL,
     last_dividend_date TEXT,
+    next_dividend_date TEXT,
     sector             TEXT,
     investment_type    TEXT,
     PRIMARY KEY (portfolio_id, ticker)
@@ -1249,6 +1251,15 @@ section('K2. last_dividend_date stored and returned');
   checkEq('last_dividend_date', h.last_dividend_date, '2024-03-20');
 }
 
+section('K2b. next_dividend_date stored and returned');
+{
+  const pid = mkPortfolio('K2b');
+  buy(pid, 'RY.TO', 50, 120.00);
+  setInfo(pid, 'RY.TO', { next_dividend_date: '2026-09-24' });
+  const [h] = getHoldings(pid);
+  checkEq('next_dividend_date', h.next_dividend_date, '2026-09-24');
+}
+
 section('K3. portfolio_code and portfolio_name in holding');
 {
   const pid = mkPortfolio('K3', 'My RRSP');
@@ -1267,6 +1278,34 @@ section('K4. acb_per_share (buy_price field)');
   const [h] = getHoldings(pid);
   check('buy_price = $45 (excludes commission)', h.buy_price, 45.00, 0.001);
   check('acb = 200×45 + 9.99 = $9009.99',        h.acb, 9009.99, 0.01);
+}
+
+section('L1. guessNextDividendDate — interval per frequency');
+{
+  checkEq('Monthly +1mo',     guessNextDividendDate('2026-01-15', 'Monthly'),     '2026-02-15');
+  checkEq('Quarterly +3mo',   guessNextDividendDate('2026-01-15', 'Quarterly'),   '2026-04-15');
+  checkEq('Semi-Annual +6mo', guessNextDividendDate('2026-01-15', 'Semi-Annual'), '2026-07-15');
+  checkEq('Annual +12mo',     guessNextDividendDate('2026-01-15', 'Annual'),      '2027-01-15');
+}
+
+section('L2. guessNextDividendDate — missing/unknown inputs return null');
+{
+  checkEq('unknown frequency string → null', guessNextDividendDate('2026-01-15', 'Weekly'), null);
+  checkEq('no frequency → null',              guessNextDividendDate('2026-01-15', undefined), null);
+  checkEq('no payment date → null',           guessNextDividendDate(null, 'Monthly'), null);
+}
+
+section('L3. shouldAcceptTmxDate — grace window and historical rejection');
+{
+  // Local midnight, matching how app.js builds `today` (new Date(); today.setHours(0,0,0,0)) —
+  // NOT new Date('2026-06-15'), which parses as UTC midnight and would drift in non-UTC zones.
+  const today = new Date(2026, 5, 15);
+  checkEq('4 days out (past 3-day grace) → accept',  shouldAcceptTmxDate('2026-06-19', today), true);
+  checkEq('exactly 3 days out → reject (not > cutoff)', shouldAcceptTmxDate('2026-06-18', today), false);
+  checkEq('2 days out (within grace) → reject',      shouldAcceptTmxDate('2026-06-17', today), false);
+  checkEq('today → reject',                          shouldAcceptTmxDate('2026-06-15', today), false);
+  checkEq('historical date → reject',                shouldAcceptTmxDate('2026-05-01', today), false);
+  checkEq('no TMX date → reject',                    shouldAcceptTmxDate(null, today), false);
 }
 
 section('K5. Return percent when acb = 0 returns 0');

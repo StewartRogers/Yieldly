@@ -98,6 +98,9 @@ export const getMonthlyAcb = () =>
 export const getDividendsMonthly = () =>
   request('/api/dividends/monthly')
 
+export const getUpcomingDividends = () =>
+  request('/api/dividends/upcoming')
+
 export const getCashflowMonthly = () =>
   request('/api/cashflow/monthly')
 
