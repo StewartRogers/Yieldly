@@ -4,6 +4,16 @@
   box-sizing: border-box;
 }
 
+/* No spinner arrows on number inputs — this app never needs click-to-increment. */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 :root {
   /* ── Terminal Calm design tokens ── */
   --bg:       #0D1014;
