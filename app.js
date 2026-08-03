@@ -607,9 +607,18 @@ function createApp(db, options = {}) {
       const priceRefresh = await performRefreshPrices().catch(e => ({ error: e.message }));
 
       const portfolios = await db.all('SELECT * FROM portfolios');
-      // Calendar date in America/New_York, independent of the UTC time the
-      // function actually runs at (Vercel Cron schedules are UTC-only).
-      const snapshotDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      // Vercel Cron fires at 05:00 UTC (~midnight-1am America/New_York,
+      // year-round) — before that trading day has opened, so the quotes
+      // performRefreshPrices() just fetched are necessarily the PRIOR
+      // trading day's close. Label the snapshot with that prior calendar
+      // day, not "today", so the row's date matches the prices it holds
+      // (see the History page's buildPivot, which buckets snapshots by the
+      // calendar month of this date — a same-day label would silently
+      // shift every month's true final trading day into the next month).
+      const nowNY = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const priorDay = new Date(`${nowNY}T00:00:00Z`);
+      priorDay.setUTCDate(priorDay.getUTCDate() - 1);
+      const snapshotDate = priorDay.toISOString().slice(0, 10);
 
       let written = 0;
       for (const p of portfolios) {

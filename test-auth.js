@@ -526,11 +526,24 @@ async function run() {
     checkEq('status = 200', run1.status, 200);
     checkEq('1 portfolio written', run1.body.written, 1);
 
+    // The cron runs at 05:00 UTC — before market open — so the quote it just
+    // fetched is necessarily the PRIOR trading day's close. The snapshot must
+    // be labeled with that prior day, not the day the cron happens to run on
+    // (see app.js's comment on this route for why: buildPivot on the client
+    // buckets snapshots by the calendar month of this date, so a same-day
+    // label would silently shift every month's true final trading day into
+    // the next month).
+    const nowNY = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const expectedSnapshotDate = new Date(`${nowNY}T00:00:00Z`);
+    expectedSnapshotDate.setUTCDate(expectedSnapshotDate.getUTCDate() - 1);
+    checkEq('snapshotDate = prior calendar day, not today', run1.body.snapshotDate, expectedSnapshotDate.toISOString().slice(0, 10));
+
     const rows1 = await req('GET', '/api/summary/value-snapshots', null, cookie, snap.base);
     checkEq('1 snapshot row', rows1.body.length, 1);
     checkEq('portfolio code', rows1.body[0].portfolio_code, 'SNAP');
     check('total_value = cash balance (no holdings)', rows1.body[0].total_value, 500);
     checkEq('source = cron', rows1.body[0].source, 'cron');
+    checkEq('row dated the prior day, not the cron run day', rows1.body[0].date, expectedSnapshotDate.toISOString().slice(0, 10));
 
     section('30. Cron snapshot – idempotent same-day re-run');
     await req('PUT', `/api/portfolios/${pid}/cash-balance`, { cash_balance: 750 }, cookie, snap.base);
@@ -746,6 +759,65 @@ async function run() {
     checkEq('GHI (has yield, no frequency) → backfilled to Quarterly', ghi?.dividend_frequency, 'Quarterly');
     checkEq('JKL (no yield at all) → left blank', jkl?.dividend_frequency, '');
     checkEq('only GHI counted (ABC already had a frequency from section 40)', backfill.body.updated, 1);
+
+    section('42. GET /api/overview — auth guard & cross-portfolio aggregation');
+    const overviewNoAuth = await req('GET', '/api/overview', null, null, cash.base);
+    checkEq('no cookie → 401', overviewNoAuth.status, 401);
+
+    const overview = await req('GET', '/api/overview', null, cookie, cash.base);
+    checkEq('200 with cookie', overview.status, 200);
+    checkTruthy('response is an array', Array.isArray(overview.body));
+
+    const oviewA = overview.body.find(p => p.code === 'CASHA');
+    const oviewB = overview.body.find(p => p.code === 'CASHB');
+    checkTruthy('CASHA present', !!oviewA);
+    checkTruthy('CASHB present', !!oviewB);
+    check('CASHA cash = 500 (1000 contrib - 200 withdraw - 300 transfer out)', oviewA.cash, 500);
+    check('CASHB cash = 300 (transfer in)', oviewB.cash, 300);
+    // ABC (10 shares @10) + GHI (10 shares @10) + JKL (10 shares @10); XYZ nets
+    // to 0 shares (fully sold in section 39) so it's excluded from holdings.
+    check('CASHA buy_total = 300 (ABC+GHI+JKL, XYZ fully sold and excluded)', oviewA.buy_total, 300);
+    check('CASHA cash_invested (ACB) = 300 (no commission, nothing sold)', oviewA.cash_invested, 300);
+    check('CASHB buy_total = 0 (no holdings, cash-only portfolio)', oviewB.buy_total, 0);
+    check('CASHA market_value = 0 (no market_price ever set in this suite)', oviewA.market_value, 0);
+
+    section('43. GET /api/dividends/upcoming — filters to holdings with a guessed next date');
+    const upcomingNoAuth = await req('GET', '/api/dividends/upcoming', null, null, cash.base);
+    checkEq('no cookie → 401', upcomingNoAuth.status, 401);
+
+    const upcoming = await req('GET', '/api/dividends/upcoming', null, cookie, cash.base);
+    checkEq('200 with cookie', upcoming.status, 200);
+    // Only ABC has ever received a DIVIDEND (section 40), so only ABC has a
+    // next_dividend_date; GHI/JKL have a frequency but no logged payment yet.
+    checkEq('only ABC has a next_dividend_date (GHI/JKL never received a dividend)', upcoming.body.length, 1);
+    checkEq('ABC next_dividend_date = 2024-07-15 (from section 40)', upcoming.body[0]?.ticker, 'ABC');
+    checkEq('next_dividend_date value', upcoming.body[0]?.next_dividend_date, '2024-07-15');
+
+    section('44. GET /api/summary/monthly-acb — auth guard & shape');
+    const acbNoAuth = await req('GET', '/api/summary/monthly-acb', null, null, cash.base);
+    checkEq('no cookie → 401', acbNoAuth.status, 401);
+
+    const acbRes = await req('GET', '/api/summary/monthly-acb', null, cookie, cash.base);
+    checkEq('200 with cookie', acbRes.status, 200);
+    checkTruthy('response is an array', Array.isArray(acbRes.body));
+    const may2024 = acbRes.body.find(r => r.year === 2024 && r.month === 5);
+    checkTruthy('has an entry for May 2024 (GHI/JKL bought 2024-05-01)', !!may2024);
+    checkTruthy('entry exposes total_acb', typeof may2024?.total_acb === 'number');
+
+    section('45. GET /api/portfolios/:portfolioId/transactions/ticker/:ticker');
+    const tickerNoAuth = await req('GET', `/api/portfolios/${p1id}/transactions/ticker/GHI`, null, null, cash.base);
+    checkEq('no cookie → 401', tickerNoAuth.status, 401);
+
+    const ghiTxns = await req('GET', `/api/portfolios/${p1id}/transactions/ticker/GHI`, null, cookie, cash.base);
+    checkEq('200 with cookie', ghiTxns.status, 200);
+    checkEq('only GHI\'s single BUY returned', ghiTxns.body.length, 1);
+    checkEq('quantity', ghiTxns.body[0]?.quantity, 10);
+
+    const ghiTxnsLower = await req('GET', `/api/portfolios/${p1id}/transactions/ticker/ghi`, null, cookie, cash.base);
+    checkEq('lowercase ticker in URL still matches (route uppercases it)', ghiTxnsLower.body.length, 1);
+
+    const otherPortfolioTxns = await req('GET', `/api/portfolios/${p2id}/transactions/ticker/GHI`, null, cookie, cash.base);
+    checkEq('scoped to portfolio — CASHB has no GHI', otherPortfolioTxns.body.length, 0);
   } finally {
     cash.close();
   }

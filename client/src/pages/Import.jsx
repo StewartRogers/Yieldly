@@ -33,7 +33,9 @@ function downloadJSON(data, filename) {
   download(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename)
 }
 
-const todayStamp = () => new Date().toISOString().slice(0, 10)
+// toISOString() converts to UTC, so it rolls to tomorrow's date once local
+// time passes UTC midnight (e.g. ~7-8pm Eastern) — use the local calendar date.
+const todayStamp = () => new Date().toLocaleDateString('en-CA')
 const counts = (d) => ({
   portfolios:   d?.portfolios?.length   ?? 0,
   transactions: d?.transactions?.length ?? 0,

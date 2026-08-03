@@ -27,7 +27,10 @@ async function main() {
   // Local dev uses a file: libSQL DB; set TURSO_DATABASE_URL/TURSO_AUTH_TOKEN to use Turso.
   const db = await createDb();
 
-  const PORTFOLIOS_BACKUP = path.join(__dirname, 'portfolios.json');
+  // Overridable so tooling that points TURSO_DATABASE_URL at a throwaway DB
+  // (e.g. Playwright's webServer) doesn't restore from / overwrite the real
+  // local backup, which holds the actual portfolio names/codes.
+  const PORTFOLIOS_BACKUP = process.env.PORTFOLIOS_BACKUP_PATH || path.join(__dirname, 'portfolios.json');
   const backupPortfolios = makePortfoliosBackup(db, PORTFOLIOS_BACKUP);
   await restorePortfoliosIfEmpty(db, PORTFOLIOS_BACKUP);
 
