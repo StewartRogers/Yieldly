@@ -13,3 +13,5 @@ portfolios.json
 npm-debug.log*
 .claude/settings.local.json
 .env*
+client/playwright-report/
+client/test-results/

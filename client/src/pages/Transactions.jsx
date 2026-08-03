@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
-import { Trash2 } from 'lucide-react'
+import { Trash2, X } from 'lucide-react'
 
 const PER_PAGE = 20
 const CASH_ONLY_TYPES = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
@@ -39,6 +39,11 @@ const TYPE_LABEL = {
 }
 
 const FIELD_LABEL = 'text-[11px] font-semibold uppercase tracking-[.08em] text-foreground/60'
+
+// toISOString() converts to UTC, so it rolls to tomorrow's date once local
+// time passes UTC midnight (e.g. ~7-8pm Eastern) — use the browser's own
+// local calendar date instead.
+const todayLocal = () => new Date().toLocaleDateString('en-CA')
 
 function Pager({ page, totalPages, totalCount, onChange }) {
   if (totalPages <= 1) return null
@@ -158,9 +163,10 @@ export default function Transactions({ portfolios }) {
   const [price, setPrice]                     = useState('')
   const [total, setTotal]                     = useState('')
   const [commission, setCommission]           = useState('')
-  const [date, setDate]                       = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate]                       = useState(todayLocal())
   const [allTxns, setAllTxns]                 = useState([])
   const [historyFilter, setFilter]            = useState('ALL')
+  const [tickerFilter, setTickerFilter]       = useState('')
   const [page, setPage]                       = useState(1)
   const [loading, setLoading]                 = useState(false)
 
@@ -222,7 +228,7 @@ export default function Transactions({ portfolios }) {
           to_portfolio_id:   parseInt(toPortfolioId),
           amount, date,
         })
-        setTotal(''); setToPortfolioId(''); setDate(new Date().toISOString().slice(0, 10))
+        setTotal(''); setToPortfolioId(''); setDate(todayLocal())
         loadAllTxns()
       } catch (err) { toast.error(err.message) }
       return
@@ -255,7 +261,7 @@ export default function Transactions({ portfolios }) {
     try {
       await createTransaction(txn)
       setTicker(''); setQuantity(''); setPrice(''); setTotal('')
-      setCommission(''); setDate(new Date().toISOString().slice(0, 10)); setMarket('TMX')
+      setCommission(''); setDate(todayLocal()); setMarket('TMX')
       loadAllTxns()
     } catch (err) { toast.error(err.message) }
   }
@@ -271,14 +277,15 @@ export default function Transactions({ portfolios }) {
     } catch (err) { toast.error(err.message) }
   }
 
-  const filteredTxns = historyFilter === 'ALL'
-    ? allTxns
-    : allTxns.filter(t => t._portfolioId === parseInt(historyFilter))
+  const filteredTxns = allTxns
+    .filter(t => historyFilter === 'ALL' || t._portfolioId === parseInt(historyFilter))
+    .filter(t => !tickerFilter || t.ticker.includes(tickerFilter))
 
   const totalPages = Math.max(1, Math.ceil(filteredTxns.length / PER_PAGE))
   const pageTxns   = filteredTxns.slice((page - 1) * PER_PAGE, page * PER_PAGE)
 
   const handleFilterChange = (f) => { setFilter(f); setPage(1) }
+  const handleTickerFilterChange = (v) => { setTickerFilter(v.toUpperCase()); setPage(1) }
 
   return (
     <div>
@@ -489,6 +496,26 @@ export default function Transactions({ portfolios }) {
                     {p.code}
                   </button>
                 ))}
+              </div>
+              <div style={{ position: 'relative' }}>
+                <Input
+                  className="h-8 w-32"
+                  placeholder="Ticker…"
+                  value={tickerFilter}
+                  onChange={e => handleTickerFilterChange(e.target.value)}
+                  style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)', paddingRight: tickerFilter ? 24 : undefined }}
+                  aria-label="Filter by ticker"
+                />
+                {tickerFilter && (
+                  <button
+                    type="button"
+                    onClick={() => handleTickerFilterChange('')}
+                    aria-label="Clear ticker filter"
+                    style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--tc-muted)', display: 'flex' }}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
               </div>
               {!loading && (
                 <span className="a muted-txt">
