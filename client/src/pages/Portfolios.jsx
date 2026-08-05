@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, LayoutGrid, List, GripVertical, Pencil } from 'lucide-react'
-import { fmtCurrency, fmtCurrencyOr, fmtPrice, fmtPct, retClass } from '../utils/format'
+import { fmtCurrency, fmtCurrencyOr, fmtPrice, fmtPct, retClass, fmtFreqCode } from '../utils/format'
 import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
 import { Input } from '@/components/ui/input'
@@ -343,6 +343,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                   <th>Mkt total</th>
                   <th>Div paid</th>
                   <th>Yield</th>
+                  <th>Freq</th>
                   <th>Return</th>
                   <th></th>
                 </tr>
@@ -368,6 +369,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                     <td className="num">{h.market_price > 0 ? fmtCurrency(h.market_value) : '—'}</td>
                     <td className="num">{fmtCurrencyOr(h.dividends_paid)}</td>
                     <td className="num">{h.market_price > 0 && h.dividend_yield > 0 ? fmtPct(h.dividend_yield) : '—'}</td>
+                    <td className="num">{fmtFreqCode(h.dividend_frequency)}</td>
                     <td className={`num ${h.market_price > 0 ? retClass(h.return) : ''}`}>
                       {h.market_price > 0
                         ? <>{h.return >= 0 ? '+' : '−'}{Math.abs(h.return_percent).toFixed(1)}%</>

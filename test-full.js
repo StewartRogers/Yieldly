@@ -18,7 +18,7 @@ const Database = require('better-sqlite3');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
 const { HOLDINGS_SQL, GROUP_ORDER } = require('./lib/holdings');
-const { guessNextDividendDate, shouldAcceptTmxDate } = require('./lib/dividends');
+const { guessNextDividendDate, shouldAcceptTmxDate, estimateNextDividendDate, isStaleNextDividendDate } = require('./lib/dividends');
 const { computeMonthlyACB: _computeMonthlyACB } = require('./app');
 
 // ─── In-memory database ──────────────────────────────────────────────────────
@@ -1306,6 +1306,27 @@ section('L3. shouldAcceptTmxDate — grace window and historical rejection');
   checkEq('today → reject',                          shouldAcceptTmxDate('2026-06-15', today), false);
   checkEq('historical date → reject',                shouldAcceptTmxDate('2026-05-01', today), false);
   checkEq('no TMX date → reject',                    shouldAcceptTmxDate(null, today), false);
+}
+
+section('L4. estimateNextDividendDate — rolls a stale TMX payable date forward past today');
+{
+  const today = new Date(2026, 7, 5); // Aug 5, 2026
+  checkEq('ZCN example: Quarterly, paid Jul 3 → Oct 3', estimateNextDividendDate('2026-07-03', 'Quarterly', today), '2026-10-03');
+  checkEq('one interval already lands in the future → used as-is', estimateNextDividendDate('2026-06-01', 'Quarterly', today), '2026-09-01');
+  checkEq('several intervals behind → rolls forward repeatedly', estimateNextDividendDate('2025-01-15', 'Monthly', today), '2026-08-15');
+  checkEq('payable date exactly today → still rolled one interval forward', estimateNextDividendDate('2026-08-05', 'Quarterly', today), '2026-11-05');
+  checkEq('unknown frequency → null', estimateNextDividendDate('2026-07-03', 'Weekly', today), null);
+  checkEq('no payable date → null', estimateNextDividendDate(null, 'Quarterly', today), null);
+}
+
+section('L5. isStaleNextDividendDate — null/missing or >7 days old counts as stale');
+{
+  const today = new Date(2026, 7, 5); // Aug 5, 2026
+  checkEq('no date → stale',                 isStaleNextDividendDate(null, today), true);
+  checkEq('8 days old → stale',              isStaleNextDividendDate('2026-07-28', today), true);
+  checkEq('exactly 7 days old → not stale',  isStaleNextDividendDate('2026-07-29', today), false);
+  checkEq('recent date → not stale',         isStaleNextDividendDate('2026-08-01', today), false);
+  checkEq('future date → not stale',         isStaleNextDividendDate('2026-10-03', today), false);
 }
 
 section('K5. Return percent when acb = 0 returns 0');

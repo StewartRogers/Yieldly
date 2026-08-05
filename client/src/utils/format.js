@@ -13,3 +13,6 @@ export const fmtCurrencyOr = v => (v && v !== 0) ? fmtCurrency(v) : '—';
 export const fmtPct = v => v != null ? v.toFixed(2) + '%' : '—';
 
 export const retClass = v => v >= 0 ? 'positive' : 'negative';
+
+const FREQ_CODE = { Monthly: 'M', Quarterly: 'Q', 'Semi-Annual': 'S', Annual: 'A' };
+export const fmtFreqCode = f => FREQ_CODE[f] || '—';
