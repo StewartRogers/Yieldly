@@ -131,15 +131,6 @@ function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
           <col style={colStyle} />
         </colgroup>
         <thead>
-          {hasCashFlow && (
-            <tr className="total">
-              <td>Net cash flow</td>
-              {years.map(y => (
-                <td key={y} className="num">{netCashFlowByYear[y] ? fmtCurrencyTrim(netCashFlowByYear[y]) : '—'}</td>
-              ))}
-              <td className="num dim">—</td>
-            </tr>
-          )}
           <tr>
             <th>Month</th>
             {years.map(y => <th key={y}>{y}</th>)}
@@ -177,6 +168,15 @@ function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
             ))}
             <td className="num dim">—</td>
           </tr>
+          {hasCashFlow && (
+            <tr className="total">
+              <td>Net cash flow</td>
+              {years.map(y => (
+                <td key={y} className="num">{netCashFlowByYear[y] ? fmtCurrencyTrim(netCashFlowByYear[y]) : '—'}</td>
+              ))}
+              <td className="num dim">—</td>
+            </tr>
+          )}
           <tr className="total">
             <td>YoY %</td>
             {years.map(y => (
@@ -186,6 +186,9 @@ function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
           </tr>
         </tbody>
       </table>
+      <p className="note" style={{ marginTop: 8 }}>
+        YoY % = (this year's total − last year's total − net cash flow contributed this year) ÷ last year's total — isolating investment growth from money you added or withdrew.
+      </p>
     </div>
   )
 }

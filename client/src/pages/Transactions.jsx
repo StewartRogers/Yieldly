@@ -167,6 +167,7 @@ export default function Transactions({ portfolios }) {
   const [allTxns, setAllTxns]                 = useState([])
   const [historyFilter, setFilter]            = useState('ALL')
   const [tickerFilter, setTickerFilter]       = useState('')
+  const [typeFilter, setTypeFilter]           = useState('ALL')
   const [page, setPage]                       = useState(1)
   const [loading, setLoading]                 = useState(false)
 
@@ -280,12 +281,14 @@ export default function Transactions({ portfolios }) {
   const filteredTxns = allTxns
     .filter(t => historyFilter === 'ALL' || t._portfolioId === parseInt(historyFilter))
     .filter(t => !tickerFilter || t.ticker.includes(tickerFilter))
+    .filter(t => typeFilter === 'ALL' || t.type === typeFilter)
 
   const totalPages = Math.max(1, Math.ceil(filteredTxns.length / PER_PAGE))
   const pageTxns   = filteredTxns.slice((page - 1) * PER_PAGE, page * PER_PAGE)
 
   const handleFilterChange = (f) => { setFilter(f); setPage(1) }
   const handleTickerFilterChange = (v) => { setTickerFilter(v.toUpperCase()); setPage(1) }
+  const handleTypeFilterChange = (v) => { setTypeFilter(v); setPage(1) }
 
   return (
     <div>
@@ -490,7 +493,7 @@ export default function Transactions({ portfolios }) {
             <div className="t">Transaction history</div>
             <div className="row" style={{ gap: 12 }}>
               <div className="pills">
-                <button className={`pill${historyFilter === 'ALL' ? ' active' : ''}`} onClick={() => handleFilterChange('ALL')}>All types</button>
+                <button className={`pill${historyFilter === 'ALL' ? ' active' : ''}`} onClick={() => handleFilterChange('ALL')}>All portfolios</button>
                 {portfolios?.map(p => (
                   <button key={p.id} className={`pill${historyFilter === String(p.id) ? ' active' : ''}`} onClick={() => handleFilterChange(String(p.id))}>
                     {p.code}
@@ -517,6 +520,22 @@ export default function Transactions({ portfolios }) {
                   </button>
                 )}
               </div>
+              <Select value={typeFilter} onValueChange={handleTypeFilterChange}>
+                <SelectTrigger className="h-8 w-36" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }} aria-label="Filter by type">
+                  <span className="flex flex-1 text-left text-sm">{typeFilter === 'ALL' ? 'All types' : (TYPE_LABEL[typeFilter] ?? typeFilter)}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All types</SelectItem>
+                  <SelectItem value="BUY">Buy</SelectItem>
+                  <SelectItem value="SELL">Sell</SelectItem>
+                  <SelectItem value="DIVIDEND">Dividend</SelectItem>
+                  <SelectItem value="DIVIDEND_REINVEST">Dividend Reinvest</SelectItem>
+                  <SelectItem value="CONTRIBUTION">Contribution</SelectItem>
+                  <SelectItem value="WITHDRAWAL">Withdrawal</SelectItem>
+                  <SelectItem value="TRANSFER_IN">Transfer in</SelectItem>
+                  <SelectItem value="TRANSFER_OUT">Transfer out</SelectItem>
+                </SelectContent>
+              </Select>
               {!loading && (
                 <span className="a muted-txt">
                   <span className="num">{filteredTxns.length}</span> records
