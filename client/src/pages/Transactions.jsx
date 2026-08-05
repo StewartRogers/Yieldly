@@ -38,6 +38,19 @@ const TYPE_LABEL = {
   TRANSFER_OUT:      'Transfer out',
 }
 
+// Transaction-history type filter pills — the real row types (no bare
+// 'TRANSFER', since rows are always stored as the IN/OUT leg).
+const TYPE_FILTER_OPTIONS = [
+  { value: 'BUY',                label: 'Buy' },
+  { value: 'SELL',                label: 'Sell' },
+  { value: 'DIVIDEND',           label: 'Dividend' },
+  { value: 'DIVIDEND_REINVEST',  label: 'Dividend Reinvest' },
+  { value: 'CONTRIBUTION',       label: 'Contribution' },
+  { value: 'WITHDRAWAL',         label: 'Withdrawal' },
+  { value: 'TRANSFER_IN',        label: 'Transfer in' },
+  { value: 'TRANSFER_OUT',       label: 'Transfer out' },
+]
+
 const FIELD_LABEL = 'text-[11px] font-semibold uppercase tracking-[.08em] text-foreground/60'
 
 // toISOString() converts to UTC, so it rolls to tomorrow's date once local
@@ -167,7 +180,7 @@ export default function Transactions({ portfolios }) {
   const [allTxns, setAllTxns]                 = useState([])
   const [historyFilter, setFilter]            = useState('ALL')
   const [tickerFilter, setTickerFilter]       = useState('')
-  const [typeFilter, setTypeFilter]           = useState('ALL')
+  const [typeFilter, setTypeFilter]           = useState([])
   const [page, setPage]                       = useState(1)
   const [loading, setLoading]                 = useState(false)
 
@@ -281,7 +294,7 @@ export default function Transactions({ portfolios }) {
   const filteredTxns = allTxns
     .filter(t => historyFilter === 'ALL' || t._portfolioId === parseInt(historyFilter))
     .filter(t => !tickerFilter || t.ticker.includes(tickerFilter))
-    .filter(t => typeFilter === 'ALL' || t.type === typeFilter)
+    .filter(t => typeFilter.length === 0 || typeFilter.includes(t.type))
 
   const totalPages = Math.max(1, Math.ceil(filteredTxns.length / PER_PAGE))
   const pageTxns   = filteredTxns.slice((page - 1) * PER_PAGE, page * PER_PAGE)
@@ -289,6 +302,10 @@ export default function Transactions({ portfolios }) {
   const handleFilterChange = (f) => { setFilter(f); setPage(1) }
   const handleTickerFilterChange = (v) => { setTickerFilter(v.toUpperCase()); setPage(1) }
   const handleTypeFilterChange = (v) => { setTypeFilter(v); setPage(1) }
+  const toggleTypeFilter = (v) => {
+    setTypeFilter(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])
+    setPage(1)
+  }
 
   return (
     <div>
@@ -489,7 +506,7 @@ export default function Transactions({ portfolios }) {
 
         {/* ── Transaction history ── */}
         <div className="tc-card">
-          <div className="tc-card-head">
+          <div className="tc-card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
             <div className="t">Transaction history</div>
             <div className="row" style={{ gap: 12 }}>
               <div className="pills">
@@ -520,27 +537,23 @@ export default function Transactions({ portfolios }) {
                   </button>
                 )}
               </div>
-              <Select value={typeFilter} onValueChange={handleTypeFilterChange}>
-                <SelectTrigger className="h-8 w-36" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }} aria-label="Filter by type">
-                  <span className="flex flex-1 text-left text-sm">{typeFilter === 'ALL' ? 'All types' : (TYPE_LABEL[typeFilter] ?? typeFilter)}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All types</SelectItem>
-                  <SelectItem value="BUY">Buy</SelectItem>
-                  <SelectItem value="SELL">Sell</SelectItem>
-                  <SelectItem value="DIVIDEND">Dividend</SelectItem>
-                  <SelectItem value="DIVIDEND_REINVEST">Dividend Reinvest</SelectItem>
-                  <SelectItem value="CONTRIBUTION">Contribution</SelectItem>
-                  <SelectItem value="WITHDRAWAL">Withdrawal</SelectItem>
-                  <SelectItem value="TRANSFER_IN">Transfer in</SelectItem>
-                  <SelectItem value="TRANSFER_OUT">Transfer out</SelectItem>
-                </SelectContent>
-              </Select>
               {!loading && (
                 <span className="a muted-txt">
                   <span className="num">{filteredTxns.length}</span> records
                 </span>
               )}
+            </div>
+            <div className="pills" style={{ width: '100%' }}>
+              <button className={`pill${typeFilter.length === 0 ? ' active' : ''}`} onClick={() => handleTypeFilterChange([])}>All types</button>
+              {TYPE_FILTER_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  className={`pill${typeFilter.includes(value) ? ' active' : ''}`}
+                  onClick={() => toggleTypeFilter(value)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
