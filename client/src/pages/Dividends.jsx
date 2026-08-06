@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react'
 import { getDividendsMonthly, getUpcomingDividends, backfillDividendFrequency } from '../api/client'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const PER_PAGE = 15
+
+// Keep in sync with INTERVAL_MONTHS in lib/dividends.js — same frequency strings.
+const INTERVAL_MONTHS = { Monthly: 1, Quarterly: 3, 'Semi-Annual': 6, Annual: 12 }
 
 function fmtNextDate(dateStr) {
   const d = new Date(`${dateStr}T00:00:00`)
@@ -22,10 +26,6 @@ function fmtDaysAway(n) {
 }
 
 function UpcomingDividends({ data }) {
-  if (!data.length) {
-    return <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No upcoming payment dates on file.</p>
-  }
-
   return (
     <div className="tbl-wrap">
       <table className="tbl">
@@ -65,6 +65,36 @@ function UpcomingDividends({ data }) {
   )
 }
 
+function Pager({ page, totalPages, totalCount, onChange }) {
+  if (totalPages <= 1) return null
+  const pages = []
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i)
+  } else if (page <= 4) {
+    pages.push(1, 2, 3, 4, 5, '…', totalPages)
+  } else if (page >= totalPages - 3) {
+    pages.push(1, '…', totalPages-4, totalPages-3, totalPages-2, totalPages-1, totalPages)
+  } else {
+    pages.push(1, '…', page-1, page, page+1, '…', totalPages)
+  }
+  return (
+    <div className="row between" style={{ padding: '14px 20px' }}>
+      <span className="muted-txt" style={{ fontSize: 12.5 }}>
+        Showing <span className="num">{(page-1)*PER_PAGE+1}–{Math.min(page*PER_PAGE, totalCount)}</span> of <span className="num">{totalCount}</span>
+      </span>
+      <div className="pager">
+        <button onClick={() => onChange(page-1)} disabled={page===1}>‹</button>
+        {pages.map((p, i) =>
+          typeof p === 'number'
+            ? <button key={i} className={p === page ? 'active' : ''} onClick={() => onChange(p)}>{p}</button>
+            : <span key={i} style={{ padding: '0 4px', color: 'var(--faint)' }}>…</span>
+        )}
+        <button onClick={() => onChange(page+1)} disabled={page===totalPages}>›</button>
+      </div>
+    </div>
+  )
+}
+
 function fmtDiv(v) {
   return v > 0
     ? '$' + v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -73,6 +103,53 @@ function fmtDiv(v) {
 
 function fmtKPI(v) {
   return v > 0 ? '$' + Math.round(v).toLocaleString('en-CA') : '—'
+}
+
+// Walks each holding's next scheduled payment forward by its dividend
+// frequency, bucketing the (guesstimated) amount into whichever target
+// {year, month} it lands in. Holdings with no known frequency only ever
+// contribute their single next_dividend_date, not a projected series.
+function projectedByMonth(data, targetMonths) {
+  const totals = targetMonths.map(() => 0)
+  const windowEnd = targetMonths[targetMonths.length - 1]
+
+  data.forEach(h => {
+    if (!h.next_dividend_date || !(h.next_payout > 0)) return
+    const interval = INTERVAL_MONTHS[h.dividend_frequency]
+    const d = new Date(`${h.next_dividend_date}T00:00:00`)
+
+    while (d.getFullYear() < windowEnd.year ||
+          (d.getFullYear() === windowEnd.year && d.getMonth() + 1 <= windowEnd.month)) {
+      const idx = targetMonths.findIndex(m => m.year === d.getFullYear() && m.month === d.getMonth() + 1)
+      if (idx !== -1) totals[idx] += h.next_payout
+      if (!interval) break
+      d.setMonth(d.getMonth() + interval)
+    }
+  })
+
+  return totals
+}
+
+function ProjectedDividends({ data }) {
+  const today = new Date()
+  const targetMonths = [0, 1, 2].map(offset => {
+    const d = new Date(today.getFullYear(), today.getMonth() + offset, 1)
+    return { year: d.getFullYear(), month: d.getMonth() + 1 }
+  })
+  const totals = projectedByMonth(data, targetMonths)
+  const labels = ['This month', 'Next month', 'In 2 months']
+
+  return (
+    <div className="kpis grid-3" style={{ marginBottom: 22 }}>
+      {targetMonths.map((m, i) => (
+        <div key={i} className="kpi">
+          <div className="k">{labels[i]}</div>
+          <div className="v num">{fmtKPI(totals[i])}</div>
+          <div className="d">{MONTHS[m.month - 1]} {m.year} · projected</div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function YoYCell({ prev, curr }) {
@@ -234,6 +311,7 @@ export default function Dividends({ portfolios = [] }) {
   const [allData, setAllData]     = useState(null)
   const [upcoming, setUpcoming]   = useState(null)
   const [selected, setSelected]   = useState('ALL')
+  const [page, setPage]           = useState(1)
   const [backfilling, setBackfilling] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState('')
 
@@ -276,6 +354,12 @@ export default function Dividends({ portfolios = [] }) {
 
   const pills = [{ code: 'ALL', label: 'All' }, ...codes]
 
+  const handleSelect = (code) => { setSelected(code); setPage(1) }
+
+  const totalPages    = Math.max(1, Math.ceil(filteredUpcoming.length / PER_PAGE))
+  const clampedPage   = Math.min(page, totalPages)
+  const pagedUpcoming = filteredUpcoming.slice((clampedPage - 1) * PER_PAGE, clampedPage * PER_PAGE)
+
   return (
     <div>
       {/* ── Page head ── */}
@@ -290,13 +374,18 @@ export default function Dividends({ portfolios = [] }) {
             <button
               key={p.code}
               className={`pill${selected === p.code ? ' active' : ''}`}
-              onClick={() => setSelected(p.code)}
+              onClick={() => handleSelect(p.code)}
             >
               {p.label}
             </button>
           ))}
         </div>
       </div>
+
+      {/* ── Projected dividends ── */}
+      {upcoming !== null && filteredUpcoming.length > 0 && (
+        <ProjectedDividends data={filteredUpcoming} />
+      )}
 
       {/* ── Upcoming payments ── */}
       <div className="tc-card" style={{ marginBottom: 22 }}>
@@ -320,8 +409,14 @@ export default function Dividends({ portfolios = [] }) {
         {upcoming === null && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
         )}
-        {upcoming !== null && (
-          <UpcomingDividends data={filteredUpcoming} />
+        {upcoming !== null && filteredUpcoming.length === 0 && (
+          <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No upcoming payment dates on file.</p>
+        )}
+        {upcoming !== null && filteredUpcoming.length > 0 && (
+          <>
+            <UpcomingDividends data={pagedUpcoming} />
+            <Pager page={clampedPage} totalPages={totalPages} totalCount={filteredUpcoming.length} onChange={setPage} />
+          </>
         )}
       </div>
 
