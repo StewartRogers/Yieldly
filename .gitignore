@@ -13,5 +13,15 @@ portfolios.json
 npm-debug.log*
 .claude/settings.local.json
 .env*
+# .env* above also matches .env.example, which IS meant to be tracked. It only
+# stays tracked because it was added before that rule existed — re-negate it so
+# a future re-add isn't silently skipped by `git add`.
+!.env.example
 client/playwright-report/
 client/test-results/
+
+# Screenshot-audit output. These are rendered from the LIVE database, so they
+# contain real portfolio names, holdings and balances. A previous set of these
+# was committed to this public repo and had to be purged from history — never
+# track them. Run the audit against seeded demo data if output must be shared.
+client/button-audit-screenshots/

@@ -10,7 +10,7 @@ const path = require('path');
 
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
-const { prepareHoldings, NET_SHARES } = require('./lib/holdings');
+const { prepareHoldings, NET_SHARES, SHARE_EPSILON } = require('./lib/holdings');
 const { guessNextDividendDate, shouldAcceptTmxDate, estimateNextDividendDate, isStaleNextDividendDate, INTERVAL_MONTHS } = require('./lib/dividends');
 const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
 
@@ -39,6 +39,14 @@ const CASH_BALANCE_DELTA = {
 const TICKER_REGEX = /^[A-Z0-9.-]{1,12}$/;
 
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
+
+/** YYYY-MM-DD *and* a real calendar date — rejects 2025-02-30 and 2025-13-01. */
+const isValidISODate = (v) => {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const [y, m, d] = v.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+};
 // Accepts numbers or numeric strings; rejects NaN/Infinity/garbage.
 const toFiniteNumber = (v) => {
   if (v === undefined || v === null || v === '') return null;
@@ -52,7 +60,11 @@ const toFiniteNumber = (v) => {
 // server-to-server. The `users` table is intentionally excluded — credentials
 // are managed per-server (npm run user:create) and never travel in a backup.
 // IDs are preserved on import so the portfolio_id references stay intact.
-const EXPORT_VERSION = 1;
+// v2 added `portfolio_value_snapshots`. v1 files are still accepted: their
+// snapshots are carried over from the live DB rather than being lost to the
+// import's delete-cascade (see POST /api/import).
+const EXPORT_VERSION = 2;
+const SUPPORTED_EXPORT_VERSIONS = new Set([1, 2]);
 
 // Column lists are read from the live schema (PRAGMA) rather than hardcoded, so
 // export/import automatically pick up any column a future migration adds and
@@ -77,11 +89,15 @@ function validateBackupPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return ['Backup must be a JSON object'];
   }
-  if (payload.version !== EXPORT_VERSION) {
-    errors.push(`Unsupported backup version (expected ${EXPORT_VERSION}, got ${payload.version ?? 'none'})`);
+  if (!SUPPORTED_EXPORT_VERSIONS.has(payload.version)) {
+    errors.push(`Unsupported backup version (expected one of ${[...SUPPORTED_EXPORT_VERSIONS].join(', ')}, got ${payload.version ?? 'none'})`);
   }
   for (const table of ['portfolios', 'transactions', 'stock_info']) {
     if (!Array.isArray(payload[table])) errors.push(`"${table}" must be an array`);
+  }
+  // Only v2+ carries snapshots; absent is valid (and means "keep what's live").
+  if (payload.portfolio_value_snapshots !== undefined && !Array.isArray(payload.portfolio_value_snapshots)) {
+    errors.push('"portfolio_value_snapshots" must be an array when present');
   }
   if (errors.length) return errors; // shape is wrong; deeper checks would be noise
 
@@ -125,6 +141,19 @@ function validateBackupPayload(payload) {
     for (const f of ['market_price', 'dividend_per_share', 'dividend_yield']) {
       if (s[f] !== undefined && s[f] !== null && Number.isNaN(toFiniteNumber(s[f]))) {
         errors.push(`stock_info[${i}].${f} must be a number`);
+      }
+    }
+  });
+  (payload.portfolio_value_snapshots || []).forEach((v, i) => {
+    if (v == null || typeof v !== 'object') return errors.push(`portfolio_value_snapshots[${i}] is not an object`);
+    if (!portfolioIds.has(v.portfolio_id)) errors.push(`portfolio_value_snapshots[${i}] references unknown portfolio_id ${v.portfolio_id}`);
+    if (!v.snapshot_date) errors.push(`portfolio_value_snapshots[${i}] is missing snapshot_date`);
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(v.snapshot_date)) errors.push(`portfolio_value_snapshots[${i}].snapshot_date must be YYYY-MM-DD`);
+    const n = toFiniteNumber(v.total_value);
+    if (n === null || Number.isNaN(n)) errors.push(`portfolio_value_snapshots[${i}].total_value must be a number`);
+    for (const f of ['market_value', 'cash_balance']) {
+      if (v[f] !== undefined && v[f] !== null && Number.isNaN(toFiniteNumber(v[f]))) {
+        errors.push(`portfolio_value_snapshots[${i}].${f} must be a number`);
       }
     }
   });
@@ -322,10 +351,16 @@ function createApp(db, options = {}) {
         return res.status(400).json({ error: 'Code must be 1–5 alphanumeric characters' });
       }
 
-      const result = await db.run('INSERT INTO portfolios (name, code) VALUES (?, ?)', name, code.toUpperCase());
+      // Store the trimmed values the validation above actually checked. Storing
+      // the raw ones let ' AB ' and 'AB' coexist despite UNIQUE(code), and the
+      // CSV import (which trims before lookup) could then never find the
+      // portfolio — it reported "Available portfolios:  AB " while rejecting AB.
+      const cleanName = name.trim();
+      const cleanCode = code.trim().toUpperCase();
+      const result = await db.run('INSERT INTO portfolios (name, code) VALUES (?, ?)', cleanName, cleanCode);
 
       await backupPortfolios();
-      res.json({ id: result.lastInsertRowid, name, code: code.toUpperCase() });
+      res.json({ id: result.lastInsertRowid, name: cleanName, code: cleanCode });
     } catch (error) {
       if (error.message.includes('UNIQUE constraint')) {
         res.status(400).json({ error: 'Portfolio code already exists' });
@@ -508,7 +543,7 @@ function createApp(db, options = {}) {
       FROM transactions t
       WHERE ${where}
       GROUP BY portfolio_id, ticker
-      HAVING ${NET_SHARES} > 0
+      HAVING ${NET_SHARES} > ${SHARE_EPSILON}
     `, ...params);
 
     if (!holdingRows.length) return { message: 'No holdings to update', updated: 0 };
@@ -896,6 +931,12 @@ function createApp(db, options = {}) {
       if (!portfolio_id || !finalTicker || !type || !date) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
+      // An unvalidated date reaches strftime() in the monthly dividend/cashflow
+      // reports as NULL year/month and is dropped from computeMonthlyACB, while
+      // still counting in /summary — a silent, permanent reconciliation gap.
+      if (!isValidISODate(date)) {
+        return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD date' });
+      }
       if (!TRANSACTION_TYPES.has(normalizedType)) {
         return res.status(400).json({ error: 'Invalid transaction type' });
       }
@@ -914,7 +955,12 @@ function createApp(db, options = {}) {
       for (const [field, value] of Object.entries(numericFields)) {
         if (value === undefined) continue;
         const n = toFiniteNumber(value);
-        if (Number.isNaN(n)) {
+        // toFiniteNumber returns null for null/'' — reject those as well as NaN.
+        // Previously `total: null` passed here (null is not NaN) and then
+        // Number(null) === 0 recorded a $0 transaction: a position with zero
+        // cost basis and an infinite return. The client reaches this via
+        // parseFloat('') → NaN → JSON null.
+        if (n === null || Number.isNaN(n)) {
           return res.status(400).json({ error: `${field} must be a number` });
         }
         if (n < 0) {
@@ -1097,6 +1143,9 @@ function createApp(db, options = {}) {
       if (String(from_portfolio_id) === String(to_portfolio_id)) {
         return res.status(400).json({ error: 'from_portfolio_id and to_portfolio_id must differ' });
       }
+      if (!isValidISODate(date)) {
+        return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD date' });
+      }
       const finalAmount = toFiniteNumber(amount);
       if (finalAmount === null || Number.isNaN(finalAmount)) {
         return res.status(400).json({ error: 'amount must be a number' });
@@ -1191,6 +1240,25 @@ function createApp(db, options = {}) {
           .map(t => dedupeKey(t.portfolio_id, t.ticker, t.type, t.date, t.quantity, t.price, t.total))
       );
 
+      // Current net shares per position, so the import can enforce the same
+      // "can't sell what you don't hold" rule POST /api/transactions does.
+      // Without this an over-sell drives `shares` negative, HAVING shares > 0
+      // drops the position, and it vanishes from /summary and /overview with
+      // no error — the import reports success while the portfolio silently
+      // loses its cost basis. The map is updated as rows are applied so a
+      // sequence of sells within one file is checked cumulatively.
+      const sharesKey = (portfolioId, ticker) => `${portfolioId}|${ticker}`;
+      const netShares = new Map(
+        (await db.all(
+          `SELECT t.portfolio_id, t.ticker, COALESCE(${NET_SHARES}, 0) AS shares
+             FROM transactions t GROUP BY t.portfolio_id, t.ticker`
+        )).map(r => [sharesKey(r.portfolio_id, r.ticker), Number(r.shares) || 0])
+      );
+
+      // Cash-flow rows must move cash_balance exactly as the single-transaction
+      // route does. Accumulated per portfolio and applied once after the loop.
+      const cashDeltas = new Map();
+
       // Skip header row
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -1201,6 +1269,15 @@ function createApp(db, options = {}) {
           const parts = parseCSVLine(line);
           if (parts.length < 7) {
             errors.push({ line: i + 1, error: `Invalid CSV format - expected at least 7 columns, got ${parts.length}`, data: truncate(line) });
+            continue;
+          }
+          // An unquoted thousands separator splits one number across two
+          // columns: `…,100,$12.34,1,234.00` yields 8 fields where total reads
+          // "1", silently importing a $1,234.00 buy as $1.00. The extra field
+          // being exactly a 3-digit group (optionally with cents) is the
+          // signature; a genuine trailing column is very unlikely to match.
+          if (parts.length > 7 && /^\d{3}(\.\d{1,2})?$/.test(parts[7])) {
+            errors.push({ line: i + 1, error: 'Number appears to contain an unquoted thousands separator — quote the field (e.g. "1,234.00") or remove the comma', data: truncate(line) });
             continue;
           }
 
@@ -1224,7 +1301,24 @@ function createApp(db, options = {}) {
           }
 
           const parsedDate = parseDate(dateStr);
-          const type = typeMap[typeCode] || typeCode;
+          if (!parsedDate) {
+            errors.push({ line: i + 1, error: `Unrecognized date '${dateStr}' — expected DD-MMM-YY, DD-MMM-YYYY, or YYYY-MM-DD`, data: truncate(line) });
+            continue;
+          }
+
+          const type = (typeMap[typeCode] || String(typeCode || '').trim().toUpperCase());
+          // Whitelist the type instead of passing any string through to the
+          // INSERT. TRANSFER_* is rejected outright (it needs a matching pair in
+          // another portfolio, which a flat CSV can't express) — mirroring
+          // POST /api/transactions.
+          if (!TRANSACTION_TYPES.has(type)) {
+            errors.push({ line: i + 1, error: `Invalid transaction type '${typeCode}'`, data: truncate(line) });
+            continue;
+          }
+          if (type === 'TRANSFER_IN' || type === 'TRANSFER_OUT') {
+            errors.push({ line: i + 1, error: 'TRANSFER_IN/TRANSFER_OUT cannot be imported from CSV — use the transfers form', data: truncate(line) });
+            continue;
+          }
 
           const quantity = parseFloat(quantityStr.replace(/[$\s,]/g, ''));
           const price = parseFloat(priceStr.replace(/[$\s,]/g, ''));
@@ -1250,16 +1344,58 @@ function createApp(db, options = {}) {
             continue;
           }
 
+          // Same position guard as POST /api/transactions: SELL/DIVIDEND/
+          // DIVIDEND_REINVEST all presuppose an open position, and a SELL may
+          // not exceed the shares actually held.
+          const held = netShares.get(sharesKey(portfolio.id, cleanTicker)) || 0;
+          if (type === 'SELL' || type === 'DIVIDEND' || type === 'DIVIDEND_REINVEST') {
+            if (held <= 0) {
+              errors.push({ line: i + 1, error: `You don't own ${cleanTicker} in ${portfolio.code} — cannot import a ${type}`, data: truncate(line) });
+              continue;
+            }
+            if (type === 'SELL' && quantity > held) {
+              errors.push({ line: i + 1, error: `Cannot sell ${quantity} shares of ${cleanTicker} — only ${held} held in ${portfolio.code}`, data: truncate(line) });
+              continue;
+            }
+          }
+
           await db.run(`
             INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `, portfolio.id, cleanTicker, type, quantity, price, total, parsedDate);
           existingKeys.add(key); // catch duplicates within the same file, not just against the DB
+
+          // Keep the running share count and cash balance in step with what was
+          // just written, so later rows in the same file are validated against
+          // it and cash-flow rows don't silently skip cash_balance the way they
+          // used to (DELETE /api/transactions/:id reverses the delta
+          // unconditionally, so an import that never applied it drove the
+          // balance negative on deletion).
+          const shareDelta = (type === 'BUY' || type === 'DIVIDEND_REINVEST') ? quantity
+            : (type === 'SELL' ? -quantity : 0);
+          if (shareDelta !== 0) {
+            netShares.set(sharesKey(portfolio.id, cleanTicker), held + shareDelta);
+          }
+          const cashDelta = CASH_BALANCE_DELTA[type]?.(total) || 0;
+          if (cashDelta !== 0) {
+            cashDeltas.set(portfolio.id, (cashDeltas.get(portfolio.id) || 0) + cashDelta);
+          }
+
           imported.push({ line: i + 1, symbol, portfolio: portfolioCode, date: parsedDate });
         } catch (error) {
           errors.push({ line: i + 1, error: error.message, data: truncate(line) });
         }
       }
+
+      // Apply the accumulated CONTRIBUTION/WITHDRAWAL cash movement once per
+      // portfolio rather than per row.
+      for (const [portfolioId, delta] of cashDeltas) {
+        await db.run(
+          'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
+          delta, portfolioId,
+        );
+      }
+      if (cashDeltas.size) await backupPortfolios();
 
       if (verbose) console.log(`Import complete: ${imported.length} imported, ${errors.length} errors`);
 
@@ -1282,10 +1418,11 @@ function createApp(db, options = {}) {
   app.get('/api/export', async (req, res) => {
     try {
       // SELECT * so the export inherently includes every column the schema has.
-      const [portfolios, transactions, stock_info] = await Promise.all([
+      const [portfolios, transactions, stock_info, portfolio_value_snapshots] = await Promise.all([
         db.all('SELECT * FROM portfolios ORDER BY id'),
         db.all('SELECT * FROM transactions ORDER BY id'),
         db.all('SELECT * FROM stock_info ORDER BY id'),
+        db.all('SELECT * FROM portfolio_value_snapshots ORDER BY id'),
       ]);
       res.json({
         version: EXPORT_VERSION,
@@ -1293,6 +1430,9 @@ function createApp(db, options = {}) {
         portfolios,
         transactions,
         stock_info,
+        // Point-in-time market data that cannot be recomputed from the ledger —
+        // if the export omits it, a restore loses the entire History chart.
+        portfolio_value_snapshots,
       });
     } catch (error) {
       serverError(res, error);
@@ -1303,12 +1443,18 @@ function createApp(db, options = {}) {
   // have to download the whole dataset just to show "what will be deleted".
   app.get('/api/export/counts', async (req, res) => {
     try {
-      const [p, t, s] = await Promise.all([
+      const [p, t, s, v] = await Promise.all([
         db.get('SELECT COUNT(*) AS c FROM portfolios'),
         db.get('SELECT COUNT(*) AS c FROM transactions'),
         db.get('SELECT COUNT(*) AS c FROM stock_info'),
+        db.get('SELECT COUNT(*) AS c FROM portfolio_value_snapshots'),
       ]);
-      res.json({ portfolios: Number(p.c), transactions: Number(t.c), stock_info: Number(s.c) });
+      res.json({
+        portfolios: Number(p.c),
+        transactions: Number(t.c),
+        stock_info: Number(s.c),
+        portfolio_value_snapshots: Number(v.c),
+      });
     } catch (error) {
       serverError(res, error);
     }
@@ -1324,11 +1470,22 @@ function createApp(db, options = {}) {
 
       // Insert columns are read from the live schema so they never drift from
       // the table definitions (a future migration column flows through here).
-      const [pCols, tCols, sCols] = await Promise.all([
+      const [pCols, tCols, sCols, vCols] = await Promise.all([
         tableColumns(db, 'portfolios'),
         tableColumns(db, 'transactions'),
         tableColumns(db, 'stock_info'),
+        tableColumns(db, 'portfolio_value_snapshots'),
       ]);
+
+      // `DELETE FROM portfolios` cascades into portfolio_value_snapshots, so
+      // snapshots are destroyed either way. A v2 file carries its own; a v1
+      // file has none, and rather than silently losing irreplaceable
+      // point-in-time data we carry the live rows across the delete and
+      // re-insert those whose portfolio still exists in the incoming file.
+      const incomingSnapshots = payload.portfolio_value_snapshots
+        ?? await db.all('SELECT * FROM portfolio_value_snapshots ORDER BY id');
+      const survivingPortfolioIds = new Set(payload.portfolios.map(p => p.id));
+      const snapshotsToRestore = incomingSnapshots.filter(v => survivingPortfolioIds.has(v.portfolio_id));
 
       // Replace-all semantics, atomic: a bad row aborts the whole import so the
       // DB is never left half-migrated. Children deleted before parents; parents
@@ -1336,6 +1493,7 @@ function createApp(db, options = {}) {
       const tx = await db.transaction('write');
       let committed = false;
       try {
+        await tx.execute('DELETE FROM portfolio_value_snapshots');
         await tx.execute('DELETE FROM stock_info');
         await tx.execute('DELETE FROM transactions');
         await tx.execute('DELETE FROM portfolios');
@@ -1347,6 +1505,9 @@ function createApp(db, options = {}) {
         }
         for (const s of payload.stock_info) {
           await tx.execute({ sql: insertSQL('stock_info', sCols), args: rowArgs(s, sCols) });
+        }
+        for (const v of snapshotsToRestore) {
+          await tx.execute({ sql: insertSQL('portfolio_value_snapshots', vCols), args: rowArgs(v, vCols) });
         }
         await tx.commit();
         committed = true;
@@ -1365,6 +1526,7 @@ function createApp(db, options = {}) {
           portfolios: payload.portfolios.length,
           transactions: payload.transactions.length,
           stock_info: payload.stock_info.length,
+          portfolio_value_snapshots: snapshotsToRestore.length,
         },
       });
     } catch (error) {

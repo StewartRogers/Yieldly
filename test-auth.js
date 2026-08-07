@@ -371,13 +371,16 @@ async function run() {
 
     const exp = await req('GET', '/api/export', null, cookie, backup.base);
     checkEq('export → 200', exp.status, 200);
-    checkEq('version = 1', exp.body.version, 1);
+    checkEq('version = 2', exp.body.version, 2);
     checkTruthy('exportedAt present', exp.body.exportedAt);
     checkEq('1 portfolio exported', exp.body.portfolios.length, 1);
     checkEq('2 transactions exported', exp.body.transactions.length, 2);
     checkEq('1 stock_info exported', exp.body.stock_info.length, 1);
     checkEq('stock_info sector carried', exp.body.stock_info[0].sector, 'Financials');
     checkEq('portfolio code carried', exp.body.portfolios[0].code, 'REG');
+    // v2 carries point-in-time snapshots; without them a restore silently wipes
+    // the entire History chart (the delete-cascade takes them either way).
+    checkTruthy('portfolio_value_snapshots array present', Array.isArray(exp.body.portfolio_value_snapshots));
 
     // 24. Import auth guard + validation
     section('24. Full backup – import auth guard & validation');

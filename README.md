@@ -9,7 +9,7 @@ Yieldly is a local stock portfolio tracker for managing multiple portfolios, tra
 - View holdings, average cost, sale totals, dividends paid, and estimated market value
 - Store manual stock details such as market price, dividend yield, sector, and investment type
 - Refresh stock prices and dividend data from TMX (Canadian) and Yahoo Finance (US) for supported tickers
-- Export and re-import a full account backup (portfolios, transactions, and stock info)
+- Export and re-import a full account backup (portfolios, transactions, stock info, and value-history snapshots)
 - Import historical transactions from CSV
 - Keep data locally in SQLite with automatic persistence across restarts
 
@@ -174,10 +174,10 @@ All API routes except `/api/auth/*` and `/api/cron/*` require authentication (re
 
 ### Import / Export (full backup)
 
-- `POST /api/import/csv` - Import transactions from CSV
-- `GET /api/export` - Export a full account backup (portfolios, transactions, stock info) as JSON
+- `POST /api/import/csv` - Import transactions from CSV. Rows are rejected (not silently coerced) on an unrecognized date, an unknown transaction type, an over-sell, or a number split across columns by an unquoted thousands separator; the per-row `errors` array reports each one.
+- `GET /api/export` - Export a full account backup as JSON: portfolios, transactions, stock info, and value snapshots (`version: 2`)
 - `GET /api/export/counts` - Row counts for the current account (preview before export/import)
-- `POST /api/import` - Restore a full account backup, replacing all existing data
+- `POST /api/import` - Restore a full account backup, replacing all existing data. Accepts `version: 1` files too — those predate value snapshots, so the existing snapshots are carried across the restore rather than lost.
 
 ### Refresh
 

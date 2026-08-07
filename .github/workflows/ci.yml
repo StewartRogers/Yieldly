@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: without this the job inherits the repository default, which
+# on older repos is read/write on every scope — so anything executing during
+# `npm install` (arbitrary lifecycle scripts) could push to main.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -22,5 +28,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run unit tests
-        run: node test.js
+      # `npm test` runs all four suites (math, full, auth, history). CI
+      # previously ran only test.js, so the security-critical auth suite —
+      # login rate limiting, JWT cookies, the route guard, backup import —
+      # never ran on any push or PR.
+      - name: Run test suite
+        run: npm test
