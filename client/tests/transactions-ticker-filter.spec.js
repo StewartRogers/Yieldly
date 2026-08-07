@@ -74,5 +74,13 @@ test('ticker filter is case-insensitive and matches partial tickers', async ({ p
 
   await page.getByLabel('Filter by ticker').fill('ZZZ')
   await expect(rows).toHaveCount(0)
-  await expect(page.getByText('No transactions yet.')).toBeVisible()
+  // Filtering to nothing must NOT claim the ledger is empty — with 4 real
+  // transactions on file, "No transactions yet." told the user their entire
+  // history was gone.
+  await expect(page.getByText('No transactions match these filters.')).toBeVisible()
+  await expect(page.getByText('No transactions yet.')).toHaveCount(0)
+
+  // "Clear filters" restores the full list.
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect(rows).toHaveCount(4)
 })

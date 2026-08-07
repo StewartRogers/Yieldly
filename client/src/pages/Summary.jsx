@@ -118,15 +118,21 @@ function OverviewTable({ data, onRefresh, totalCash, totalInv, totalMkt }) {
 }
 
 export default function Summary({ pricesTick = 0 }) {
-  const [overview, setOverview]     = useState([])
+  // null = not loaded yet, [] = loaded and genuinely empty. Initialising to []
+  // made those two states indistinguishable, so a brand-new account with no
+  // portfolios sat on "Loading…" forever while the header read "0 accounts".
+  const [overview, setOverview]     = useState(null)
+  const [loadError, setLoadError]   = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState(null)
   const [updatedAt, setUpdatedAt]   = useState(null)
 
-  const loadOverview = () =>
-    getOverview()
+  const loadOverview = () => {
+    setLoadError('')
+    return getOverview()
       .then(data => { setOverview(data); setUpdatedAt(new Date()) })
-      .catch(console.error)
+      .catch(e => setLoadError(e.message || 'Could not load your accounts'))
+  }
 
   /* Initial load + ACB (ACB data doesn't change on price refresh) */
   useEffect(() => {
@@ -152,14 +158,15 @@ export default function Summary({ pricesTick = 0 }) {
     }
   }
 
-  /* derived totals */
-  const totalMkt      = overview.reduce((s, p) => s + p.market_value, 0)
-  const totalCash     = overview.reduce((s, p) => s + (p.cash ?? 0), 0)
-  const totalInvested = overview.reduce((s, p) => s + p.cash_invested, 0)
+  /* derived totals — `overview` is null until the first load resolves */
+  const rows          = overview ?? []
+  const totalMkt      = rows.reduce((s, p) => s + p.market_value, 0)
+  const totalCash     = rows.reduce((s, p) => s + (p.cash ?? 0), 0)
+  const totalInvested = rows.reduce((s, p) => s + p.cash_invested, 0)
   const totalValue    = totalMkt + totalCash
   const allTimePL     = totalMkt - totalInvested
   const allTimePct    = totalInvested > 0 ? (allTimePL / totalInvested) * 100 : 0
-  const cashAccounts  = overview.filter(p => p.cash != null).length
+  const cashAccounts  = rows.filter(p => p.cash != null).length
   const isGain        = allTimePL >= 0
 
   const fmtTotal = (n) => {
@@ -192,7 +199,7 @@ export default function Summary({ pricesTick = 0 }) {
           <div className="eyebrow">
             Total portfolio value{updatedAt ? ` · as of ${fmtTime(updatedAt)}` : ''}
           </div>
-          {overview.length > 0 && (
+          {rows.length > 0 && (
             <>
               <div className="hero-total mt2">
                 <span className="num">${totalWhole}</span>
@@ -222,7 +229,7 @@ export default function Summary({ pricesTick = 0 }) {
       </div>
 
       {/* ── KPI strip ── */}
-      {overview.length > 0 && (
+      {rows.length > 0 && (
         <div className="kpis grid-3">
           <div className="kpi">
             <div className="k">All-time return</div>
@@ -251,14 +258,25 @@ export default function Summary({ pricesTick = 0 }) {
         <div className="tc-card-head">
           <div className="t">Portfolio overview</div>
           <div className="a">
-            {overview.length} accounts
+            {overview === null ? '—' : `${rows.length} accounts`}
             {updatedAt && <> · <span className="faint-txt">prices updated {fmtTime(updatedAt)}</span></>}
           </div>
         </div>
-        {overview.length === 0
-          ? <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
-          : <OverviewTable data={overview} onRefresh={loadOverview} totalCash={totalCash} totalInv={totalInvested} totalMkt={totalMkt} />
-        }
+        {loadError ? (
+          <div style={{ padding: '16px 20px' }}>
+            <p className="text-destructive text-sm">{loadError}</p>
+            <button type="button" className="tc-btn sm ghost mt2" onClick={loadOverview}>Try again</button>
+          </div>
+        ) : overview === null ? (
+          <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: '16px 20px' }}>
+            <p className="muted-txt text-sm">No portfolios yet.</p>
+            <p className="faint-txt text-sm mt2">Create one on the Portfolios page to start tracking holdings.</p>
+          </div>
+        ) : (
+          <OverviewTable data={rows} onRefresh={loadOverview} totalCash={totalCash} totalInv={totalInvested} totalMkt={totalMkt} />
+        )}
       </div>
 
       <div className="row between">

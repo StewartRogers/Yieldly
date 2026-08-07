@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { getDividendsMonthly, getUpcomingDividends, backfillDividendFrequency } from '../api/client'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -315,10 +315,17 @@ export default function Dividends({ portfolios = [] }) {
   const [backfilling, setBackfilling] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState('')
 
-  useEffect(() => {
-    getDividendsMonthly().then(setAllData).catch(console.error)
-    getUpcomingDividends().then(setUpcoming).catch(console.error)
+  const [loadError, setLoadError] = useState('')
+
+  // Without an error state these left `allData`/`upcoming` null forever and
+  // both cards showed "Loading…" indefinitely on any API failure.
+  const loadDividends = useCallback(() => {
+    setLoadError('')
+    getDividendsMonthly().then(setAllData).catch(e => setLoadError(e.message || 'Could not load dividend history'))
+    getUpcomingDividends().then(setUpcoming).catch(e => setLoadError(e.message || 'Could not load upcoming dividends'))
   }, [])
+
+  useEffect(() => { loadDividends() }, [loadDividends])
 
   const runBackfill = async () => {
     setBackfilling(true)
@@ -406,13 +413,19 @@ export default function Dividends({ portfolios = [] }) {
             </button>
           </div>
         </div>
-        {upcoming === null && (
+        {loadError && (
+          <div style={{ padding: '16px 20px' }}>
+            <p className="text-destructive text-sm">{loadError}</p>
+            <button type="button" className="tc-btn sm ghost mt2" onClick={loadDividends}>Try again</button>
+          </div>
+        )}
+        {!loadError && upcoming === null && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
         )}
-        {upcoming !== null && filteredUpcoming.length === 0 && (
+        {!loadError && upcoming !== null && filteredUpcoming.length === 0 && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No upcoming payment dates on file.</p>
         )}
-        {upcoming !== null && filteredUpcoming.length > 0 && (
+        {!loadError && upcoming !== null && filteredUpcoming.length > 0 && (
           <>
             <UpcomingDividends data={pagedUpcoming} />
             <Pager page={clampedPage} totalPages={totalPages} totalCount={filteredUpcoming.length} onChange={setPage} />
@@ -431,13 +444,16 @@ export default function Dividends({ portfolios = [] }) {
           <div className="t">Income by month</div>
           <div className="a">CAD · before withholding</div>
         </div>
-        {allData === null && (
+        {!loadError && allData === null && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
         )}
-        {allData !== null && filteredData.length === 0 && (
+        {loadError && (
+          <p className="text-destructive text-sm" style={{ padding: '16px 20px' }}>{loadError}</p>
+        )}
+        {!loadError && allData !== null && filteredData.length === 0 && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No dividend data for this portfolio.</p>
         )}
-        {allData !== null && filteredData.length > 0 && (
+        {!loadError && allData !== null && filteredData.length > 0 && (
           <DividendMatrix data={filteredData} />
         )}
       </div>

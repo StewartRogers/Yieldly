@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, LayoutGrid, List, GripVertical, Pencil } from 'lucide-react'
 import { fmtCurrency, fmtCurrencyOr, fmtPrice, fmtPct, retClass, fmtFreqCode } from '../utils/format'
 import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder, updatePortfolio } from '../api/client'
 
 function HoldingCard({ holding, onEdit, onShowTxns }) {
@@ -78,6 +77,8 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   const [localPortfolios, setLocalPortfolios] = useState([])
   const [selectedId, setSelectedId]           = useState(null)
   const [holdings, setHoldings]               = useState([])
+  const [holdingsError, setHoldingsError]     = useState('')
+  const [reorderError, setReorderError]       = useState('')
   const [view, setView]                       = useState('card')
   const [newName, setNewName]                 = useState('')
   const [newCode, setNewCode]                 = useState('')
@@ -100,24 +101,38 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
     }
   }, [localPortfolios])
 
-  useEffect(() => {
+  // Monotonic request id. Switching portfolios fires a second /summary while
+  // the first is still in flight; responses arrive in completion order, not
+  // issue order, so a slow response for portfolio A could land under
+  // portfolio B's tab — and then "Edit" on one of those rows would write A's
+  // ticker metadata into B. Only the newest request is allowed to set state.
+  const holdingsReq = useRef(0)
+
+  const reloadHoldings = useCallback(() => {
     if (!selectedId) return
+    const reqId = ++holdingsReq.current
+    setHoldingsError('')
     getPortfolioSummary(selectedId)
-      .then(data => setHoldings(data.filter(h => h.shares > 0.00005)))
-      .catch(console.error)
+      .then(data => {
+        if (reqId !== holdingsReq.current) return
+        setHoldings(data.filter(h => h.shares > 0.00005))
+      })
+      .catch(e => {
+        if (reqId !== holdingsReq.current) return
+        // Clear the rows too: leaving the previous portfolio's holdings on
+        // screen under this portfolio's name and totals is indistinguishable
+        // from real data in a money app.
+        setHoldings([])
+        setHoldingsError(e.message || 'Could not load holdings')
+      })
   }, [selectedId])
 
-  const reloadHoldings = () => {
-    if (!selectedId) return
-    getPortfolioSummary(selectedId)
-      .then(data => setHoldings(data.filter(h => h.shares > 0.00005)))
-      .catch(console.error)
-  }
+  useEffect(() => { reloadHoldings() }, [reloadHoldings])
 
   /* Re-fetch market values when nav refresh fires */
   useEffect(() => {
     if (pricesTick > 0) reloadHoldings()
-  }, [pricesTick])
+  }, [pricesTick, reloadHoldings])
 
   const handleCreatePortfolio = async () => {
     if (!newName.trim() || !newCode.trim()) return
@@ -147,19 +162,43 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   }
 
   const handleDragStart = (e, id) => { dragId.current = id; e.dataTransfer.effectAllowed = 'move' }
-  const handleDragOver  = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }
+  const handleDragOver  = (e) => {
+    // Only accept our own tab drags. Without this, handleDragOver's
+    // preventDefault() made the tab strip a valid drop target for anything —
+    // a file from the desktop, a text selection — and the drop below then ran
+    // with dragId.current === null.
+    if (dragId.current === null) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
   const handleDrop = async (e, targetId) => {
     e.preventDefault()
-    if (dragId.current === targetId) return
+    if (dragId.current === targetId) { dragId.current = null; return }
+
     const reordered = [...localPortfolios]
     const fromIdx   = reordered.findIndex(p => p.id === dragId.current)
     const toIdx     = reordered.findIndex(p => p.id === targetId)
-    const [moved]   = reordered.splice(fromIdx, 1)
+    // findIndex returns -1 for an unrecognized drag, and splice(-1, 1) removes
+    // the LAST element — so a stray drop silently reordered and persisted a
+    // portfolio the user never touched.
+    if (fromIdx === -1 || toIdx === -1) { dragId.current = null; return }
+
+    const [moved] = reordered.splice(fromIdx, 1)
     reordered.splice(toIdx, 0, moved)
+
+    const previous = localPortfolios
     setLocalPortfolios(reordered)
-    await updateOrder(reordered)
-    onPortfoliosChange()
     dragId.current = null
+    try {
+      await updateOrder(reordered)
+      onPortfoliosChange()
+    } catch (err) {
+      // Roll the optimistic reorder back rather than leaving an order on
+      // screen that was never saved (it silently reverted on reload).
+      setLocalPortfolios(previous)
+      setReorderError(err.message || 'Could not save the new order')
+      setTimeout(() => setReorderError(''), 5000)
+    }
   }
 
   const startEdit = () => {
@@ -239,6 +278,9 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
             </button>
           ))}
           <span className="note" style={{ marginLeft: 6 }}>drag to reorder — saved</span>
+          {reorderError && (
+            <span className="text-destructive text-xs" style={{ marginLeft: 6 }}>{reorderError}</span>
+          )}
         </div>
       )}
 
@@ -307,8 +349,16 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
         </div>
       )}
 
+      {/* ── Holdings load failure ── */}
+      {holdingsError && (
+        <div className="tc-card" style={{ padding: '16px 20px' }}>
+          <p className="text-destructive text-sm">{holdingsError}</p>
+          <button type="button" className="tc-btn sm ghost mt2" onClick={reloadHoldings}>Try again</button>
+        </div>
+      )}
+
       {/* ── Holdings: Card view ── */}
-      {view === 'card' && (
+      {!holdingsError && view === 'card' && (
         <div className="holds">
           {holdings.map(h => (
             <HoldingCard
@@ -328,7 +378,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
       )}
 
       {/* ── Holdings: List view ── */}
-      {view === 'list' && (
+      {!holdingsError && view === 'list' && (
         <div className="tc-card">
           <div className="tbl-wrap">
             <table className="tbl">

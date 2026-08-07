@@ -25,3 +25,7 @@ client/test-results/
 # was committed to this public repo and had to be purged from history — never
 # track them. Run the audit against seeded demo data if output must be shared.
 client/button-audit-screenshots/
+
+# Playwright output if the runner is invoked from the repo root
+# rather than from client/ (client/test-results/ is covered above).
+test-results/

@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { fmtCurrency } from '../utils/format'
 import { getPortfolioTransactions, createTransaction, createTransfer, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
-import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import { Trash2, X } from 'lucide-react'
 
@@ -51,7 +50,6 @@ const TYPE_FILTER_OPTIONS = [
   { value: 'TRANSFER_OUT',       label: 'Transfer out' },
 ]
 
-const FIELD_LABEL = 'text-[11px] font-semibold uppercase tracking-[.08em] text-foreground/60'
 
 // toISOString() converts to UTC, so it rolls to tomorrow's date once local
 // time passes UTC midnight (e.g. ~7-8pm Eastern) — use the browser's own
@@ -174,7 +172,7 @@ export default function Transactions({ portfolios }) {
   const [ticker, setTicker]                   = useState('')
   const [quantity, setQuantity]               = useState('')
   const [price, setPrice]                     = useState('')
-  const [total, setTotal]                     = useState('')
+  const [cashTotal, setCashTotal]             = useState('')
   const [commission, setCommission]           = useState('')
   const [date, setDate]                       = useState(todayLocal())
   const [allTxns, setAllTxns]                 = useState([])
@@ -183,6 +181,7 @@ export default function Transactions({ portfolios }) {
   const [typeFilter, setTypeFilter]           = useState([])
   const [page, setPage]                       = useState(1)
   const [loading, setLoading]                 = useState(false)
+  const [loadError, setLoadError]             = useState('')
 
   const isTransfer = type === 'TRANSFER'
   const isCashOnly = CASH_ONLY_TYPES.has(type) || isTransfer
@@ -200,15 +199,33 @@ export default function Transactions({ portfolios }) {
     return [...set].sort()
   }, [allTxns, formPortfolioId])
 
-  useEffect(() => {
+  // Derived during render rather than mirrored into state by an effect. The
+  // effect only ever wrote (never cleared), so setting quantity back to 0
+  // after typing a valid pair left the previous product sitting in the
+  // read-only Total field — uncorrectable by the user, and submitted as
+  // {quantity: 0, price: 0, total: 1000}.
+  const autoTotal = (() => {
     const q = parseFloat(quantity) || 0
     const p = parseFloat(price) || 0
-    if (!isCashOnly && q > 0 && p > 0) setTotal((q * p).toFixed(2))
-  }, [quantity, price, isCashOnly])
+    return q > 0 && p > 0 ? (q * p).toFixed(2) : ''
+  })()
+  // `total` is the user-entered amount on cash-only forms, the computed
+  // product otherwise. One value, so submit and display can never disagree.
+  const total = isCashOnly ? cashTotal : autoTotal
 
-  const loadAllTxns = () => {
+  // Monotonic batch id. loadAllTxns fires one request per portfolio and is
+  // called after every create/transfer/delete, so two batches are easily in
+  // flight at once. Batch order is not completion order: an older batch
+  // resolving last used to overwrite newer data — deleting two rows quickly
+  // made the first one reappear in the list, with every derived total wrong
+  // until the next reload.
+  const txnsReq = useRef(0)
+
+  const loadAllTxns = useCallback(() => {
     if (!portfolios?.length) return
+    const reqId = ++txnsReq.current
     setLoading(true)
+    setLoadError('')
     Promise.all(
       portfolios.map(p =>
         getPortfolioTransactions(p.id)
@@ -216,17 +233,28 @@ export default function Transactions({ portfolios }) {
       )
     )
       .then(results => {
+        if (reqId !== txnsReq.current) return
         const merged = results.flat().sort((a, b) =>
           b.date !== a.date ? b.date.localeCompare(a.date) : b.id - a.id
         )
         setAllTxns(merged)
-        setPage(1)
+        // NOTE: deliberately does NOT reset the page. Resetting here threw the
+        // user back to page 1 after every delete, so clearing a run of bad
+        // imported rows meant paging back in each time. `clampedPage` below
+        // keeps the view valid when the list shrinks instead.
       })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }
+      .catch(e => {
+        if (reqId !== txnsReq.current) return
+        setLoadError(e.message || 'Could not load transactions')
+      })
+      .finally(() => {
+        // Don't let a superseded batch clear the spinner while the newer one
+        // is still running.
+        if (reqId === txnsReq.current) setLoading(false)
+      })
+  }, [portfolios])
 
-  useEffect(() => { loadAllTxns() }, [portfolios])
+  useEffect(() => { loadAllTxns() }, [loadAllTxns])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -242,7 +270,7 @@ export default function Transactions({ portfolios }) {
           to_portfolio_id:   parseInt(toPortfolioId),
           amount, date,
         })
-        setTotal(''); setToPortfolioId(''); setDate(todayLocal())
+        setCashTotal(''); setToPortfolioId(''); setDate(todayLocal())
         loadAllTxns()
       } catch (err) { toast.error(err.message) }
       return
@@ -274,7 +302,7 @@ export default function Transactions({ portfolios }) {
     }
     try {
       await createTransaction(txn)
-      setTicker(''); setQuantity(''); setPrice(''); setTotal('')
+      setTicker(''); setQuantity(''); setPrice(''); setCashTotal('')
       setCommission(''); setDate(todayLocal()); setMarket('TMX')
       loadAllTxns()
     } catch (err) { toast.error(err.message) }
@@ -297,7 +325,20 @@ export default function Transactions({ portfolios }) {
     .filter(t => typeFilter.length === 0 || typeFilter.includes(t.type))
 
   const totalPages = Math.max(1, Math.ceil(filteredTxns.length / PER_PAGE))
-  const pageTxns   = filteredTxns.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+  // Clamp rather than reset. If the list shrinks (a delete, or a filter that
+  // matches fewer rows) an out-of-range `page` would slice to [] and render a
+  // table header with zero rows, while Pager hides itself when totalPages <= 1
+  // — leaving no way to navigate back.
+  const clampedPage = Math.min(page, totalPages)
+  const pageTxns    = filteredTxns.slice((clampedPage - 1) * PER_PAGE, clampedPage * PER_PAGE)
+
+  // The portfolio pills are a scope selector, not a row filter — "Clear
+  // filters" deliberately leaves the selected account alone rather than
+  // yanking the user out of the portfolio they're looking at.
+  const hasRowFilter = !!tickerFilter || typeFilter.length > 0
+  const clearFilters = () => {
+    setTickerFilter(''); setTypeFilter([]); setPage(1)
+  }
 
   const handleFilterChange = (f) => { setFilter(f); setPage(1) }
   const handleTickerFilterChange = (v) => { setTickerFilter(v.toUpperCase()); setPage(1) }
@@ -387,7 +428,7 @@ export default function Transactions({ portfolios }) {
             <div className="tc-field">
               <label>Type</label>
               <Select value={type} onValueChange={v => {
-                setType(v); setTicker(''); setQuantity(''); setPrice(''); setTotal(''); setToPortfolioId('')
+                setType(v); setTicker(''); setQuantity(''); setPrice(''); setCashTotal(''); setToPortfolioId('')
               }}>
                 <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                   <span className="flex flex-1 text-left text-sm">{TYPE_LABEL[type] ?? type}</span>
@@ -485,7 +526,7 @@ export default function Transactions({ portfolios }) {
                   <label>{(isCashFlow || isTransfer) ? 'Amount' : 'Total'}</label>
                   <Input className="h-9" type="number" step="0.01" placeholder="0.00" value={total}
                     style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
-                    onChange={e => setTotal(e.target.value)} required />
+                    onChange={e => setCashTotal(e.target.value)} required />
                 </div>
                 <div className="tc-field">
                   <label>Date</label>
@@ -558,10 +599,28 @@ export default function Transactions({ portfolios }) {
           </div>
 
           {loading && <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>}
-          {!loading && filteredTxns.length === 0 && (
-            <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No transactions yet.</p>
+          {!loading && loadError && (
+            <div style={{ padding: '16px 20px' }}>
+              <p className="text-destructive text-sm">{loadError}</p>
+              <button type="button" className="tc-btn sm ghost mt2" onClick={loadAllTxns}>Try again</button>
+            </div>
           )}
-          {!loading && filteredTxns.length > 0 && (
+          {!loading && !loadError && filteredTxns.length === 0 && (
+            // Distinguish "you have no transactions" from "your filters match
+            // nothing" — with a filter active, the old copy claimed the entire
+            // ledger was empty.
+            hasRowFilter ? (
+              <div style={{ padding: '16px 20px' }}>
+                <p className="muted-txt text-sm">No transactions match these filters.</p>
+                <button type="button" className="tc-btn sm ghost mt2" onClick={clearFilters}>Clear filters</button>
+              </div>
+            ) : historyFilter !== 'ALL' ? (
+              <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No transactions in this portfolio yet.</p>
+            ) : (
+              <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>No transactions yet.</p>
+            )
+          )}
+          {!loading && !loadError && filteredTxns.length > 0 && (
             <>
               <div className="tbl-wrap">
                 <table className="tbl">
@@ -617,7 +676,7 @@ export default function Transactions({ portfolios }) {
                   </tbody>
                 </table>
               </div>
-              <Pager page={page} totalPages={totalPages} totalCount={filteredTxns.length} onChange={setPage} />
+              <Pager page={clampedPage} totalPages={totalPages} totalCount={filteredTxns.length} onChange={setPage} />
             </>
           )}
         </div>

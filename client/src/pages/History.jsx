@@ -54,6 +54,15 @@ function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
     }
   }
 
+  // This guard MUST come before the `editing` branch. `editing` is local state,
+  // so when the parent turns editing off — clicking "Done", or switching
+  // portfolio (which sets editMode false) — an already-open cell used to stay
+  // open. handleSave resolves the target from the *current* selection, so
+  // typing into that stale input wrote the value into the wrong portfolio.
+  if (!editable || disabled) {
+    return <td className="num">{cell ? fmtCurrencyTrim(cell.value) : '—'}</td>
+  }
+
   if (editing) {
     return (
       <td style={{ textAlign: 'right' }}>
@@ -66,10 +75,6 @@ function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
         </form>
       </td>
     )
-  }
-
-  if (!editable || disabled) {
-    return <td className="num">{cell ? fmtCurrencyTrim(cell.value) : '—'}</td>
   }
 
   return (
@@ -196,9 +201,14 @@ export default function History({ portfolios = [] }) {
   const [selected, setSelected]         = useState('ALL')
   const [editMode, setEditMode]         = useState(false)
 
+  const [error, setError] = useState('')
+
   const load = () => {
-    getValueSnapshots().then(setSnapshots).catch(console.error)
-    getCashflowMonthly().then(setCashflow).catch(console.error)
+    setError('')
+    // Without an error state a failed fetch left `snapshots` null forever and
+    // the card showed "Loading…" indefinitely, with the only clue in devtools.
+    getValueSnapshots().then(setSnapshots).catch(e => setError(e.message || 'Could not load value history'))
+    getCashflowMonthly().then(setCashflow).catch(e => setError(e.message || 'Could not load cash flow'))
   }
 
   useEffect(() => { load() }, [])
@@ -287,11 +297,19 @@ export default function History({ portfolios = [] }) {
             )}
           </div>
         </div>
-        {snapshots === null && (
+        {error && (
+          <div style={{ padding: '16px 20px' }}>
+            <p className="text-destructive text-sm">{error}</p>
+            <button type="button" className="tc-btn sm ghost mt2" onClick={load}>Try again</button>
+          </div>
+        )}
+        {!error && snapshots === null && (
           <p className="muted-txt text-sm" style={{ padding: '16px 20px' }}>Loading…</p>
         )}
-        {snapshots !== null && (
-          <ValueMatrix pivot={pivot} netCashFlowByYear={netCashFlowByYear} editable={selected !== 'ALL' && editMode} onSave={handleSave} />
+        {!error && snapshots !== null && (
+          // Keyed on the selected portfolio so switching remounts the matrix and
+          // discards any half-finished cell edit rather than carrying it over.
+          <ValueMatrix key={selected} pivot={pivot} netCashFlowByYear={netCashFlowByYear} editable={selected !== 'ALL' && editMode} onSave={handleSave} />
         )}
       </div>
 

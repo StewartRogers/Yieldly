@@ -14,8 +14,14 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
   useEffect(() => {
     if (!portfolioId || !ticker) return
     setTxns(null); setSummary(null); setError(null)
+    // Opening one ticker, closing, then opening another leaves two requests in
+    // flight. Without this flag the first could resolve last and render its
+    // rows and ACB under the second ticker's title — and the ACB strip is the
+    // whole point of this dialog.
+    let cancelled = false
     getTickerTransactions(portfolioId, ticker)
       .then(data => {
+        if (cancelled) return
         setTxns(data)
         let shares = 0, cost = 0, commission = 0
         data.forEach(t => {
@@ -27,7 +33,8 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
         setSummary({ shares, cost, commission,
           acb: shares > 0 ? (cost + commission) / shares : 0 })
       })
-      .catch(e => setError(e.message))
+      .catch(e => { if (!cancelled) setError(e.message) })
+    return () => { cancelled = true }
   }, [portfolioId, ticker])
 
   return (
