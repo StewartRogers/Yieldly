@@ -15,9 +15,9 @@
  */
 
 const Database = require('better-sqlite3');
-const { computeHoldings } = require('./lib/compute');
+const { computeHoldings, applyRunningACB } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
-const { HOLDINGS_SQL, GROUP_ORDER } = require('./lib/holdings');
+const { HOLDINGS_SQL, GROUP_ORDER, ACB_TX_SQL, ACB_TX_ORDER } = require('./lib/holdings');
 const { guessNextDividendDate, shouldAcceptTmxDate, estimateNextDividendDate, isStaleNextDividendDate } = require('./lib/dividends');
 const { computeMonthlyACB: _computeMonthlyACB } = require('./app');
 
@@ -121,7 +121,13 @@ function setInfo(pid, ticker, fields) {
 
 const holdingsAllStmt  = db.prepare(`${HOLDINGS_SQL} ${GROUP_ORDER}`);
 const holdingsByPidStmt = db.prepare(`${HOLDINGS_SQL} WHERE t.portfolio_id = ? ${GROUP_ORDER}`);
-function queryHoldings(pid) { return pid ? holdingsByPidStmt.all(pid) : holdingsAllStmt.all(); }
+// Ordered transaction feed for the running-average ACB pass (see test.js).
+const acbAllStmt  = db.prepare(`${ACB_TX_SQL} ${ACB_TX_ORDER}`);
+const acbByPidStmt = db.prepare(`${ACB_TX_SQL} AND t.portfolio_id = ? ${ACB_TX_ORDER}`);
+function queryHoldings(pid) {
+  const rows = pid ? holdingsByPidStmt.all(pid) : holdingsAllStmt.all();
+  return applyRunningACB(rows, pid ? acbByPidStmt.all(pid) : acbAllStmt.all());
+}
 function getHoldings(pid) {
   return computeHoldings(queryHoldings(pid));
 }
@@ -764,6 +770,112 @@ section('C5. computeMonthlyACB — DRIP increases ACB');
   const marEntry = acb.find(r => r.year === 2024 && r.month === 3);
   check('Jan ACB = $5000',             janEntry?.total_acb, 5000);
   check('Mar ACB = $5100 (DRIP adds)', marEntry?.total_acb, 5100);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PART C2 — ACB respects transaction ORDER (regression)
+//
+//  ACB used to be prorated with all-time totals:
+//      (buyTotal + buyExpense) * (shares / sharesBought)
+//  which only equals average cost when every BUY precedes every SELL. Once a
+//  BUY lands after a SELL, that retroactively re-averaged the sold lot's cost
+//  back into the shares still held, understating the tax basis. Every fixture
+//  above happens to buy-then-sell, which is why the bug survived — these cover
+//  the interleaved orderings that expose it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+section('C2a. Holdings ACB — buy → sell → buy re-averages at sale time');
+{
+  const pid = mkPortfolio('ORD1');
+  buy (pid, 'XEI.TO', 100, 10.00, 0, '2024-01-15');  // acb 1000, 100 sh
+  sell(pid, 'XEI.TO',  50, 12.00, 0, '2024-02-15');  // retires half → acb 500, 50 sh
+  buy (pid, 'XEI.TO',  50, 20.00, 0, '2024-03-15');  // acb 1500, 100 sh
+  setInfo(pid, 'XEI.TO', { market_price: 20.00 });
+  const [h] = getHoldings(pid);
+  // Old (order-blind) result was acb $1333.33 / buy_price $13.33 / 45.0%.
+  check('shares = 100',              h.shares,         100);
+  check('acb = $1500',               h.acb,            1500);
+  check('buy_price = $15',           h.buy_price,      15.00);
+  check('return = $600',             h.return,         600);
+  check('return_percent = 40%',      h.return_percent, 40.0, 0.01);
+}
+
+section('C2b. Holdings ACB — full round trip does not dilute the new position');
+{
+  const pid = mkPortfolio('ORD2');
+  buy (pid, 'RY.TO', 100, 10.00, 0, '2024-01-15');
+  sell(pid, 'RY.TO', 100, 11.00, 0, '2024-02-15');   // position fully closed → acb 0
+  buy (pid, 'RY.TO', 100, 50.00, 0, '2024-03-15');   // fresh basis, untouched by the old lot
+  setInfo(pid, 'RY.TO', { market_price: 50.00 });
+  const [h] = getHoldings(pid);
+  // Old result was acb $3000 — a 40% understatement of a still-held position.
+  check('shares = 100',    h.shares,    100);
+  check('acb = $5000',     h.acb,       5000);
+  check('buy_price = $50', h.buy_price, 50.00);
+}
+
+section('C2c. Holdings ACB — commission rides the running average, buy_price does not');
+{
+  const pid = mkPortfolio('ORD3');
+  buy (pid, 'SU.TO', 100, 10.00, 10.00, '2024-01-15'); // acb 1010, cost 1000
+  sell(pid, 'SU.TO',  50, 12.00,  0.00, '2024-02-15'); // halved → acb 505, cost 500
+  buy (pid, 'SU.TO',  50, 20.00, 10.00, '2024-03-15'); // acb 1515, cost 1500
+  setInfo(pid, 'SU.TO', { market_price: 20.00 });
+  const [h] = getHoldings(pid);
+  check('acb = $1515 (commission included)',   h.acb,       1515);
+  check('buy_price = $15 (commission excl.)',  h.buy_price, 15.00);
+}
+
+section('C2d. Holdings ACB — buys-before-sells still matches the old proration');
+{
+  // Guards the equivalence case: where the old formula was correct, the running
+  // average must agree, so this change is not a silent re-pricing of normal data.
+  const pid = mkPortfolio('ORD4');
+  buy (pid, 'BNS.TO', 100, 10.00, 0, '2024-01-15');
+  buy (pid, 'BNS.TO', 100, 20.00, 0, '2024-02-15');   // acb 3000, 200 sh
+  sell(pid, 'BNS.TO',  50, 15.00, 0, '2024-03-15');   // keep 150/200 → 2250
+  setInfo(pid, 'BNS.TO', { market_price: 15.00 });
+  const [h] = getHoldings(pid);
+  check('shares = 150',    h.shares,    150);
+  check('acb = $2250',     h.acb,       2250);
+  check('buy_price = $15', h.buy_price, 15.00);
+}
+
+section('C2e. computeMonthlyACB — buy → sell → buy');
+{
+  const txRows = [
+    { portfolio_id: 994, ticker: 'XEI.TO', type: 'BUY',  quantity: 100, total: 1000, commission: 0, date: '2024-01-15' },
+    { portfolio_id: 994, ticker: 'XEI.TO', type: 'SELL', quantity:  50, total:  600, commission: 0, date: '2024-02-15' },
+    { portfolio_id: 994, ticker: 'XEI.TO', type: 'BUY',  quantity:  50, total: 1000, commission: 0, date: '2024-03-15' },
+  ];
+  const acb = computeMonthlyACB(txRows);
+  check('Jan = $1000',                acb.find(r => r.month === 1)?.total_acb, 1000);
+  check('Feb = $500 (half retired)',  acb.find(r => r.month === 2)?.total_acb, 500);
+  check('Mar = $1500 (was $1333.33)', acb.find(r => r.month === 3)?.total_acb, 1500);
+}
+
+section('C2f. computeMonthlyACB — round trip resets the basis');
+{
+  const txRows = [
+    { portfolio_id: 993, ticker: 'RY.TO', type: 'BUY',  quantity: 100, total: 1000, commission: 0, date: '2024-01-15' },
+    { portfolio_id: 993, ticker: 'RY.TO', type: 'SELL', quantity: 100, total: 1100, commission: 0, date: '2024-02-15' },
+    { portfolio_id: 993, ticker: 'RY.TO', type: 'BUY',  quantity: 100, total: 5000, commission: 0, date: '2024-03-15' },
+  ];
+  const acb = computeMonthlyACB(txRows);
+  check('Feb = $0 (closed out)',    acb.find(r => r.month === 2)?.total_acb, 0);
+  check('Mar = $5000 (was $3000)',  acb.find(r => r.month === 3)?.total_acb, 5000);
+}
+
+section('C2g. computeMonthlyACB — over-sell clamps at zero, never negative');
+{
+  // Reachable via CSV import, which bypasses the POST /api/transactions
+  // share-count guard.
+  const txRows = [
+    { portfolio_id: 992, ticker: 'ENB.TO', type: 'BUY',  quantity: 100, total: 1000, commission: 0, date: '2024-01-15' },
+    { portfolio_id: 992, ticker: 'ENB.TO', type: 'SELL', quantity: 150, total: 1800, commission: 0, date: '2024-02-15' },
+  ];
+  const acb = computeMonthlyACB(txRows);
+  check('Feb = $0, not negative', acb.find(r => r.month === 2)?.total_acb, 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

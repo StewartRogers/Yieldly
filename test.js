@@ -10,8 +10,8 @@
  */
 
 const Database = require('better-sqlite3');
-const { computeHoldings } = require('./lib/compute');
-const { HOLDINGS_SQL, GROUP_ORDER } = require('./lib/holdings');
+const { computeHoldings, computeRunningACB, applyRunningACB } = require('./lib/compute');
+const { HOLDINGS_SQL, GROUP_ORDER, ACB_TX_SQL, ACB_TX_ORDER } = require('./lib/holdings');
 
 // ─── In-memory database ──────────────────────────────────────────────────────
 // These suites validate the money math, which is driver-agnostic, so they run
@@ -108,9 +108,15 @@ function setInfo(pid, ticker, fields) {
 
 const holdingsAllStmt = db.prepare(`${HOLDINGS_SQL} ${GROUP_ORDER}`);
 const holdingsByPortfolioStmt = db.prepare(`${HOLDINGS_SQL} WHERE t.portfolio_id = ? ${GROUP_ORDER}`);
+// Ordered transaction feed for the running-average ACB pass, merged through the
+// same applyRunningACB the server uses so the two can't drift.
+const acbAllStmt = db.prepare(`${ACB_TX_SQL} ${ACB_TX_ORDER}`);
+const acbByPortfolioStmt = db.prepare(`${ACB_TX_SQL} AND t.portfolio_id = ? ${ACB_TX_ORDER}`);
 
 function query(portfolioId) {
-  return portfolioId ? holdingsByPortfolioStmt.all(portfolioId) : holdingsAllStmt.all();
+  const rows = portfolioId ? holdingsByPortfolioStmt.all(portfolioId) : holdingsAllStmt.all();
+  const txRows = portfolioId ? acbByPortfolioStmt.all(portfolioId) : acbAllStmt.all();
+  return applyRunningACB(rows, txRows);
 }
 
 function getHoldings(portfolioId) {
@@ -826,6 +832,48 @@ section('37. Defensive Defaults for Sparse Rows');
   checkEq('portfolio_code default ""',        h.portfolio_code,  '');
   checkEq('portfolio_name default ""',        h.portfolio_name,  '');
   checkEq('buy_count default 0',              h.buy_count,        0);
+}
+
+// ── 38. Running ACB — defensive branches only reachable off the query() path ──
+section('38. Running ACB — Defensive Branches & Direct Fallback');
+{
+  // Every real call path (queryHoldings → applyRunningACB) always supplies a
+  // real array, so these fallbacks only fire for direct/malformed callers —
+  // exercised here since computeRunningACB/applyRunningACB are exported
+  // (used directly, not just through the query() wrapper above).
+  checkEq('computeRunningACB(undefined) → empty state', computeRunningACB(undefined).size, 0);
+  checkEq('computeRunningACB([]) → empty state',         computeRunningACB([]).size,        0);
+
+  // A BUY row missing `quantity` must not throw — shares stay 0, dollars still accumulate.
+  const noQtyState = computeRunningACB([{ portfolio_id: 1, ticker: 'NOQTY', type: 'BUY', total: 500 }]);
+  const noQty = noQtyState.get('1:NOQTY');
+  check('missing quantity → shares stays 0',           noQty.shares, 0);
+  check('missing quantity → acb still accumulates',    noQty.acb,  500);
+
+  // A holdings row with no matching transaction-feed entry is left untouched,
+  // falling through to computeHoldings' own order-blind fallback below.
+  const [orphan] = applyRunningACB([{ portfolio_id: 9, ticker: 'ORPHAN' }], []);
+  checkEq('no matching tx state → row.acb left unset', orphan.acb, undefined);
+
+  // A fully round-tripped position (running shares net back to 0) still reports
+  // acb_per_share = 0, not a division by zero.
+  const [closed] = applyRunningACB(
+    [{ portfolio_id: 2, ticker: 'CLOSED' }],
+    [
+      { portfolio_id: 2, ticker: 'CLOSED', type: 'BUY',  quantity: 100, total: 1000 },
+      { portfolio_id: 2, ticker: 'CLOSED', type: 'SELL', quantity: 100, total: 1200 },
+    ]
+  );
+  check('fully closed position → acb = 0',           closed.acb,           0);
+  check('fully closed position → acb_per_share = 0', closed.acb_per_share, 0);
+
+  // computeHoldings falls back to the old order-blind proration when a row has
+  // no `.acb` attached — its pure-function contract when used without applyRunningACB.
+  const [h] = computeHoldings([{
+    shares: 50, shares_bought: 100, buy_total: 1000, buy_expense: 10, market_price: 20,
+  }]);
+  check('fallback acb = $505 (order-blind proration)', h.acb,      505);
+  check('fallback buy_price = $10 (excl. commission)', h.buy_price, 10);
 }
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

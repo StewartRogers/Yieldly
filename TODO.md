@@ -10,40 +10,6 @@ and some have shifted. Symbol names are reliable.
 
 ---
 
-## P0 — Money math
-
-### ACB proration ignores transaction order
-
-`lib/compute.js:23` (`acb`) and `computeMonthlyACB` in `app.js`
-
-`(buyTotal + buyExpense) * (shares / sharesBought)` uses **all-time**
-`sharesBought`/`buyTotal`. That equals average-cost ACB only when every buy
-precedes every sell. After a buy→sell→buy sequence, the sold lot's cost is
-retroactively re-averaged back into the remaining shares.
-
-Verified — Jan: BUY 100 @ $10; Feb: SELL 50 @ $12; Mar: BUY 50 @ $20:
-
-| | reported | correct (CRA average cost) |
-|---|---|---|
-| `acb` | $1,333.33 | $1,500.00 |
-| `buy_price` | $13.33 | $15.00 |
-| `return_percent` (mkt $20) | 45.0% | 40.0% |
-
-Worse on a full round-trip — BUY 100 @ $10, SELL all 100, BUY 100 @ $50
-reports ACB **$3,000** vs correct **$5,000**: a 40% understatement of the tax
-basis on a position still held.
-
-**Fix:** maintain a running average — on BUY `acb += total + commission;
-sh += qty`; on SELL `acb -= acb * (qty / sh); sh -= qty`. `computeMonthlyACB`
-already receives rows in date order (`ORDER BY date ASC, id ASC`) and can do
-this today. `computeHoldings` needs `HOLDINGS_SQL` to stop pre-aggregating
-away the ordering, or a separate ordered lot pass.
-
-**This changes displayed ACB and return % for affected holdings, and test
-fixtures will need updating.** Give it its own session.
-
----
-
 ## P1 — Security / operational
 
 - [ ] **Ask GitHub Support to expire cached views** of the objects purged in

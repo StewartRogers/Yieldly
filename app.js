@@ -1652,17 +1652,17 @@ function computeMonthlyACB(allTxRows, now = new Date()) {
 
   function getState(portfolioId, ticker) {
     const key = `${portfolioId}:${ticker}`;
-    if (!state.has(key)) state.set(key, { sharesBought: 0, buyTotal: 0, buyExpense: 0, sharesSold: 0 });
+    if (!state.has(key)) state.set(key, { acb: 0, shares: 0 });
     return state.get(key);
   }
 
   function totalACB() {
     let sum = 0;
     for (const s of state.values()) {
-      const shares = s.sharesBought - s.sharesSold;
-      if (shares > 0 && s.sharesBought > 0) {
-        sum += (s.buyTotal + s.buyExpense) * (shares / s.sharesBought);
-      }
+      // SHARE_EPSILON, not > 0: fractional DRIP shares leave IEEE-754 residue
+      // on a fully-closed position, which would otherwise keep contributing a
+      // near-zero ACB forever.
+      if (s.shares > SHARE_EPSILON) sum += s.acb;
     }
     return Math.round(sum * 100) / 100;
   }
@@ -1686,12 +1686,16 @@ function computeMonthlyACB(allTxRows, now = new Date()) {
     for (const tx of (byMonth.get(key) || [])) {
       if (tx.ticker === 'CASH') continue;
       const s = getState(tx.portfolio_id, tx.ticker);
+      // Running average, matching computeRunningACB in lib/compute.js: a SELL
+      // retires its share of the basis at the average cost *as of that sale*,
+      // rather than re-averaging it across later buys.
       if (tx.type === 'BUY' || tx.type === 'DIVIDEND_REINVEST') {
-        s.sharesBought += tx.quantity || 0;
-        s.buyTotal     += tx.total    || 0;
-        s.buyExpense   += tx.commission || 0;
-      } else if (tx.type === 'SELL') {
-        s.sharesSold += tx.quantity || 0;
+        s.acb    += (tx.total || 0) + (tx.commission || 0);
+        s.shares += tx.quantity || 0;
+      } else if (tx.type === 'SELL' && s.shares > 0) {
+        const sold = Math.min(tx.quantity || 0, s.shares);
+        s.acb    *= 1 - sold / s.shares;
+        s.shares -= sold;
       }
     }
     results.push({ year: y, month: m, total_acb: totalACB() });
