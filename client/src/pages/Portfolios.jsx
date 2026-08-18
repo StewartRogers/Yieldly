@@ -233,6 +233,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
         </div>
         <div className="row">
           <Input
+            aria-label="New portfolio name"
             placeholder="New name…"
             value={newName}
             onChange={e => setNewName(e.target.value)}
@@ -241,6 +242,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
             onKeyDown={e => e.key === 'Enter' && handleCreatePortfolio()}
           />
           <Input
+            aria-label="New portfolio code"
             placeholder="Code"
             value={newCode}
             onChange={e => setNewCode(e.target.value)}
@@ -302,6 +304,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
             {editing ? (
               <>
                 <Input
+                  aria-label="Portfolio name"
                   value={editName}
                   onChange={e => setEditName(e.target.value)}
                   placeholder="Portfolio name"
@@ -311,6 +314,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                   autoFocus
                 />
                 <Input
+                  aria-label="Portfolio code"
                   value={editCode}
                   onChange={e => setEditCode(e.target.value.toUpperCase())}
                   placeholder="Code"

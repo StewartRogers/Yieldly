@@ -10,9 +10,20 @@
   }
 }
 
-/* No spinner arrows on number inputs — this app never needs click-to-increment. */
+/* iOS Safari inflates text in landscape unless this is pinned. Without it,
+   rotating a phone silently rescales every font-size and breaks the
+   carefully-sized dense table layouts. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* No spinner arrows on number inputs — this app never needs click-to-increment.
+   Firefox honours -moz-appearance; the unprefixed `appearance` is what
+   current Firefox and the spec use, so both are set. */
 input[type="number"] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
@@ -73,6 +84,13 @@ input[type="number"]::-webkit-inner-spin-button {
   --maxw: 1280px;
   --nav-h: 60px;
 
+  /* Horizontal padding of .app-page. The Home hero bleeds to the viewport
+     edge by cancelling this out with a negative margin, so the two must
+     always agree — hard-coding "-24px" against a 16px padding is what used
+     to push every phone/tablet layout 16px wider than the screen. Anything
+     that bleeds must use calc(var(--page-pad) * -1), never a literal. */
+  --page-pad: 24px;
+
   /* ── Legacy vars → Terminal Calm ── */
   --bg-page:             var(--bg);
   --bg-surface:          var(--panel);
@@ -104,6 +122,9 @@ body {
 /* ===== TOP NAVIGATION ===== */
 .app-nav {
   background: rgba(13, 16, 20, 0.85);
+  /* Safari still only implements the prefixed property; without this the nav
+     is flatly translucent there instead of frosted. */
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   position: sticky;
@@ -221,313 +242,16 @@ body {
   outline-offset: 2px;
 }
 
-/* Avatar — gradient circle, no text */
-.app-nav-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, var(--avatar-stop-lt), var(--avatar-stop-dk));
-  border: 1px solid var(--line-2);
-  flex-shrink: 0;
-  cursor: default;
-}
-
 /* ===== CONTAINER ===== */
 .app-page {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: 28px 24px 80px;
-}
-
-/* ===== PAGE NAVIGATION ===== */
-.page-content {
-  display: none;
-}
-
-.page-content.active {
-  display: block;
-}
-
-/* ===== HOME PAGE ===== */
-.home-hero {
-  text-align: center;
-  padding: 48px 0;
-}
-
-.home-hero h1 {
-  font-size: 2.5rem;
-  color: var(--text-primary);
-  margin-bottom: 16px;
-  font-weight: 600;
-}
-
-.hero-subtitle {
-  font-size: 1.125rem;
-  color: var(--text-secondary);
-  margin-bottom: 32px;
-}
-
-.coming-soon-container {
-  max-width: 720px;
-  margin: 0 auto;
-}
-
-.chat-preview {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-  border: 1px solid var(--border-color);
-  padding: 32px;
-  position: relative;
-  overflow: hidden;
-}
-
-.chat-watermark {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) rotate(-30deg);
-  font-size: 4rem;
-  font-weight: 700;
-  color: rgba(37, 99, 235, 0.04);
-  pointer-events: none;
-  z-index: 1;
-  white-space: nowrap;
-}
-
-.chat-placeholder {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.chat-message {
-  padding: 12px 16px;
-  border-radius: var(--radius-lg);
-  max-width: 80%;
-  animation: fadeIn 0.5s ease;
-}
-
-.chat-message.assistant {
-  background: var(--color-primary);
-  color: white;
-  align-self: flex-start;
-}
-
-.chat-message.user {
-  background: var(--bg-muted);
-  color: var(--text-primary);
-  align-self: flex-end;
-  border: 1px solid var(--border-color);
-}
-
-.chat-message p {
-  margin: 0;
-  font-size: 0.9rem;
+  padding: 28px var(--page-pad) 80px;
 }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-.subtitle {
-  color: var(--text-secondary);
-  font-size: 1.1rem;
-}
-
-/* ===== PAGE HEADER ===== */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.page-header-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.btn-link {
-  background: none;
-  color: var(--text-secondary);
-  border: none;
-  padding: 8px 12px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  border-radius: var(--radius-sm);
-}
-
-.btn-link:hover {
-  color: var(--color-primary);
-  background: var(--bg-muted);
-}
-
-.btn-link:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-/* ===== PORTFOLIO TABS ===== */
-.portfolio-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--border-color);
-  overflow-x: auto;
-}
-
-.portfolio-tab {
-  padding: 8px 16px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  color: var(--text-secondary);
-  font-weight: 500;
-  font-size: 0.9rem;
-  cursor: grab;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  white-space: nowrap;
-  user-select: none;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-}
-
-.portfolio-tab:active {
-  cursor: grabbing;
-}
-
-.portfolio-tab:hover {
-  color: var(--text-primary);
-  background: var(--bg-muted);
-}
-
-.portfolio-tab:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.portfolio-tab.active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
-}
-
-.portfolio-tab.dragging {
-  opacity: 0.5;
-}
-
-.portfolio-tab.drag-over {
-  border-left: 2px solid var(--color-primary);
-}
-
-/* ===== PORTFOLIO SELECTOR / TRANSACTION CONTROLS ===== */
-.portfolio-selector,
-.transaction-controls,
-.import-controls {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
-  margin-bottom: 24px;
-}
-
-.selector-header {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 16px;
-  align-items: end;
-  margin-bottom: 16px;
-}
-
-.new-portfolio-form {
-  background: var(--bg-muted);
-  padding: 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  margin-top: 16px;
-}
-
-/* ===== BUTTONS ===== */
-.btn-secondary {
-  background: var(--bg-muted);
-  color: var(--text-primary);
-  padding: 0 16px;
-  height: 40px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.btn-secondary:hover {
-  background: #dde1e7;
-}
-
-.btn-secondary:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-/* ===== CSV IMPORT SECTION ===== */
-.import-section {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
-}
-
-.import-section h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: var(--text-primary);
-}
-
-.help-text {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  margin-bottom: 16px;
-}
-
-/* ===== FILE UPLOAD ===== */
-.file-upload {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.file-name {
-  color: var(--text-primary);
-  font-size: 0.875rem;
-}
-
-.file-name:empty:before {
-  content: "No file selected";
-  color: var(--text-secondary);
-}
-
-/* ===== PAGINATION ===== */
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
 }
 
 #page-info {
@@ -536,42 +260,11 @@ body {
   font-size: 0.9rem;
 }
 
-.import-status {
-  margin-top: 16px;
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  display: none;
-}
-
-.import-status.success {
-  background: #dcfce7;
-  color: #14532d;
-  border: 1px solid #bbf7d0;
-  display: block;
-}
-
-.import-status.error {
-  background: #fee2e2;
-  color: #7f1d1d;
-  border: 1px solid #fecaca;
-  display: block;
-}
-
 /* ===== SEMANTIC STATUS PANELS ===== */
 /* Use with: rounded-lg border px-4 py-3 text-sm (layout in Tailwind, colors here) */
 .status-success { border-color: #bbf7d0; background: #dcfce7; color: #14532d; }
 .status-error   { border-color: #fecaca; background: #fee2e2; color: #7f1d1d; }
 .status-warning { border-color: #fde68a; background: #fef9c3; color: #854d0e; }
-
-/* ===== PORTFOLIO TABS MODIFIER ===== */
-.portfolio-tabs.borderless { margin-bottom: 0; border: none; }
-
-/* ===== SECTION / CARD ===== */
-.main-content {
-  display: grid;
-  gap: 24px;
-}
 
 section {
   background: var(--bg-surface);
@@ -592,354 +285,6 @@ h2 {
   margin-bottom: 16px;
 }
 
-/* ===== VIEW TOGGLE ===== */
-.view-toggle {
-  display: flex;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.view-btn {
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  border: none;
-  padding: 8px 12px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.view-btn:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: -2px;
-}
-
-.view-btn.active {
-  background: var(--color-primary);
-  color: white;
-}
-
-/* ===== HOLDINGS LIST TABLE ===== */
-.portfolio-list-wrap {
-  overflow-x: auto;
-}
-
-.holdings-list-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  font-variant-numeric: tabular-nums;
-}
-
-.holdings-list-table th,
-.holdings-list-table td {
-  padding: 8px 12px;
-  text-align: right;
-  border-bottom: 1px solid var(--border-color);
-  white-space: nowrap;
-}
-
-.holdings-list-table th:first-child,
-.holdings-list-table td:first-child {
-  text-align: left;
-}
-
-.holdings-list-table th {
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.holdings-list-table thead th {
-  position: sticky;
-  top: 0;
-  background: var(--bg-muted);
-  z-index: 2;
-}
-
-.holdings-list-table tbody tr:hover {
-  background: var(--bg-muted);
-}
-
-.holdings-list-table .ticker-cell {
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
-/* ===== PORTFOLIO GRID (CARD VIEW) ===== */
-.portfolio-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
-}
-
-.portfolio-card {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  padding: 16px;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
-}
-
-.portfolio-card .portfolio-card-header {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.portfolio-card .ticker-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.portfolio-card .ticker {
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
-.portfolio-card .shares {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  font-weight: 500;
-  margin-left: 8px;
-}
-
-.portfolio-card .holding-details,
-.portfolio-card .dividend-info {
-  margin-top: 12px;
-}
-
-.portfolio-card .dividend-info {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.portfolio-card .detail-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 0;
-  font-size: 0.875rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.portfolio-card .detail-row .label {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.portfolio-card .detail-row .value {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.portfolio-card .detail-row .value.placeholder {
-  color: var(--text-secondary);
-  font-style: italic;
-  font-weight: 400;
-}
-
-.portfolio-card .detail-row .value.positive {
-  color: var(--color-success);
-}
-
-.portfolio-card .detail-row .value.negative {
-  color: var(--color-error);
-}
-
-.portfolio-card .detail-row.highlight {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-color);
-  font-size: 0.9rem;
-}
-
-.portfolio-card .detail-row.highlight .label,
-.portfolio-card .detail-row.highlight .value {
-  font-weight: 700;
-}
-
-/* ===== FORM STYLES ===== */
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 500;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-}
-
-.form-group input,
-.form-group select {
-  width: 100%;
-  padding: 0 12px;
-  height: 40px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  font-family: inherit;
-  color: var(--text-primary);
-  background: var(--bg-surface);
-  transition: border-color 0.15s;
-}
-
-.form-group input:hover,
-.form-group select:hover {
-  border-color: rgba(15, 23, 42, 0.2);
-}
-
-.form-group input:focus,
-.form-group select:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 0;
-  border-color: var(--color-primary);
-}
-
-.btn-primary {
-  background: var(--color-primary);
-  color: white;
-  padding: 0 24px;
-  height: 40px;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-  width: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-primary:hover {
-  background: var(--color-primary-hover);
-}
-
-.btn-primary:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.btn-primary:active {
-  background: var(--color-primary-active);
-}
-
-/* ===== TRANSACTION LIST ===== */
-.transactions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.transaction-item {
-  display: grid;
-  grid-template-columns: 80px 1fr 100px 120px 120px 100px 60px;
-  align-items: center;
-  padding: 12px 16px;
-  background: var(--bg-muted);
-  border-radius: var(--radius-sm);
-  border-left: 3px solid transparent;
-  font-variant-numeric: tabular-nums;
-}
-
-.transaction-item.buy {
-  border-left-color: var(--color-success);
-}
-
-.transaction-item.sell {
-  border-left-color: var(--color-error);
-}
-
-.transaction-item .ticker {
-  font-weight: 700;
-  font-size: 1rem;
-  color: var(--text-primary);
-}
-
-.transaction-item .type {
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-align: center;
-  width: fit-content;
-}
-
-.transaction-item .type.buy {
-  background: #dcfce7;
-  color: #14532d;
-}
-
-.transaction-item .type.sell {
-  background: #fee2e2;
-  color: #7f1d1d;
-}
-
-.transaction-item .type.dividend {
-  background: #fef9c3;
-  color: #713f12;
-}
-
-.transaction-item .type.dividend-reinvest {
-  background: #dcfce7;
-  color: #14532d;
-}
-
-.transaction-item.dividend {
-  border-left-color: var(--color-warning);
-}
-
-.transaction-item.dividend-reinvest {
-  border-left-color: var(--color-success);
-}
-
-.btn-delete {
-  background: var(--color-error);
-  color: white;
-  border: none;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 500;
-  transition: opacity 0.15s;
-  height: 32px;
-}
-
-.btn-delete:hover {
-  opacity: 0.8;
-}
-
-.btn-delete:focus {
-  outline: 2px solid var(--color-error);
-  outline-offset: 2px;
-}
-
-.empty-state {
-  color: var(--text-secondary);
-  text-align: center;
-  padding: 32px;
-  font-style: italic;
-}
-
 /* ===== LOADING SPINNER ===== */
 .spinner {
   display: inline-block;
@@ -957,200 +302,12 @@ h2 {
   to { transform: rotate(360deg); }
 }
 
-.btn-primary:disabled,
-.btn-secondary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ===== MODAL STYLES ===== */
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  width: 90%;
-  max-width: 560px;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: var(--shadow-md);
-  border: 1px solid var(--border-color);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.modal-header h2 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 1.1rem;
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  line-height: 1;
-  padding: 4px;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s, color 0.15s;
-}
-
-.modal-close:hover {
-  background: var(--bg-muted);
-  color: var(--text-primary);
-}
-
-.modal-close:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
 #stock-info-form {
   padding: 24px;
 }
 
-.form-section {
-  margin-bottom: 24px;
-}
-
-.form-section h3 {
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.form-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
-}
-
-.form-actions button {
-  flex: 1;
-}
-
-/* ===== EDIT BUTTON ON PORTFOLIO CARDS ===== */
-.portfolio-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.btn-edit {
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 500;
-  height: 32px;
-  transition: background 0.15s;
-  display: inline-flex;
-  align-items: center;
-}
-
-.btn-edit:hover {
-  background: var(--color-primary-hover);
-}
-
-.btn-edit:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.btn-sm {
-  padding: 0 8px;
-  font-size: 0.8rem;
-  height: 28px;
-}
-
-.ticker-link {
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
-}
-
-.ticker-link:hover {
-  opacity: 0.75;
-}
-
-.modal-wide {
-  max-width: 840px;
-}
-
-.holding-tx-table-wrap {
-  padding: 0 24px 24px;
-  overflow-x: auto;
-}
-
-.holding-tx-summary {
-  padding: 12px 24px;
-  background: var(--bg-muted);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.tx-summary-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-
-  .transaction-item {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-
-  .portfolio-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .app-page {
-    padding: 16px;
-  }
 
   .app-nav-inner {
     padding: 0 12px;
@@ -1158,868 +315,37 @@ h2 {
     gap: 4px;
   }
 
-  /* Nav links scroll horizontally; right-side actions stay visible */
+  /* Seven nav links do not fit a phone, so the strip scrolls horizontally.
+     The mask fades the trailing edge so it reads as "more this way" rather
+     than as a clipped list; Safari still needs the -webkit- prefix. */
   .app-nav-links {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
     scrollbar-width: none;
     flex-shrink: 1;
     min-width: 0;
+    scroll-snap-type: x proximity;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
   }
   .app-nav-links::-webkit-scrollbar { display: none; }
+  .app-nav-link { scroll-snap-align: start; white-space: nowrap; }
 
   /* Hide wordmark text on very narrow screens, keep brand mark */
   .app-nav-brand { display: none; }
   .app-nav-wordmark { margin-right: 8px; }
 
-  .app-page { padding: 16px 16px 64px; }
-}
-
-/* ===== SUMMARY PAGE ===== */
-
-/* Eyebrow label above section headings */
-.summary-eyebrow {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-/* Large display heading (Portfolio Overview card) */
-.summary-display-heading {
-  font-size: 1.75rem;
-  font-weight: 700;
-  line-height: 1.15;
-  color: var(--text-primary);
-}
-
-/* Smaller section heading (ACB card) */
-.summary-section-heading {
-  font-size: 1.25rem;
-  font-weight: 600;
-  line-height: 1.2;
-  color: var(--text-primary);
-}
-
-/* Shared table header cell */
-.summary-th {
-  padding: 10px 20px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
-  background: var(--bg-muted);
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border-color);
-}
-
-/* Shared table body cell */
-.summary-td {
-  padding: 11px 20px;
-  font-size: 0.9rem;
-  border-bottom: 1px solid var(--border-color);
-  vertical-align: middle;
-  color: var(--text-primary);
-}
-
-/* Portfolio Overview table */
-.summary-overview-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.summary-overview-table .summary-row:last-child .summary-td {
-  border-bottom: none;
-}
-
-.summary-overview-table .summary-row:hover .summary-td {
-  background: var(--bg-muted);
-}
-
-/* Portfolio name cell */
-.summary-portfolio-name {
-  font-weight: 600;
-  min-width: 140px;
-}
-
-/* Grand total row */
-.summary-total-row .summary-td {
-  font-weight: 700;
-  background: var(--bg-muted);
-  border-top: 2px solid var(--border-color);
-  border-bottom: none;
-}
-
-.summary-total-label {
-  color: var(--text-primary);
-}
-
-/* ACB table */
-.summary-acb-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.summary-acb-table .summary-row:last-child .summary-td {
-  border-bottom: none;
-}
-
-.summary-acb-table .summary-row:hover .summary-td {
-  background: var(--bg-muted);
-}
-
-.acb-label-col {
-  min-width: 76px;
-}
-
-/* ===== SUMMARY TABLE (legacy) ===== */
-.summary-table-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  margin-top: 16px;
-}
-
-.summary-table {
-  width: max-content;
-  min-width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  font-variant-numeric: tabular-nums;
-}
-
-.summary-table thead th {
-  background: var(--bg-muted);
-  color: var(--text-secondary);
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  padding: 8px 12px;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border-color);
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-
-.summary-table thead th:nth-child(1),
-.summary-table thead th:nth-child(2),
-.summary-table thead th:nth-child(3) {
-  left: 0;
-  z-index: 3;
-  background: var(--bg-muted);
-}
-
-.summary-table thead th:nth-child(2) { left: 70px; }
-.summary-table thead th:nth-child(3) { left: 110px; }
-
-.summary-table tbody td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  white-space: nowrap;
-  text-align: right;
-  color: var(--text-primary);
-}
-
-.summary-table tbody td:nth-child(1),
-.summary-table tbody td:nth-child(2),
-.summary-table tbody td:nth-child(3) {
-  text-align: left;
-  position: sticky;
-  background: var(--bg-surface);
-  z-index: 1;
-}
-
-.summary-table tbody td:nth-child(1) { left: 0;     min-width: 70px;  font-weight: 600; color: var(--color-primary); }
-.summary-table tbody td:nth-child(2) { left: 70px;  min-width: 40px; }
-.summary-table tbody td:nth-child(3) { left: 110px; min-width: 90px;  font-weight: 600; }
-
-.summary-table tbody tr:hover td {
-  background: var(--bg-muted) !important;
-}
-
-.summary-table .positive { color: var(--color-success); }
-.summary-table .negative { color: var(--color-error); }
-.summary-table .ticker-cell { font-family: monospace; font-size: 0.85rem; }
-
-/* ===== PORTFOLIO OVERVIEW TABLE ===== */
-.overview-section {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
-  padding: 24px;
-  margin-bottom: 24px;
-}
-
-.summary-section {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
-  padding: 24px;
-  margin-bottom: 24px;
-}
-
-.overview-table-wrap {
-  display: inline-block;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.overview-table {
-  border-collapse: collapse;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  font-variant-numeric: tabular-nums;
-}
-
-.overview-table th,
-.overview-table td {
-  padding: 8px 12px;
-  text-align: right;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.overview-table thead th {
-  background: var(--bg-muted);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.overview-table tbody th {
-  text-align: left;
-  font-weight: 600;
-  color: var(--text-primary);
-  background: var(--bg-muted);
-  border-right: 1px solid var(--border-color);
-  min-width: 130px;
-}
-
-.overview-table tbody tr:last-child th,
-.overview-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.overview-table td { color: var(--text-primary); }
-.overview-table .negative { color: var(--color-error); }
-
-.btn-set-cash {
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  height: 24px;
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-weight: 500;
-  transition: background 0.15s;
-}
-
-.btn-set-cash:hover { background: var(--color-primary-hover); }
-
-.btn-set-cash:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.btn-edit-cash {
-  font-size: 0.75rem;
-  padding: 2px 6px;
-  margin-left: 4px;
-  background: none;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text-secondary);
-  vertical-align: middle;
-  height: 22px;
-}
-
-.btn-edit-cash:hover { background: var(--bg-muted); }
-
-.btn-edit-cash:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
+  /* Narrowing the page gutter here also narrows the Home hero's bleed,
+     because both read --page-pad. */
+  :root { --page-pad: 16px; }
+  .app-page { padding: 16px var(--page-pad) 64px; }}
 
 .cash-inline-form {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-}
-
-.cash-inline-input {
-  width: 90px;
-  padding: 2px 6px;
-  font-size: 0.8rem;
-  height: 28px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-}
-
-.cash-inline-input:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 0;
-  border-color: var(--color-primary);
-}
-
-.cash-cancel-btn {
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  height: 24px;
-  background: none;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text-secondary);
-}
-
-.cash-cancel-btn:hover { background: var(--bg-muted); }
-.cash-error { color: var(--color-error); font-size: 0.7rem; width: 100%; }
-
-/* ===== DIVIDENDS PAGE ===== */
-
-/* "last 5 years" indicator top-right of header */
-.div-last5-label {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  flex-shrink: 0;
-  padding-top: 6px;
-}
-
-/* Portfolio filter pill row */
-.div-filter-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-surface);
-}
-
-.div-filter-pill {
-  padding: 4px 14px;
-  border-radius: 999px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  border: 1px solid var(--border-color);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-  line-height: 1.5;
-}
-
-.div-filter-pill:hover {
-  background: var(--bg-muted);
-  color: var(--text-primary);
-}
-
-.div-filter-pill:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.div-filter-pill--active {
-  background: var(--text-primary);
-  color: #fff;
-  border-color: var(--text-primary);
-}
-
-.div-filter-pill--active:hover {
-  background: var(--text-primary);
-  color: #fff;
-}
-
-/* KPI strip — 4 tiles in a row */
-.div-kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.div-kpi-tile {
-  padding: 16px 20px;
-  border-right: 1px solid var(--border-color);
-}
-
-.div-kpi-tile:last-child {
-  border-right: none;
-}
-
-.div-kpi-label {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.div-kpi-value {
-  font-size: 1.625rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-
-.div-kpi-sub {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  margin-top: 3px;
-}
-
-/* Dividend matrix table */
-.div-matrix-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.div-th {
-  padding: 10px 20px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
-  background: var(--bg-muted);
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.div-td {
-  padding: 10px 20px;
-  font-size: 0.9rem;
-  border-bottom: 1px solid var(--border-color);
-  vertical-align: middle;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.div-matrix-row:last-child .div-td {
-  border-bottom: none;
-}
-
-.div-matrix-row:hover .div-td {
-  background: var(--bg-muted);
-}
-
-/* YoY column: left border to separate it visually */
-.div-yoy-col {
-  border-left: 1px solid var(--border-color) !important;
-}
-
-/* Annual total row */
-.div-total-row .div-td {
-  font-weight: 700;
-  background: var(--bg-muted);
-  border-top: 2px solid var(--border-color);
-  border-bottom: none;
-}
-
-@media (max-width: 640px) {
-  .div-kpi-strip {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .div-kpi-tile:nth-child(2) {
-    border-right: none;
-  }
-}
-
-/* ===== PORTFOLIOS PAGE ===== */
-
-/* Toolbar rows */
-.ptf-toolbar-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.ptf-toolbar-row--secondary {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 4px;
-}
-
-/* Portfolio tab strip */
-.ptf-tabs-wrap {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  flex: 1;
-}
-
-.ptf-tab {
-  padding: 5px 14px;
-  border-radius: 999px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  border: 1px solid var(--border-color);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  cursor: grab;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.ptf-tab:active {
-  cursor: grabbing;
-}
-
-.ptf-tab:hover {
-  background: var(--bg-muted);
-  color: var(--text-primary);
-}
-
-.ptf-tab:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.ptf-tab--active {
-  background: var(--text-primary);
-  color: #fff;
-  border-color: var(--text-primary);
-}
-
-.ptf-tab--active:hover {
-  background: var(--text-primary);
-  color: #fff;
-}
-
-.ptf-drag-hint {
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  margin-left: 6px;
-}
-
-/* Create form (tabs row, right side) */
-.ptf-create-form {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-/* Stats label (secondary toolbar, right side) */
-.ptf-stats-label {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-/* Holdings card grid */
-.ptf-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
-}
-
-/* ── Holding card ── */
-.ptf-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* Card header */
-.ptf-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 14px 16px 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.ptf-card-ticker-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.ptf-card-ticker {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--color-primary);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: none;
-  transition: opacity 0.15s;
-}
-
-.ptf-card-ticker:hover {
-  opacity: 0.75;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-}
-
-.ptf-card-ticker:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
-.ptf-card-type-badge {
-  font-size: 0.65rem !important;
-  padding: 1px 6px !important;
-}
-
-.ptf-card-shares {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  margin-top: 3px;
-}
-
-.ptf-card-edit-btn {
-  height: 28px !important;
-  font-size: 0.75rem !important;
-  padding: 0 10px !important;
-  flex-shrink: 0;
-}
-
-/* Detail rows */
-.ptf-card-rows {
-  padding: 10px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  flex: 1;
-}
-
-.ptf-card-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 0.8125rem;
-}
-
-.ptf-card-row-label {
-  color: var(--text-secondary);
-}
-
-.ptf-card-row-value {
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.ptf-card-row-value--muted {
-  color: var(--text-secondary);
-  font-weight: 400;
-}
-
-/* Dividend footer */
-.ptf-card-div-footer {
-  padding: 7px 16px;
-  font-size: 0.73rem;
-  color: var(--text-secondary);
-  background: var(--bg-muted);
-  border-top: 1px solid var(--border-color);
-}
-
-/* Return section — most prominent */
-.ptf-card-return-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-top: 1px dashed var(--border-color);
-  margin-top: auto;
-}
-
-.ptf-card-return-left {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.ptf-card-return-label {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
-}
-
-.ptf-card-return-value {
-  font-size: 0.9rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.ptf-card-return-value--none {
-  color: var(--text-secondary);
-  font-weight: 400;
-}
-
-.ptf-card-return-pct {
-  font-size: 0.8rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Action buttons */
-.ptf-card-actions {
-  display: flex;
-  gap: 6px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--border-color);
-}
-
-.ptf-card-action-btn {
-  flex: 1;
-  height: 30px !important;
-  font-size: 0.75rem !important;
-  justify-content: center;
-}
-
-/* Add holding card */
-.ptf-add-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-lg);
-  border: 2px dashed var(--border-color);
-  min-height: 180px;
-  padding: 24px;
-  color: var(--text-secondary);
-  background: none;
-  cursor: pointer;
-  gap: 8px;
-  width: 100%;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.ptf-add-card:hover {
-  background: var(--bg-muted);
-  border-color: rgba(37, 99, 235, 0.3);
-}
-
-.ptf-add-card:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.ptf-add-card-plus {
-  font-size: 1.75rem;
-  font-weight: 300;
-  line-height: 1;
-}
-
-.ptf-add-card-label {
-  font-size: 0.8125rem;
-}
-
-/* ===== DIVIDEND INCOME PAGE (legacy) ===== */
-.div-income-section {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
-  padding: 24px;
-  margin-bottom: 24px;
-}
-
-.div-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  margin-top: 16px;
-}
-
-.div-table {
-  border-collapse: collapse;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  min-width: 100%;
-  font-variant-numeric: tabular-nums;
-}
-
-.div-table th,
-.div-table td {
-  padding: 8px 12px;
-  text-align: right;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.div-table thead th {
-  background: var(--bg-muted);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.div-table tbody th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--text-primary);
-  background: var(--bg-muted);
-  border-right: 1px solid var(--border-color);
-  min-width: 50px;
-}
-
-.div-table tbody tr:hover td,
-.div-table tbody tr:hover th {
-  background: var(--bg-muted) !important;
-}
-
-.div-table .div-total-col {
-  font-weight: 600;
-  border-left: 1px solid var(--border-color);
-  background: var(--bg-muted) !important;
-}
-
-.div-table .div-yoy {
-  border-left: 1px solid var(--border-color);
-  font-weight: 600;
-  background: var(--bg-muted) !important;
-  text-align: right;
-}
-
-.div-table .div-yoy.positive { color: var(--color-success); }
-.div-table .div-yoy.negative { color: var(--color-error); }
-
-.div-table .div-total-row th,
-.div-table .div-total-row td {
-  font-weight: 700;
-  border-top: 1px solid var(--border-color);
-  border-bottom: none;
-  background: var(--bg-muted) !important;
 }
 
 /* ===== GLOBAL STATUS CLASSES ===== */
@@ -2057,18 +383,6 @@ h2 {
   background: var(--gain-bg);
   color: var(--gain);
   border: 1px solid rgba(74,222,128,.3);
-  font-variant-numeric: tabular-nums;
-}
-.badge-neg {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: 11px;
-  font-weight: 600;
-  background: var(--loss-bg);
-  color: var(--loss);
-  border: 1px solid rgba(248,113,113,.3);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2124,7 +438,7 @@ h2 {
 }
 .page-title {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: clamp(21px, 4.5vw, 26px);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -2133,24 +447,26 @@ h2 {
 
 /* Spacing helpers */
 .mt2 { margin-top: 8px; }
-.mt3 { margin-top: 12px; }
 .mt4 { margin-top: 16px; }
-.mt6 { margin-top: 24px; }
 
 /* Flex helpers */
-.row     { display: flex; align-items: center; gap: 10px; }
+.row     { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
 .between { justify-content: space-between; }
-.col     { display: flex; flex-direction: column; gap: 10px; }
-.stack   { display: flex; flex-direction: column; gap: 18px; }
+.col     { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
 /* Grid helpers */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
 
-/* Hero total */
-.hero-total { font-family: var(--font-num); font-size: 56px; line-height: 1; letter-spacing: -0.04em; font-weight: 500; }
-.hero-total .cents { font-size: 30px; color: var(--tc-muted); }
+/* Hero total — clamped because a seven-figure total at a fixed 56px is wider
+   than a phone. The vw term lets it fill the space it has and no more. */
+.hero-total {
+  font-family: var(--font-num);
+  font-size: clamp(34px, 10vw, 56px);
+  line-height: 1; letter-spacing: -0.04em; font-weight: 500;
+}
+.hero-total .cents { font-size: 0.55em; color: var(--tc-muted); }
 
 /* Delta tags */
 .deltas { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
@@ -2168,30 +484,75 @@ h2 {
 
 /* KPI cards */
 .kpis { display: grid; gap: 14px; }
-.kpi  { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow-tc); }
+.kpi  { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow-tc); min-width: 0; }
 .kpi .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--tc-muted); font-weight: 600; }
 .kpi .v { font-family: var(--font-num); font-size: 26px; letter-spacing: -0.03em; margin-top: 8px; }
 .kpi .d { font-size: 12.5px; color: var(--tc-muted); margin-top: 5px; }
 
 /* TC Card */
-.tc-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-tc); }
+/* min-width: 0 is load-bearing, not cosmetic. A grid/flex item defaults to
+   `min-width: auto`, i.e. "never shrink below my content's min-content
+   width". A card holding a wide table or a non-wrapping toolbar therefore
+   refuses to shrink and pushes the whole page sideways on a phone instead of
+   letting its own .tbl-wrap scroll. */
+.tc-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-tc); min-width: 0; }
 .tc-card-pad { padding: 20px; }
 .tc-card-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line);
+  flex-wrap: wrap; min-width: 0;
 }
 .tc-card-head .t { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
 .tc-card-head .a { font-size: 12.5px; color: var(--tc-muted); }
 
 /* TC Table */
-.tbl-wrap { overflow-x: auto; }
-table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tbl-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Keeps a sideways swipe on a wide table from also dragging the page/back
+     gesture once the table hits its end — matters on iOS and Android. */
+  overscroll-behavior-x: contain;
+
+  /* This cap is what makes the sticky header below actually do something.
+     Setting overflow-x already made overflow-y compute to `auto`, so
+     .tbl-wrap was the scrollport for any sticky descendant — but with no
+     height limit there was nothing to scroll within it, so the header just
+     left with the page in every browser. Capping the height gives long
+     tables their own scroll region and pins the header to the top of it.
+     Short tables are unaffected: max-height only engages once the content
+     exceeds it. */
+  max-height: min(70vh, 640px);
+}
+
+/* border-collapse MUST stay `separate` here.
+   WebKit does not honour `position: sticky` on <th>/<td> in a table with
+   `border-collapse: collapse`, so the `position: sticky` on `table.tbl th`
+   below could never work in Safari. `separate` + zero border-spacing renders
+   identically and is honoured by all three engines.
+
+   NB: that sticky header is currently inert everywhere, not just in Safari.
+   Setting `overflow-x: auto` on .tbl-wrap makes its `overflow-y` compute to
+   `auto` as well, which makes .tbl-wrap itself the sticky scrollport — and
+   it has no height constraint, so there is nothing to scroll within and the
+   header just leaves with the page. Activating it means giving .tbl-wrap a
+   max-height so long tables scroll internally, which is a layout decision,
+   not a compatibility fix. Keeping `separate` means that change will work in
+   Safari on the day it is made. */
+table.tbl {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+}
 table.tbl th {
   font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
   color: var(--tc-muted); font-weight: 600;
   text-align: right; padding: 12px 18px;
   border-bottom: 1px solid var(--line); white-space: nowrap;
-  position: sticky; top: 0; background: var(--panel);
+  /* Pins to the top of .tbl-wrap's scroll region (see its max-height).
+     z-index is required: a sticky cell makes its own stacking context, and
+     without it the tbody cells scrolling underneath paint over the header. */
+  position: sticky; top: 0; z-index: 2; background: var(--panel);
 }
 table.tbl th:first-child { text-align: left; }
 table.tbl td { padding: 13px 18px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -2199,6 +560,7 @@ table.tbl td:first-child { text-align: left; font-weight: 600; }
 table.tbl tbody tr { transition: background .12s; }
 table.tbl tbody tr:hover { background: var(--panel-2); }
 table.tbl tr:last-child td { border-bottom: none; }
+table.tbl tr:has(+ tr.total) td { border-bottom: none; }
 table.tbl tr.total td {
   background: var(--panel-2); font-weight: 700;
   border-top: 1px solid var(--line-2);
@@ -2225,7 +587,16 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .editable .pen { font-size: 11px; color: var(--faint); }
 
 /* Pills */
-.pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+/* A pill group that takes a whole row of its (wrapping) flex parent.
+   Use this rather than an inline `width: 100%`: a percentage width cannot be
+   resolved while the parent's own intrinsic width is being measured, so the
+   browser falls back to the group's max-content width — every pill on one
+   line — and that becomes the card's minimum width. That is precisely how
+   the Transactions toolbar used to force a 690px-wide card onto a 390px
+   phone. `flex-basis` + `min-width: 0` expresses the same intent and stays
+   shrinkable. */
+.pills.full { flex: 1 1 100%; min-width: 0; }
 .pill {
   font-size: 12.5px; font-weight: 600; color: var(--tc-muted);
   padding: 6px 13px; border-radius: var(--radius-pill);
@@ -2308,6 +679,7 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   box-shadow: var(--shadow-tc); padding: 18px;
   display: flex; flex-direction: column; gap: 14px; transition: .15s;
+  min-width: 0;
 }
 .hold:hover { border-color: var(--line-2); transform: translateY(-2px); }
 .hold .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -2328,14 +700,6 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 /* TC Form fields */
 .tc-field { display: flex; flex-direction: column; gap: 6px; }
 .tc-field label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--tc-muted); font-weight: 600; }
-.tc-input {
-  font-family: inherit; font-size: 14px; color: var(--ink);
-  padding: 9px 12px; border: 1px solid var(--line-2); border-radius: 8px;
-  background: var(--inset); min-height: 38px; width: 100%;
-}
-.tc-input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
-.tc-select::after { content: "▾"; color: var(--tc-muted); font-size: 12px; }
-.tc-input.derived { background: var(--panel-2); border-style: dashed; color: var(--ink); }
 
 /* Pagination */
 .pager { display: flex; align-items: center; gap: 4px; }
@@ -2348,6 +712,24 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .pager button:hover:not(.active) { color: var(--ink); }
 .pager button:focus-visible { outline: 2px solid var(--tc-accent); outline-offset: 2px; }
 
+/* Transactions page shell: the "add transaction" rail beside the history
+   table. Two details matter here:
+   - `minmax(0, 1fr)`, not a bare `1fr`. `1fr` is shorthand for
+     `minmax(auto, 1fr)`, and that `auto` minimum refuses to shrink below the
+     history table's min-content — so the table pushed the page sideways
+     instead of scrolling inside its own .tbl-wrap.
+   - The rail is a fixed 320px, which alone is most of a phone screen, so the
+     whole thing stacks below 900px. */
+.tx-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .tx-layout { grid-template-columns: minmax(0, 1fr); }}
+
 /* Divider row (view toggle area) */
 .divider-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -2357,8 +739,12 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 
 /* Home page hero */
 .home-hero-section {
-  margin: -28px -24px 0;
-  padding: 64px 24px 52px;
+  /* Bleeds to the viewport edge by cancelling .app-page's padding. Derived
+     from --page-pad so the two can never disagree; a literal -24px here
+     overflowed every viewport between 641px and 768px, where the padding
+     drops to 16px but the margin did not. */
+  margin: -28px calc(var(--page-pad) * -1) 0;
+  padding: 64px var(--page-pad) 52px;
   border-bottom: 1px solid var(--line);
   position: relative;
   overflow: hidden;
@@ -2370,6 +756,39 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
   background: radial-gradient(60% 80% at 50% -10%, var(--accent-soft), transparent 70%);
   pointer-events: none;
 }
+/* Home headline — clamped so "Track every share, dividend & dollar." fits a
+   360px phone without a horizontal scrollbar. */
+.home-hero-title {
+  font-size: clamp(30px, 7.5vw, 52px);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+  max-width: 16ch;
+  margin: 18px auto 0;
+  color: var(--ink);
+}
+
+.home-assistant {
+  max-width: 780px;
+  margin: 40px auto 0;
+}
+
+.home-assistant-title {
+  font-size: clamp(22px, 4vw, 28px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--ink);
+}
+
+.home-hero-lede {
+  color: var(--ink-2);
+  font-size: clamp(15px, 1.6vw, 17px);
+  max-width: 54ch;
+  margin: 16px auto 0;
+  line-height: 1.55;
+}
+
 .kicker {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 12.5px; font-weight: 600; color: var(--tc-accent);
@@ -2379,8 +798,11 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 
 /* TC Bubble chat messages */
 .bubble {
-  max-width: 64%; padding: 11px 15px;
+  /* 64% of a 358px phone column is 229px — too narrow to read. Cap by
+     measure instead, and let phones use most of the width. */
+  max-width: min(90%, 46ch); padding: 11px 15px;
   font-size: 14px; line-height: 1.5; border-radius: 16px;
+  overflow-wrap: anywhere;
 }
 .bubble.me { margin-left: auto; background: var(--tc-accent); color: var(--accent-ink); border-bottom-right-radius: 5px; font-weight: 500; }
 .bubble.ai { margin-right: auto; background: var(--panel-2); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
@@ -2395,18 +817,67 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .banner.ok   { background: var(--gain-bg); border-color: rgba(74,222,128,.3); }
 .banner.warn { background: var(--loss-bg); border-color: rgba(248,113,113,.3); }
 
-@media (max-width: 900px) {
-  .grid-4 { grid-template-columns: 1fr 1fr; }
-  .grid-3 { grid-template-columns: 1fr; }
-}
+/* ===== RESPONSIVE LADDER (Terminal Calm layout primitives) =====
+   These four steps are the whole responsive story for the app shell. Page
+   components use .grid-2/3/4, .kpis, .holds and .row, so collapsing them
+   here reflows every page at once instead of each page inventing its own
+   breakpoints. Verified at 390 / 768 / 1440 px on Chromium, Firefox and
+   WebKit by tests/responsive.spec.js. */
 
+/* Tablet landscape — four across gets cramped before three does. */
+@media (max-width: 1024px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }}
+
+/* Tablet portrait */
+@media (max-width: 900px) {
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }}
+
+/* Phone */
 @media (max-width: 640px) {
-  .home-hero-section { margin: -28px -16px 0; }
-}
+  /* Two KPI tiles across still reads fine at 390px; form pairs do not. */
+  .grid-2 { grid-template-columns: 1fr; }
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+
+  /* auto-fill's 280px/240px track floor exceeds the content box on a small
+     phone, which would otherwise leave a card wider than the screen. */
+  .holds { grid-template-columns: 1fr; }
+
+  .page-head { align-items: flex-start; gap: 12px; }
+  .tc-card-pad { padding: 16px; }
+  .tc-card-head { padding: 14px 16px; }
+  table.tbl th { padding: 10px 12px; }
+  table.tbl td { padding: 11px 12px; }
+
+  /* Anchored bottom-right at a fixed 380px, the toast stack hung off the
+     left edge of a 390px screen. Span the gutters instead. */
+  .toast-stack { left: 16px; right: 16px; bottom: 16px; width: auto; max-width: none; }
+
+  /* Long tickers / account names must wrap rather than widen the card. */
+  .hold .tk { overflow-wrap: anywhere; }
+  .page-title { overflow-wrap: anywhere; }}
+
+/* Touch targets on touch devices. Keyed off `pointer: coarse` rather than
+   width so a small desktop window keeps its compact density while a tablet
+   gets thumb-sized controls. Written flat (not nested inside the phone
+   query) so the file does not depend on native CSS nesting support. */
+@media (pointer: coarse) {
+  .pill, .tc-btn.sm, .pager button, .seg button { min-height: 36px; }
+  .tc-btn, .acct-tab { min-height: 40px; }}
+
+/* Very narrow phones (iPhone SE and similar) */
+@media (max-width: 400px) {
+  .grid-4 { grid-template-columns: 1fr; }
+  .hero-total .cents { font-size: 0.5em; }}
 
 /* ===== LOGIN / SETUP PAGE ===== */
 .login-page {
+  /* 100vh on iOS Safari / Android Chrome means "viewport with the URL bar
+     hidden", so the card sits partly under the bar on first paint. dvh
+     tracks the visible area; the vh line stays as the fallback. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2512,8 +983,7 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .toast { animation: toast-in .15s ease-out; }
-}
+  .toast { animation: toast-in .15s ease-out; }}
 
 .toast--error   { border-color: rgba(248,113,113,.3); }
 .toast--success { border-color: rgba(74,222,128,.3); }

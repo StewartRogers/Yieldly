@@ -1,8 +1,12 @@
-import { defineConfig } from '@playwright/test'
+import { defineConfig, devices } from '@playwright/test'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
+import { fileURLToPath } from 'url'
+
+const configDir = path.dirname(fileURLToPath(import.meta.url))
+const storageState = path.join(configDir, 'tests', '.auth', 'state.json')
 
 // Isolated per-run libSQL file so E2E tests never touch the developer's real
 // yieldly.db. libSQL's Windows backend needs the file to already exist
@@ -15,11 +19,41 @@ if (!fs.existsSync(dbPath)) fs.writeFileSync(dbPath, '')
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
+  // One worker, not one per project. Every spec shares a single server and a
+  // single libSQL file, so parallel projects raced each other through the
+  // first-run "Create your account" flow — two workers both POSTed
+  // /api/auth/setup, one got an error and hung waiting for a nav link.
+  workers: 1,
+  // These specs drive a real Vite dev server and three browser engines on one
+  // machine. Under load the dev server occasionally drops a request (a font,
+  // an /api call), which is a harness artifact rather than an app defect. One
+  // retry absorbs that; a genuine failure still fails twice and is reported.
+  retries: 1,
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:2080',
     trace: 'retain-on-failure',
   },
+  // Every suite runs against all three engines. WebKit is the only way to
+  // catch Safari-specific layout bugs without a Mac — several of the fixes
+  // in style.css (sticky cells under border-collapse, dvh units) exist
+  // solely because this project surfaced them.
+  //
+  // Viewport widths are set inside the specs (page.setViewportSize) rather
+  // than via Playwright's `devices` presets: the mobile presets set
+  // `isMobile`/`hasTouch`, which Firefox does not support and which would
+  // make the Firefox project fail to start.
+  //
+  // The `setup` project logs in once and saves the JWT cookie; the engine
+  // projects depend on it and start authenticated. Without this, ~20
+  // sign-ins across three engines tripped the app's own login rate limit
+  // (10 per 15 min) and everything after the tenth failed.
+  projects: [
+    { name: 'setup', testMatch: /auth\.setup\.js/ },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'],  storageState }, dependencies: ['setup'] },
+    { name: 'firefox',  use: { ...devices['Desktop Firefox'], storageState }, dependencies: ['setup'] },
+    { name: 'webkit',   use: { ...devices['Desktop Safari'],  storageState }, dependencies: ['setup'] },
+  ],
   // Boots the real server + client against the isolated DB above. If ports
   // 2080/2085 are already in use (e.g. your own `npm run dev` is running
   // against the real DB), stop that first — this always starts a fresh

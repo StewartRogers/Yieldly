@@ -25,10 +25,10 @@ export default function Home() {
       <div className="home-hero-section">
         <div style={{ position: 'relative', zIndex: 1 }}>
           <span className="kicker">● Your money, all in one ledger</span>
-          <h1 className="disp" style={{ fontSize: 52, lineHeight: 1.04, letterSpacing: '-0.035em', fontWeight: 600, maxWidth: '16ch', margin: '18px auto 0', color: 'var(--ink)' }}>
+          <h1 className="disp home-hero-title">
             Track every share, dividend&nbsp;&amp;&nbsp;dollar.
           </h1>
-          <p style={{ color: 'var(--ink-2)', fontSize: 17, maxWidth: '54ch', margin: '16px auto 0', lineHeight: 1.55 }}>
+          <p className="home-hero-lede">
             Live prices, adjusted cost base, and full dividend history across all your accounts — RRSP, TFSA, and beyond.
           </p>
           <div className="row" style={{ justifyContent: 'center', marginTop: 28, gap: 12, flexWrap: 'wrap' }}>
@@ -46,9 +46,9 @@ export default function Home() {
       </div>
 
       {/* ── AI Assistant ── */}
-      <div style={{ maxWidth: 780, margin: '40px auto 0' }}>
+      <div className="home-assistant">
         <div className="row" style={{ justifyContent: 'center', marginBottom: 20, gap: 12 }}>
-          <h2 className="disp" style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, color: 'var(--ink)' }}>
+          <h2 className="disp home-assistant-title">
             AI Portfolio Assistant
           </h2>
           <span className="tc-badge" style={{ color: 'var(--tc-accent)', background: 'var(--accent-soft)', borderColor: 'var(--accent-line)' }}>
@@ -67,7 +67,7 @@ export default function Home() {
             ))}
           </div>
           <div className="row" style={{ marginTop: 16, opacity: 0.55, pointerEvents: 'none' }}>
-            <Input placeholder="Ask about your portfolio…" style={{ flex: 1 }} disabled />
+            <Input aria-label="Ask about your portfolio (preview only)" placeholder="Ask about your portfolio…" style={{ flex: 1 }} disabled />
             <Button disabled size="sm">Send</Button>
           </div>
           <p className="note" style={{ justifyContent: 'center', marginTop: 10 }}>

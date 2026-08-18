@@ -68,6 +68,7 @@ function SnapshotCell({ year, month, cell, editable, disabled, onSave }) {
       <td style={{ textAlign: 'right' }}>
         <form className="cash-inline-form" onSubmit={save}>
           <Input className="h-7 w-24 text-right tabular-nums" type="text" inputMode="decimal"
+            aria-label={`Portfolio value for ${MONTHS[month - 1]} ${year}`}
             value={input} onChange={e => setInput(e.target.value)} placeholder="Value" autoFocus disabled={saving} />
           <button type="submit" className="tc-btn sm ghost" title="Save" style={{ padding: '0 6px' }}><Check size={13} /></button>
           <button type="button" className="tc-btn sm ghost" onClick={cancel} title="Cancel" style={{ padding: '0 6px' }}>✕</button>

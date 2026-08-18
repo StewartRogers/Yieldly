@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import { RefreshCw, Check, LogOut } from 'lucide-react'
 import { getPortfolios, refreshAllPrices, getSession, login, logout, setupAccount, setOnUnauthorized } from './api/client'
 import Home from './pages/Home'
@@ -13,6 +13,40 @@ import Login from './pages/Login'
 import { Button } from '@/components/ui/button'
 
 const navCls = ({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')
+
+/**
+ * The seven nav links do not fit a phone, so on small screens the strip
+ * scrolls horizontally (see .app-nav-links in style.css). That left the
+ * current page's tab off-screen — on /transactions the strip still read
+ * "Home Summary History…", with nothing showing where you were. Bring the
+ * active link into view on every navigation.
+ *
+ * `inline: 'nearest'` scrolls only the strip, and `block: 'nearest'` stops it
+ * from also scrolling the page vertically.
+ */
+function NavLinks() {
+  const location = useLocation()
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const active = ref.current?.querySelector('.app-nav-link--active')
+    if (!active) return
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    active.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', inline: 'nearest', block: 'nearest' })
+  }, [location.pathname])
+
+  return (
+    <div className="app-nav-links" ref={ref}>
+      <NavLink to="/" end className={navCls}>Home</NavLink>
+      <NavLink to="/summary"      className={navCls}>Summary</NavLink>
+      <NavLink to="/history"      className={navCls}>History</NavLink>
+      <NavLink to="/dividends"    className={navCls}>Dividends</NavLink>
+      <NavLink to="/portfolios"   className={navCls}>Portfolios</NavLink>
+      <NavLink to="/transactions" className={navCls}>Transactions</NavLink>
+      <NavLink to="/import"       className={navCls}>Import Data</NavLink>
+    </div>
+  )
+}
 
 export default function App() {
   const [authState, setAuthState] = useState({ loading: true, user: null, needsSetup: false, error: null })
@@ -110,15 +144,7 @@ export default function App() {
             <span className="app-nav-brand">Yieldly</span>
           </NavLink>
 
-          <div className="app-nav-links">
-            <NavLink to="/" end className={navCls}>Home</NavLink>
-            <NavLink to="/summary"      className={navCls}>Summary</NavLink>
-            <NavLink to="/history"      className={navCls}>History</NavLink>
-            <NavLink to="/dividends"    className={navCls}>Dividends</NavLink>
-            <NavLink to="/portfolios"   className={navCls}>Portfolios</NavLink>
-            <NavLink to="/transactions" className={navCls}>Transactions</NavLink>
-            <NavLink to="/import"       className={navCls}>Import Data</NavLink>
-          </div>
+          <NavLinks />
 
           <span style={{ flex: 1 }} aria-hidden="true" />
 

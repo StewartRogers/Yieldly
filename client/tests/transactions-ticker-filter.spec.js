@@ -1,22 +1,12 @@
 import { test, expect } from '@playwright/test'
 import crypto from 'crypto'
+import { signIn } from './helpers/app.js'
 
 // All tests in this file share one server + DB for the whole run (see
-// playwright.config.js), so only the first test's beforeEach sees the
-// first-run "Create your account" screen — later ones see a normal Sign In.
+// playwright.config.js). Authentication comes from the `setup` project's
+// saved storageState, so signIn() here just waits for the shell to be up.
 test.beforeEach(async ({ page }) => {
-  await page.goto('/')
-  await page.getByLabel('Username', { exact: true }).fill('e2euser')
-  await page.getByLabel('Password', { exact: true }).fill('e2epassword123')
-
-  const confirmField = page.getByLabel('Confirm password', { exact: true })
-  if (await confirmField.isVisible().catch(() => false)) {
-    await confirmField.fill('e2epassword123')
-    await page.getByRole('button', { name: 'Create Account' }).click()
-  } else {
-    await page.getByRole('button', { name: 'Sign In' }).click()
-  }
-  await expect(page.getByRole('link', { name: 'Transactions' })).toBeVisible()
+  await signIn(page)
 
   // Seed a portfolio (unique code per test, since tests share one DB for the
   // run) + transactions across tickers via the API — the subject under test

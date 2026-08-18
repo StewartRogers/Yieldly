@@ -13,6 +13,8 @@
     "test:full": "node test-full.js",
     "test:auth": "node test-auth.js",
     "test:history": "node test-history.js",
+    "test:browser": "npm run test --prefix client",
+    "test:browser:install": "cd client && npx playwright install chromium firefox webkit",
     "coverage": "c8 --include=lib/compute.js --reporter=text --reporter=html node test.js",
     "db:migrate": "node scripts/migrate.js",
     "user:create": "node manage-user.js create",

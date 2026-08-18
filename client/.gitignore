@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Saved login cookie from the Playwright `setup` project (tests/auth.setup.js)
+tests/.auth/

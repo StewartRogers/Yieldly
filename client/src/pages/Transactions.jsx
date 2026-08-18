@@ -87,7 +87,7 @@ function Pager({ page, totalPages, totalCount, onChange }) {
 }
 
 /* custom: shadcn Select can't do free-text typeahead — hand-rolled combobox styled with TC tokens */
-function TickerCombobox({ value, options, onChange, placeholder, required }) {
+function TickerCombobox({ id, value, options, onChange, placeholder, required }) {
   const [open, setOpen]           = useState(false)
   const [highlight, setHighlight] = useState(0)
   const wrapRef                   = useRef(null)
@@ -118,6 +118,7 @@ function TickerCombobox({ value, options, onChange, placeholder, required }) {
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <Input
+        id={id}
         className="h-9"
         placeholder={placeholder}
         value={value}
@@ -358,7 +359,7 @@ export default function Transactions({ portfolios }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 18, alignItems: 'start' }}>
+      <div className="tx-layout">
 
         {/* ── Add Transaction form ── */}
         <div className="tc-card tc-card-pad">
@@ -369,9 +370,9 @@ export default function Transactions({ portfolios }) {
 
             {!isTransfer ? (
               <div className="tc-field">
-                <label>Portfolio</label>
+                <label htmlFor="tx-portfolio">Portfolio</label>
                 <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
-                  <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                  <SelectTrigger id="tx-portfolio" className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                     {/* base-ui Select.Value shows raw value string, so we render the label ourselves */}
                     <span className="flex flex-1 text-left text-sm truncate" style={{ color: formPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
                       {formPortfolioId
@@ -389,9 +390,9 @@ export default function Transactions({ portfolios }) {
             ) : (
               <div className="grid-2">
                 <div className="tc-field">
-                  <label>From portfolio</label>
+                  <label htmlFor="tx-from-portfolio">From portfolio</label>
                   <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
-                    <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                    <SelectTrigger id="tx-from-portfolio" className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                       <span className="flex flex-1 text-left text-sm truncate" style={{ color: formPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
                         {formPortfolioId
                           ? (() => { const p = portfolios?.find(p => String(p.id) === formPortfolioId); return p ? p.code : 'Select…' })()
@@ -406,9 +407,9 @@ export default function Transactions({ portfolios }) {
                   </Select>
                 </div>
                 <div className="tc-field">
-                  <label>To portfolio</label>
+                  <label htmlFor="tx-to-portfolio">To portfolio</label>
                   <Select value={toPortfolioId} onValueChange={setToPortfolioId}>
-                    <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                    <SelectTrigger id="tx-to-portfolio" className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                       <span className="flex flex-1 text-left text-sm truncate" style={{ color: toPortfolioId ? 'var(--ink)' : 'var(--tc-muted)' }}>
                         {toPortfolioId
                           ? (() => { const p = portfolios?.find(p => String(p.id) === toPortfolioId); return p ? p.code : 'Select…' })()
@@ -426,11 +427,11 @@ export default function Transactions({ portfolios }) {
             )}
 
             <div className="tc-field">
-              <label>Type</label>
+              <label htmlFor="tx-type">Type</label>
               <Select value={type} onValueChange={v => {
                 setType(v); setTicker(''); setQuantity(''); setPrice(''); setCashTotal(''); setToPortfolioId('')
               }}>
-                <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                <SelectTrigger id="tx-type" className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                   <span className="flex flex-1 text-left text-sm">{TYPE_LABEL[type] ?? type}</span>
                 </SelectTrigger>
                 <SelectContent>
@@ -448,8 +449,9 @@ export default function Transactions({ portfolios }) {
             {!isCashFlow && !isTransfer && (
               <>
                 <div className="tc-field">
-                  <label>Ticker</label>
+                  <label htmlFor="tx-ticker">Ticker</label>
                   <TickerCombobox
+                    id="tx-ticker"
                     value={ticker}
                     options={ownedTickers}
                     onChange={setTicker}
@@ -458,9 +460,9 @@ export default function Transactions({ portfolios }) {
                   />
                 </div>
                 <div className="tc-field">
-                  <label>Market</label>
+                  <label htmlFor="tx-market">Market</label>
                   <Select value={market} onValueChange={setMarket}>
-                    <SelectTrigger className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
+                    <SelectTrigger id="tx-market" className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                       <span className="flex flex-1 text-left text-sm">{{ TMX: 'TMX (Toronto)', NYSE: 'NYSE (New York)', NASDAQ: 'NASDAQ' }[market] ?? market}</span>
                     </SelectTrigger>
                     <SelectContent>
@@ -477,23 +479,24 @@ export default function Transactions({ portfolios }) {
               <>
                 <div className="grid-2">
                   <div className="tc-field">
-                    <label>Quantity</label>
-                    <Input className="h-9" type="number" step="0.0001" placeholder="100" value={quantity}
+                    <label htmlFor="tx-quantity">Quantity</label>
+                    <Input id="tx-quantity" className="h-9" type="number" step="0.0001" placeholder="100" value={quantity}
                       style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                       onChange={e => setQuantity(e.target.value)} required />
                   </div>
                   <div className="tc-field">
-                    <label>Price / share</label>
-                    <Input className="h-9" type="number" step="0.01" placeholder="139.20" value={price}
+                    <label htmlFor="tx-price">Price / share</label>
+                    <Input id="tx-price" className="h-9" type="number" step="0.01" placeholder="139.20" value={price}
                       style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                       onChange={e => setPrice(e.target.value)} required />
                   </div>
                 </div>
 
                 <div className="tc-field">
-                  <label>Total (auto)</label>
+                  <label htmlFor="tx-total">Total (auto)</label>
                   {/* tabIndex={-1}: intentional skip target — read-only derived field */}
                   <Input
+                    id="tx-total"
                     className="h-9"
                     style={{ background: 'var(--panel-2)', borderStyle: 'dashed', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                     type="number" step="0.01"
@@ -505,14 +508,14 @@ export default function Transactions({ portfolios }) {
 
                 <div className="grid-2">
                   <div className="tc-field">
-                    <label>Commission</label>
-                    <Input className="h-9" type="number" step="0.01" placeholder="9.95" min="0" value={commission}
+                    <label htmlFor="tx-commission">Commission</label>
+                    <Input id="tx-commission" className="h-9" type="number" step="0.01" placeholder="9.95" min="0" value={commission}
                       style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                       onChange={e => setCommission(e.target.value)} />
                   </div>
                   <div className="tc-field">
-                    <label>Date</label>
-                    <Input className="h-9" type="date" value={date}
+                    <label htmlFor="tx-date">Date</label>
+                    <Input id="tx-date" className="h-9" type="date" value={date}
                       style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                       onChange={e => setDate(e.target.value)} required />
                   </div>
@@ -523,14 +526,14 @@ export default function Transactions({ portfolios }) {
             {isCashOnly && (
               <div className="grid-2">
                 <div className="tc-field">
-                  <label>{(isCashFlow || isTransfer) ? 'Amount' : 'Total'}</label>
-                  <Input className="h-9" type="number" step="0.01" placeholder="0.00" value={total}
+                  <label htmlFor="tx-cash-amount">{(isCashFlow || isTransfer) ? 'Amount' : 'Total'}</label>
+                  <Input id="tx-cash-amount" className="h-9" type="number" step="0.01" placeholder="0.00" value={total}
                     style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                     onChange={e => setCashTotal(e.target.value)} required />
                 </div>
                 <div className="tc-field">
-                  <label>Date</label>
-                  <Input className="h-9" type="date" value={date}
+                  <label htmlFor="tx-cash-date">Date</label>
+                  <Input id="tx-cash-date" className="h-9" type="date" value={date}
                     style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                     onChange={e => setDate(e.target.value)} required />
                 </div>
@@ -584,7 +587,10 @@ export default function Transactions({ portfolios }) {
                 </span>
               )}
             </div>
-            <div className="pills" style={{ width: '100%' }}>
+            {/* `pills full` rather than an inline width:100% — see .pills.full
+                in style.css: a percentage width here made the toolbar's
+                max-content width the card's minimum, overflowing phones. */}
+            <div className="pills full">
               <button className={`pill${typeFilter.length === 0 ? ' active' : ''}`} onClick={() => handleTypeFilterChange([])}>All types</button>
               {TYPE_FILTER_OPTIONS.map(({ value, label }) => (
                 <button
