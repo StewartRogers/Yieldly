@@ -358,7 +358,7 @@ export default function Transactions({ portfolios }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 18, alignItems: 'start' }}>
+      <div className="tx-layout">
 
         {/* ── Add Transaction form ── */}
         <div className="tc-card tc-card-pad">
@@ -584,7 +584,10 @@ export default function Transactions({ portfolios }) {
                 </span>
               )}
             </div>
-            <div className="pills" style={{ width: '100%' }}>
+            {/* `pills full` rather than an inline width:100% — see .pills.full
+                in style.css: a percentage width here made the toolbar's
+                max-content width the card's minimum, overflowing phones. */}
+            <div className="pills full">
               <button className={`pill${typeFilter.length === 0 ? ' active' : ''}`} onClick={() => handleTypeFilterChange([])}>All types</button>
               {TYPE_FILTER_OPTIONS.map(({ value, label }) => (
                 <button

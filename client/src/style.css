@@ -10,9 +10,20 @@
   }
 }
 
-/* No spinner arrows on number inputs — this app never needs click-to-increment. */
+/* iOS Safari inflates text in landscape unless this is pinned. Without it,
+   rotating a phone silently rescales every font-size and breaks the
+   carefully-sized dense table layouts. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* No spinner arrows on number inputs — this app never needs click-to-increment.
+   Firefox honours -moz-appearance; the unprefixed `appearance` is what
+   current Firefox and the spec use, so both are set. */
 input[type="number"] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
@@ -73,6 +84,13 @@ input[type="number"]::-webkit-inner-spin-button {
   --maxw: 1280px;
   --nav-h: 60px;
 
+  /* Horizontal padding of .app-page. The Home hero bleeds to the viewport
+     edge by cancelling this out with a negative margin, so the two must
+     always agree — hard-coding "-24px" against a 16px padding is what used
+     to push every phone/tablet layout 16px wider than the screen. Anything
+     that bleeds must use calc(var(--page-pad) * -1), never a literal. */
+  --page-pad: 24px;
+
   /* ── Legacy vars → Terminal Calm ── */
   --bg-page:             var(--bg);
   --bg-surface:          var(--panel);
@@ -104,6 +122,9 @@ body {
 /* ===== TOP NAVIGATION ===== */
 .app-nav {
   background: rgba(13, 16, 20, 0.85);
+  /* Safari still only implements the prefixed property; without this the nav
+     is flatly translucent there instead of frosted. */
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   position: sticky;
@@ -236,7 +257,7 @@ body {
 .app-page {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: 28px 24px 80px;
+  padding: 28px var(--page-pad) 80px;
 }
 
 /* ===== PAGE NAVIGATION ===== */
@@ -1148,31 +1169,37 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .app-page {
-    padding: 16px;
-  }
-
   .app-nav-inner {
     padding: 0 12px;
     height: var(--nav-h);
     gap: 4px;
   }
 
-  /* Nav links scroll horizontally; right-side actions stay visible */
+  /* Seven nav links do not fit a phone, so the strip scrolls horizontally.
+     The mask fades the trailing edge so it reads as "more this way" rather
+     than as a clipped list; Safari still needs the -webkit- prefix. */
   .app-nav-links {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
     scrollbar-width: none;
     flex-shrink: 1;
     min-width: 0;
+    scroll-snap-type: x proximity;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
   }
   .app-nav-links::-webkit-scrollbar { display: none; }
+  .app-nav-link { scroll-snap-align: start; white-space: nowrap; }
 
   /* Hide wordmark text on very narrow screens, keep brand mark */
   .app-nav-brand { display: none; }
   .app-nav-wordmark { margin-right: 8px; }
 
-  .app-page { padding: 16px 16px 64px; }
+  /* Narrowing the page gutter here also narrows the Home hero's bleed,
+     because both read --page-pad. */
+  :root { --page-pad: 16px; }
+  .app-page { padding: 16px var(--page-pad) 64px; }
 }
 
 /* ===== SUMMARY PAGE ===== */
@@ -2124,7 +2151,7 @@ h2 {
 }
 .page-title {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: clamp(21px, 4.5vw, 26px);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -2138,19 +2165,24 @@ h2 {
 .mt6 { margin-top: 24px; }
 
 /* Flex helpers */
-.row     { display: flex; align-items: center; gap: 10px; }
+.row     { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
 .between { justify-content: space-between; }
-.col     { display: flex; flex-direction: column; gap: 10px; }
-.stack   { display: flex; flex-direction: column; gap: 18px; }
+.col     { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.stack   { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 
 /* Grid helpers */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
 
-/* Hero total */
-.hero-total { font-family: var(--font-num); font-size: 56px; line-height: 1; letter-spacing: -0.04em; font-weight: 500; }
-.hero-total .cents { font-size: 30px; color: var(--tc-muted); }
+/* Hero total — clamped because a seven-figure total at a fixed 56px is wider
+   than a phone. The vw term lets it fill the space it has and no more. */
+.hero-total {
+  font-family: var(--font-num);
+  font-size: clamp(34px, 10vw, 56px);
+  line-height: 1; letter-spacing: -0.04em; font-weight: 500;
+}
+.hero-total .cents { font-size: 0.55em; color: var(--tc-muted); }
 
 /* Delta tags */
 .deltas { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
@@ -2168,24 +2200,56 @@ h2 {
 
 /* KPI cards */
 .kpis { display: grid; gap: 14px; }
-.kpi  { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow-tc); }
+.kpi  { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow-tc); min-width: 0; }
 .kpi .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--tc-muted); font-weight: 600; }
 .kpi .v { font-family: var(--font-num); font-size: 26px; letter-spacing: -0.03em; margin-top: 8px; }
 .kpi .d { font-size: 12.5px; color: var(--tc-muted); margin-top: 5px; }
 
 /* TC Card */
-.tc-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-tc); }
+/* min-width: 0 is load-bearing, not cosmetic. A grid/flex item defaults to
+   `min-width: auto`, i.e. "never shrink below my content's min-content
+   width". A card holding a wide table or a non-wrapping toolbar therefore
+   refuses to shrink and pushes the whole page sideways on a phone instead of
+   letting its own .tbl-wrap scroll. */
+.tc-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-tc); min-width: 0; }
 .tc-card-pad { padding: 20px; }
 .tc-card-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line);
+  flex-wrap: wrap; min-width: 0;
 }
 .tc-card-head .t { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
 .tc-card-head .a { font-size: 12.5px; color: var(--tc-muted); }
 
 /* TC Table */
-.tbl-wrap { overflow-x: auto; }
-table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tbl-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Keeps a sideways swipe on a wide table from also dragging the page/back
+     gesture once the table hits its end — matters on iOS and Android. */
+  overscroll-behavior-x: contain;
+}
+
+/* border-collapse MUST stay `separate` here.
+   WebKit does not honour `position: sticky` on <th>/<td> in a table with
+   `border-collapse: collapse`, so the `position: sticky` on `table.tbl th`
+   below could never work in Safari. `separate` + zero border-spacing renders
+   identically and is honoured by all three engines.
+
+   NB: that sticky header is currently inert everywhere, not just in Safari.
+   Setting `overflow-x: auto` on .tbl-wrap makes its `overflow-y` compute to
+   `auto` as well, which makes .tbl-wrap itself the sticky scrollport — and
+   it has no height constraint, so there is nothing to scroll within and the
+   header just leaves with the page. Activating it means giving .tbl-wrap a
+   max-height so long tables scroll internally, which is a layout decision,
+   not a compatibility fix. Keeping `separate` means that change will work in
+   Safari on the day it is made. */
+table.tbl {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+}
 table.tbl th {
   font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
   color: var(--tc-muted); font-weight: 600;
@@ -2199,6 +2263,7 @@ table.tbl td:first-child { text-align: left; font-weight: 600; }
 table.tbl tbody tr { transition: background .12s; }
 table.tbl tbody tr:hover { background: var(--panel-2); }
 table.tbl tr:last-child td { border-bottom: none; }
+table.tbl tr:has(+ tr.total) td { border-bottom: none; }
 table.tbl tr.total td {
   background: var(--panel-2); font-weight: 700;
   border-top: 1px solid var(--line-2);
@@ -2225,7 +2290,16 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .editable .pen { font-size: 11px; color: var(--faint); }
 
 /* Pills */
-.pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+/* A pill group that takes a whole row of its (wrapping) flex parent.
+   Use this rather than an inline `width: 100%`: a percentage width cannot be
+   resolved while the parent's own intrinsic width is being measured, so the
+   browser falls back to the group's max-content width — every pill on one
+   line — and that becomes the card's minimum width. That is precisely how
+   the Transactions toolbar used to force a 690px-wide card onto a 390px
+   phone. `flex-basis` + `min-width: 0` expresses the same intent and stays
+   shrinkable. */
+.pills.full { flex: 1 1 100%; min-width: 0; }
 .pill {
   font-size: 12.5px; font-weight: 600; color: var(--tc-muted);
   padding: 6px 13px; border-radius: var(--radius-pill);
@@ -2308,6 +2382,7 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   box-shadow: var(--shadow-tc); padding: 18px;
   display: flex; flex-direction: column; gap: 14px; transition: .15s;
+  min-width: 0;
 }
 .hold:hover { border-color: var(--line-2); transform: translateY(-2px); }
 .hold .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -2348,6 +2423,25 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .pager button:hover:not(.active) { color: var(--ink); }
 .pager button:focus-visible { outline: 2px solid var(--tc-accent); outline-offset: 2px; }
 
+/* Transactions page shell: the "add transaction" rail beside the history
+   table. Two details matter here:
+   - `minmax(0, 1fr)`, not a bare `1fr`. `1fr` is shorthand for
+     `minmax(auto, 1fr)`, and that `auto` minimum refuses to shrink below the
+     history table's min-content — so the table pushed the page sideways
+     instead of scrolling inside its own .tbl-wrap.
+   - The rail is a fixed 320px, which alone is most of a phone screen, so the
+     whole thing stacks below 900px. */
+.tx-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .tx-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Divider row (view toggle area) */
 .divider-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -2357,8 +2451,12 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 
 /* Home page hero */
 .home-hero-section {
-  margin: -28px -24px 0;
-  padding: 64px 24px 52px;
+  /* Bleeds to the viewport edge by cancelling .app-page's padding. Derived
+     from --page-pad so the two can never disagree; a literal -24px here
+     overflowed every viewport between 641px and 768px, where the padding
+     drops to 16px but the margin did not. */
+  margin: -28px calc(var(--page-pad) * -1) 0;
+  padding: 64px var(--page-pad) 52px;
   border-bottom: 1px solid var(--line);
   position: relative;
   overflow: hidden;
@@ -2370,6 +2468,39 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
   background: radial-gradient(60% 80% at 50% -10%, var(--accent-soft), transparent 70%);
   pointer-events: none;
 }
+/* Home headline — clamped so "Track every share, dividend & dollar." fits a
+   360px phone without a horizontal scrollbar. */
+.home-hero-title {
+  font-size: clamp(30px, 7.5vw, 52px);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+  max-width: 16ch;
+  margin: 18px auto 0;
+  color: var(--ink);
+}
+
+.home-assistant {
+  max-width: 780px;
+  margin: 40px auto 0;
+}
+
+.home-assistant-title {
+  font-size: clamp(22px, 4vw, 28px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--ink);
+}
+
+.home-hero-lede {
+  color: var(--ink-2);
+  font-size: clamp(15px, 1.6vw, 17px);
+  max-width: 54ch;
+  margin: 16px auto 0;
+  line-height: 1.55;
+}
+
 .kicker {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 12.5px; font-weight: 600; color: var(--tc-accent);
@@ -2379,8 +2510,11 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 
 /* TC Bubble chat messages */
 .bubble {
-  max-width: 64%; padding: 11px 15px;
+  /* 64% of a 358px phone column is 229px — too narrow to read. Cap by
+     measure instead, and let phones use most of the width. */
+  max-width: min(90%, 46ch); padding: 11px 15px;
   font-size: 14px; line-height: 1.5; border-radius: 16px;
+  overflow-wrap: anywhere;
 }
 .bubble.me { margin-left: auto; background: var(--tc-accent); color: var(--accent-ink); border-bottom-right-radius: 5px; font-weight: 500; }
 .bubble.ai { margin-right: auto; background: var(--panel-2); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
@@ -2395,18 +2529,72 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .banner.ok   { background: var(--gain-bg); border-color: rgba(74,222,128,.3); }
 .banner.warn { background: var(--loss-bg); border-color: rgba(248,113,113,.3); }
 
-@media (max-width: 900px) {
-  .grid-4 { grid-template-columns: 1fr 1fr; }
-  .grid-3 { grid-template-columns: 1fr; }
+/* ===== RESPONSIVE LADDER (Terminal Calm layout primitives) =====
+   These four steps are the whole responsive story for the app shell. Page
+   components use .grid-2/3/4, .kpis, .holds and .row, so collapsing them
+   here reflows every page at once instead of each page inventing its own
+   breakpoints. Verified at 390 / 768 / 1440 px on Chromium, Firefox and
+   WebKit by tests/responsive.spec.js. */
+
+/* Tablet landscape — four across gets cramped before three does. */
+@media (max-width: 1024px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* Tablet portrait */
+@media (max-width: 900px) {
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Phone */
 @media (max-width: 640px) {
-  .home-hero-section { margin: -28px -16px 0; }
+  /* Two KPI tiles across still reads fine at 390px; form pairs do not. */
+  .grid-2 { grid-template-columns: 1fr; }
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+
+  /* auto-fill's 280px/240px track floor exceeds the content box on a small
+     phone, which would otherwise leave a card wider than the screen. */
+  .holds { grid-template-columns: 1fr; }
+
+  .page-head { align-items: flex-start; gap: 12px; }
+  .tc-card-pad { padding: 16px; }
+  .tc-card-head { padding: 14px 16px; }
+  table.tbl th { padding: 10px 12px; }
+  table.tbl td { padding: 11px 12px; }
+
+  /* Anchored bottom-right at a fixed 380px, the toast stack hung off the
+     left edge of a 390px screen. Span the gutters instead. */
+  .toast-stack { left: 16px; right: 16px; bottom: 16px; width: auto; max-width: none; }
+
+  /* Long tickers / account names must wrap rather than widen the card. */
+  .hold .tk { overflow-wrap: anywhere; }
+  .page-title { overflow-wrap: anywhere; }
+}
+
+/* Touch targets on touch devices. Keyed off `pointer: coarse` rather than
+   width so a small desktop window keeps its compact density while a tablet
+   gets thumb-sized controls. Written flat (not nested inside the phone
+   query) so the file does not depend on native CSS nesting support. */
+@media (pointer: coarse) {
+  .pill, .tc-btn.sm, .pager button, .seg button { min-height: 36px; }
+  .tc-btn, .acct-tab { min-height: 40px; }
+}
+
+/* Very narrow phones (iPhone SE and similar) */
+@media (max-width: 400px) {
+  .grid-4 { grid-template-columns: 1fr; }
+  .hero-total .cents { font-size: 0.5em; }
 }
 
 /* ===== LOGIN / SETUP PAGE ===== */
 .login-page {
+  /* 100vh on iOS Safari / Android Chrome means "viewport with the URL bar
+     hidden", so the card sits partly under the bar on first paint. dvh
+     tracks the visible area; the vh line stays as the fallback. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;

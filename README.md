@@ -55,6 +55,32 @@ npm run user:reset-password
 ```
 (Auth is stateless JWT, so this changes the password but does not retroactively revoke tokens already issued to other devices — they expire on their own.)
 
+## Browser Support
+
+Yieldly is tested on the three major rendering engines and at phone, tablet
+and desktop widths:
+
+| Engine | Covers |
+|---|---|
+| Chromium | Chrome, Edge, Brave, Opera |
+| Gecko | Firefox |
+| WebKit | Safari (macOS and iOS) |
+
+The layout is responsive from 390 px up: page content reflows to a single
+column on a phone, and wide financial tables scroll horizontally inside their
+own container rather than pushing the page sideways.
+
+To run the browser suite yourself:
+
+```bash
+npm run test:browser:install   # one-time: download the three engines
+npm run test:browser           # every spec, on all three
+```
+
+It boots its own server against a throwaway database, so it never touches
+your real data — but it needs ports 2080 and 2085 free, so stop `npm run dev`
+first.
+
 ## Production Build
 
 1. Build the client app:

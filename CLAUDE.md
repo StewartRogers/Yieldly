@@ -23,13 +23,18 @@ npm run build
 # Production server (serves built client as static files)
 npm run start:prod
 
-# Full backend test suite (all three suites, in-memory SQLite, no live server)
+# Full backend test suite (all four suites, in-memory SQLite, no live server)
 npm test
 
 # Individual suites
 npm run test:math     # test.js      — computeHoldings math
 npm run test:full     # test-full.js — broad math/CSV/monthly-ACB/validation coverage
 npm run test:auth     # test-auth.js — auth routes + guard against the real app
+
+# Browser suite — every spec on Chromium, Firefox AND WebKit (Safari's engine).
+# Boots its own server + throwaway libSQL file; needs ports 2080/2085 free.
+npm run test:browser
+npm run test:browser:install   # one-time: download the three browser engines
 
 # Branch/line coverage of lib/compute.js (text + HTML report)
 npm run coverage
@@ -46,6 +51,24 @@ There are three flat-script test suites (no Jest/Mocha), all using a hand-rolled
 - `test.js` (~150 assertions) — `computeHoldings` math.
 - `test-full.js` (~268 assertions) — broader math, CSV import, `computeMonthlyACB`, and validation rules.
 - `test-auth.js` (~90 assertions) — boots the **real async app** (`createApp(await createDb(...))`) over an ephemeral HTTP port to exercise the auth routes, the auth guard, JWT cookies, cascade delete, login rate-limiting, and the full backup export/import.
+
+### Browser suite (`client/tests/`, Playwright)
+
+Runs under three projects — `chromium`, `firefox`, `webkit` — so every spec is
+checked on all three rendering engines. **WebKit is the stand-in for Safari**
+and is the only way to catch Safari-specific breakage without a Mac.
+
+- `responsive.spec.js` — asserts no page scrolls horizontally at 390/768/1440 px.
+  Wide content is fine, but it must scroll inside its own container.
+- `cross-browser.spec.js` — console/page errors, table scroll containment,
+  mobile nav behaviour, form-control sizing.
+- `transactions-ticker-filter.spec.js` — the ticker filter.
+- `auth.setup.js` — a `setup` project that logs in **once** and saves the JWT
+  cookie for the others via `storageState`. This is not an optimisation: the
+  app rate-limits `/api/auth/login` to 10 attempts per 15 min, and signing in
+  per-spec across three engines tripped it and failed everything after the
+  tenth. `workers: 1` for the same reason — all specs share one server and one
+  libSQL file, so parallel projects raced through the first-run setup flow.
 
 `test.js`/`test-full.js` validate the **driver-agnostic** money math, so they run synchronously on `better-sqlite3` (a devDependency) for a tight, await-free harness, importing the shared `HOLDINGS_SQL`/`GROUP_ORDER` from `lib/holdings.js` so the aggregation can't drift. `test-auth.js` exercises the **real** async libSQL schema + app (backed by a temp-file libSQL DB — `:memory:` is per-connection in libSQL and would not be shared across an interactive transaction). They are flat scripts with no filtering, so there is **no single-test command** — to isolate a case, temporarily comment out scenarios. Coverage (`npm run coverage`) is via `c8` over `test.js`; `lib/compute.js` is at 100% statements/branches/lines, HTML report in `coverage/`. Playwright is installed under `client/` but no E2E tests exist yet.
 
@@ -95,6 +118,14 @@ This is a single-user portfolio tracker with stateless JWT authentication (one s
 - Global state in `App.jsx`: `portfolios` list and `pricesTick` counter. Pages receive these as props. When `pricesTick` increments (after a price refresh), price-sensitive pages re-fetch via `useEffect([pricesTick])`.
 - Styling uses Tailwind v4 + a custom design system with CSS custom properties (`--ink`, `--inset`, `--line-2`, etc.). Shadcn/ui components live in `client/src/components/ui/`.
 - `client/src/utils/format.js` — shared currency/percentage formatters used across all pages.
+
+**Responsive + cross-browser invariants** (all verified by `npm run test:browser`; breaking one is how the layout silently overflows a phone again):
+- **`--page-pad` is the single source of truth for the page gutter.** `.app-page` pads by it and the Home hero bleeds full-width with `calc(var(--page-pad) * -1)`. Never hard-code the bleed — a literal `-24px` against a 16px padding overflowed every viewport from 641–768 px.
+- **`min-width: 0` on anything that can hold a wide table or toolbar** (`.tc-card`, `.kpi`, `.hold`, `.row`, `.col`). Grid/flex items default to `min-width: auto`, i.e. "never shrink below my content" — so one wide table pushes the whole page sideways instead of scrolling inside its own `.tbl-wrap`.
+- **Grid tracks that hold tables use `minmax(0, 1fr)`, not `1fr`.** A bare `1fr` means `minmax(auto, 1fr)`, and that `auto` floor has the same effect (see `.tx-layout`).
+- **No percentage widths on flex items in a wrapping container.** A percentage cannot resolve while the parent's intrinsic width is being measured, so the browser substitutes max-content and that becomes the parent's minimum. Use `flex-basis` (see `.pills.full`) — an inline `width: 100%` here forced a 690 px card onto a 390 px phone.
+- **`table.tbl` must keep `border-collapse: separate`.** WebKit ignores `position: sticky` on `<th>`/`<td>` under `border-collapse: collapse`. (Those sticky headers are currently inert in *every* engine — `overflow-x: auto` on `.tbl-wrap` makes it the sticky scrollport, and it has no height limit. Activating them means capping `.tbl-wrap`'s height, which is a layout decision, not a compat fix.)
+- Fixed px font sizes on headlines are clamped (`.hero-total`, `.page-title`, `.home-hero-title`) — a seven-figure total at 56 px is wider than a phone.
 
 ## Financial correctness
 
