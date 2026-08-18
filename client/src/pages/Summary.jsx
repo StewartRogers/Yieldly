@@ -39,6 +39,7 @@ function CashCell({ portfolio, onRefresh }) {
       <td style={{ textAlign: 'right' }}>
         <form className="cash-inline-form" onSubmit={save}>
           <Input className="h-7 w-28 text-right tabular-nums" type="text" inputMode="decimal"
+            aria-label={`Cash balance for ${portfolio.name || portfolio.code}`}
             value={input} onChange={e => setInput(e.target.value)} placeholder="Amount" autoFocus />
           <button type="submit" className="tc-btn sm ghost" title="Save" style={{ padding: '0 6px' }}><Check size={13} /></button>
           <button type="button" className="tc-btn sm ghost" onClick={cancel} title="Cancel" style={{ padding: '0 6px' }}>✕</button>

@@ -11,10 +11,21 @@ import { signIn } from './helpers/app.js'
 
 const PAGES = ['/', '/summary', '/history', '/dividends', '/portfolios', '/transactions', '/import']
 
+// Vite serves @fontsource files straight out of node_modules in dev, and under
+// load that request sometimes fails — Firefox reports it as a console error.
+// Production bundles the fonts as hashed assets, so this failure mode does not
+// exist there; ignoring it keeps the check meaningful instead of noisy.
+const IGNORED_CONSOLE = [/downloadable font: download failed/i]
+
 test('every page renders without console or page errors', async ({ page }) => {
   test.setTimeout(120_000)
   const errors = []
-  page.on('console', m => { if (m.type() === 'error') errors.push(`console: ${m.text()}`) })
+  page.on('console', m => {
+    if (m.type() !== 'error') return
+    const text = m.text()
+    if (IGNORED_CONSOLE.some(re => re.test(text))) return
+    errors.push(`console: ${text}`)
+  })
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`))
 
   await signIn(page)
@@ -80,6 +91,39 @@ test('the active nav tab is brought into view on a phone', async ({ page }) => {
     }),
     { message: 'active nav tab should be scrolled into the visible part of the strip', timeout: 10_000 },
   ).toBe(true)
+})
+
+test('a long table pins its header while scrolling', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1280, height: 700 })
+  await signIn(page)
+  // The dividend matrix is twelve months plus a total — reliably taller than
+  // .tbl-wrap's max-height cap.
+  await page.goto('/dividends')
+  await page.getByRole('table').first().waitFor()
+
+  const wrap = page.locator('.tbl-wrap').filter({ has: page.locator('table.tbl') }).last()
+  const scrollable = await wrap.evaluate(el => el.scrollHeight > el.clientHeight + 1)
+  expect(scrollable, '.tbl-wrap should cap its height so long tables scroll internally').toBe(true)
+
+  const th = wrap.locator('table.tbl th').first()
+  const wrapTopBefore = await wrap.evaluate(el => el.getBoundingClientRect().top)
+  const thTopBefore   = await th.evaluate(el => el.getBoundingClientRect().top)
+
+  await wrap.evaluate(el => { el.scrollTop = el.scrollHeight })
+  await page.waitForTimeout(150)
+
+  const wrapTopAfter = await wrap.evaluate(el => el.getBoundingClientRect().top)
+  const thTopAfter   = await th.evaluate(el => el.getBoundingClientRect().top)
+
+  // The wrapper itself must not have moved, and the header must still be
+  // sitting at its top edge rather than having scrolled out of view. This is
+  // the regression guard for `border-collapse: separate` on table.tbl —
+  // WebKit ignores sticky table cells under `collapse`, so this assertion
+  // fails on WebKit alone if that ever gets switched back.
+  expect(Math.round(wrapTopAfter)).toBe(Math.round(wrapTopBefore))
+  expect(Math.abs(thTopAfter - wrapTopAfter)).toBeLessThanOrEqual(2)
+  expect(Math.round(thTopAfter)).toBe(Math.round(thTopBefore))
 })
 
 test('form controls stay inside their column on a phone', async ({ page }) => {

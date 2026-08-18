@@ -67,7 +67,7 @@ export default function Home() {
             ))}
           </div>
           <div className="row" style={{ marginTop: 16, opacity: 0.55, pointerEvents: 'none' }}>
-            <Input placeholder="Ask about your portfolio…" style={{ flex: 1 }} disabled />
+            <Input aria-label="Ask about your portfolio (preview only)" placeholder="Ask about your portfolio…" style={{ flex: 1 }} disabled />
             <Button disabled size="sm">Send</Button>
           </div>
           <p className="note" style={{ justifyContent: 'center', marginTop: 10 }}>

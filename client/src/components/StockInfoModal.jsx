@@ -67,20 +67,20 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
         <form id="stock-info-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Market Price</label>
-              <Input type="number" step="0.01" placeholder="0.00"
+              <label className="text-sm font-medium" htmlFor="si-market-price">Market Price</label>
+              <Input id="si-market-price" type="number" step="0.01" placeholder="0.00"
                 value={form.marketPrice} onChange={set('marketPrice')} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium">Sector</label>
-                <Input type="text" placeholder="e.g. Financials"
+                <label className="text-sm font-medium" htmlFor="si-sector">Sector</label>
+                <Input id="si-sector" type="text" placeholder="e.g. Financials"
                   value={form.sector} onChange={set('sector')} />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium">Type</label>
+                <label className="text-sm font-medium" htmlFor="si-type">Type</label>
                 <Select value={form.investmentType} onValueChange={setVal('investmentType')}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="si-type" className="w-full">
                     <span className="flex flex-1 text-left text-sm" style={{ color: form.investmentType ? undefined : 'var(--tc-muted)' }}>
                       {({ S: 'S — Stock', E: 'E — ETF/Index', X: 'X — Other' }[form.investmentType]) ?? '—'}
                     </span>
@@ -99,9 +99,9 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
             <p className="text-sm font-medium text-muted-foreground">Dividend Information</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium">Frequency</label>
+                <label className="text-sm font-medium" htmlFor="si-frequency">Frequency</label>
                 <Select value={form.dividendFrequency} onValueChange={setVal('dividendFrequency')}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="si-frequency" className="w-full">
                     <span className="flex flex-1 text-left text-sm" style={{ color: form.dividendFrequency ? undefined : 'var(--tc-muted)' }}>
                       {form.dividendFrequency || 'None'}
                     </span>
@@ -115,14 +115,14 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
                 </Select>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium">Per Share Amount</label>
-                <Input type="number" step="0.01" placeholder="0.00"
+                <label className="text-sm font-medium" htmlFor="si-per-share">Per Share Amount</label>
+                <Input id="si-per-share" type="number" step="0.01" placeholder="0.00"
                   value={form.dividendPerShare} onChange={set('dividendPerShare')} />
               </div>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Last Dividend Date</label>
-              <Input type="date" value={form.lastDividendDate} onChange={set('lastDividendDate')} />
+              <label className="text-sm font-medium" htmlFor="si-last-div-date">Last Dividend Date</label>
+              <Input id="si-last-div-date" type="date" value={form.lastDividendDate} onChange={set('lastDividendDate')} />
             </div>
           </div>
         </form>

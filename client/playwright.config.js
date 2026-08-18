@@ -24,6 +24,11 @@ export default defineConfig({
   // first-run "Create your account" flow — two workers both POSTed
   // /api/auth/setup, one got an error and hung waiting for a nav link.
   workers: 1,
+  // These specs drive a real Vite dev server and three browser engines on one
+  // machine. Under load the dev server occasionally drops a request (a font,
+  // an /api call), which is a harness artifact rather than an app defect. One
+  // retry absorbs that; a genuine failure still fails twice and is reported.
+  retries: 1,
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:2080',

@@ -61,7 +61,9 @@ and is the only way to catch Safari-specific breakage without a Mac.
 - `responsive.spec.js` — asserts no page scrolls horizontally at 390/768/1440 px.
   Wide content is fine, but it must scroll inside its own container.
 - `cross-browser.spec.js` — console/page errors, table scroll containment,
-  mobile nav behaviour, form-control sizing.
+  sticky table headers, mobile nav behaviour, form-control sizing.
+- `accessibility.spec.js` — every visible control has an accessible name, and
+  clicking a field's label focuses it.
 - `transactions-ticker-filter.spec.js` — the ticker filter.
 - `auth.setup.js` — a `setup` project that logs in **once** and saves the JWT
   cookie for the others via `storageState`. This is not an optimisation: the
@@ -126,6 +128,9 @@ This is a single-user portfolio tracker with stateless JWT authentication (one s
 - **No percentage widths on flex items in a wrapping container.** A percentage cannot resolve while the parent's intrinsic width is being measured, so the browser substitutes max-content and that becomes the parent's minimum. Use `flex-basis` (see `.pills.full`) — an inline `width: 100%` here forced a 690 px card onto a 390 px phone.
 - **`table.tbl` must keep `border-collapse: separate`.** WebKit ignores `position: sticky` on `<th>`/`<td>` under `border-collapse: collapse`. (Those sticky headers are currently inert in *every* engine — `overflow-x: auto` on `.tbl-wrap` makes it the sticky scrollport, and it has no height limit. Activating them means capping `.tbl-wrap`'s height, which is a layout decision, not a compat fix.)
 - Fixed px font sizes on headlines are clamped (`.hero-total`, `.page-title`, `.home-hero-title`) — a seven-figure total at 56 px is wider than a phone.
+- **`.tbl-wrap`'s `max-height` is what makes the sticky `<th>` work.** Setting `overflow-x` makes `overflow-y` compute to `auto`, which makes `.tbl-wrap` itself the scrollport for any sticky descendant; without a height cap there is nothing to scroll within it and the header just leaves with the page. Remove the cap and the sticky header silently stops working everywhere.
+
+**Form labels.** `.tc-field` renders `<label>` and its control as siblings, so every label needs an explicit `htmlFor` pointing at the control's `id` — there is no wrapping to fall back on. Base UI's `SelectTrigger` forwards `id` onto a `<button>`, which is a labelable element, so the same pattern works for selects. Controls with no visible label (inline cash edits, the portfolio name/code boxes) carry an `aria-label` instead; a placeholder is not an accessible name. `accessibility.spec.js` fails if any visible control ends up without a name.
 
 ## Financial correctness
 
@@ -142,6 +147,25 @@ The money math is the heart of this app, and several rules are non-obvious and e
 Run `npm test` after touching `lib/compute.js` or the `HOLDINGS_SQL` aggregation in `lib/holdings.js`.
 
 **Resolved:** ACB used to be prorated from all-time `sharesBought`/`buyTotal`, which only equalled average-cost ACB when every buy preceded every sell — a buy→sell→buy sequence re-averaged the sold lot's cost back into the remaining shares (e.g. buy 100@$10, sell 50@$12, buy 50@$20 used to report ACB $1,333.33 where CRA average-cost is $1,500.00). Fixed by walking transactions in date order (`computeRunningACB`/`applyRunningACB` in `lib/compute.js`) instead of pre-aggregating the order away; this changed displayed ACB and return % for any position with a buy after a sell. Regression coverage in `test-full.js` section C2.
+
+## Stylesheet
+
+`client/src/style.css` holds the hand-written Terminal Calm layer; Tailwind
+utilities and the shadcn primitives cover everything else. About half the file
+was dead when the Terminal Calm port landed — 261 rules for classes that no
+longer appeared in any component — and has been removed. If you delete a
+component, delete its rules with it.
+
+Two things make a class look unused when it is not, so check both before
+removing anything:
+- **Runtime-assembled class names.** `` `type ${t.type.toLowerCase()}` ``
+  (HoldingTransactionsModal), `TYPE_BADGE` → `` `tc-badge ${cls}` ``
+  (Transactions), `` `toast toast--${variant}` `` (toast.jsx) and `retClass()`
+  → `positive`/`negative` (utils/format.js) all build class names from data, so
+  grepping for the literal finds nothing.
+- **Compound selectors.** `.type` is live but `.transaction-item .type` is
+  dead, because `.transaction-item` no longer exists. Judge the whole
+  selector, not the individual class names in it.
 
 ## Project skills
 

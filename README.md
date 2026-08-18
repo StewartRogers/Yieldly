@@ -68,7 +68,11 @@ and desktop widths:
 
 The layout is responsive from 390 px up: page content reflows to a single
 column on a phone, and wide financial tables scroll horizontally inside their
-own container rather than pushing the page sideways.
+own container rather than pushing the page sideways. Long tables keep their
+column headers pinned while you scroll them.
+
+Every form field is associated with its label, so labels are click-to-focus
+and screen readers announce each field.
 
 To run the browser suite yourself:
 
