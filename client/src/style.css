@@ -1,7 +1,7 @@
 /* Layered (not left bare) so it sits below Tailwind's "utilities" layer in
    cascade priority — an unlayered rule would otherwise always beat every
    Tailwind utility regardless of specificity, silently zeroing out any
-   px-*/py-* padding utility on every element in the app. */
+   px- or py- padding utility on every element in the app. */
 @layer base {
   * {
     margin: 0;
