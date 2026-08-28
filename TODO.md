@@ -56,6 +56,18 @@ and some have shifted. Symbol names are reliable.
 
 ## P2 — Correctness (server)
 
+- [ ] **Transactions can be dated in the future.** `isValidISODate`
+      (`app.js:44`) only checks that the string is a real calendar date — it
+      has no upper bound, so `POST /api/transactions` (`app.js:937`) and the
+      transfer route (`app.js:1146`) both accept a date years out. The CSV
+      import's `parseDate` (`lib/parse.js`) is unbounded too, and neither
+      client date input sets a `max` (`Transactions.jsx:518`, `:536`).
+      Reported 2026-08-28 after a mistyped year sorted a new row to the top of
+      the list — `ORDER BY date DESC` puts any future row above everything,
+      and it silently distorts ACB ordering and the monthly buckets as well.
+      Fix at all three write paths, not just the form: bound to today in the
+      market's timezone (a trade dated "tomorrow" is legitimate in a
+      UTC-ahead zone), and add the `max` attribute for immediate feedback.
 - [ ] **DIVIDEND_REINVEST income vanishes from `return` and the dividend
       chart.** DRIP adds to `buy_total` but never to `dividends_paid`, and
       `/api/dividends/monthly` filters `WHERE t.type = 'DIVIDEND'`. BUY 100 @
@@ -178,6 +190,22 @@ and some have shifted. Symbol names are reliable.
       no source file. They don't ship — Vercel installs fresh from the
       lockfiles — but they pollute local `npm audit`. `rm -rf node_modules &&
       npm ci`, and install that CLI globally instead.
+
+---
+
+## Feature requests
+
+- [ ] **Edit an existing transaction.** There is no update path: transactions
+      have `DELETE /api/transactions/:id` (`app.js:1086`) and nothing else —
+      no `PUT`/`PATCH` — so correcting a typo means deleting the row and
+      retyping it. Requested 2026-08-28 (a wrong date, which currently cannot
+      be corrected in place). An edit route has to re-run the same guards as
+      `POST`: the type whitelist, the finite/non-negative number checks, the
+      date validation, the oversell guard against `NET_SHARES`, and the
+      duplicate check — and it must reverse the *old* row's
+      `CASH_BALANCE_DELTA` before applying the new one, or cash drifts on
+      every edit of a CONTRIBUTION/WITHDRAWAL. Editing a `TRANSFER_IN`/`OUT`
+      needs to update its `transfer_peer_id` twin too, or reject outright.
 
 ---
 
