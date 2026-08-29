@@ -60,7 +60,7 @@ function CashCell({ portfolio, onRefresh }) {
   return (
     <td style={{ textAlign: 'right' }} onClick={startEdit} title="Click to edit" className="cursor-pointer select-none">
       <span className="editable num">
-        {fmtCurrencyTrim(portfolio.cash)}
+        {fmtCurrency(portfolio.cash)}
         <span className="pen"><PenLine size={10} /></span>
       </span>
     </td>
@@ -73,7 +73,7 @@ function OverviewTable({ data, onRefresh, totalCash, totalInv, totalMkt }) {
 
   return (
     <>
-      <div className="tbl-wrap">
+      <div className="tbl-wrap no-inner-scroll">
         <table className="tbl">
           <thead>
             <tr>
@@ -103,7 +103,7 @@ function OverviewTable({ data, onRefresh, totalCash, totalInv, totalMkt }) {
               <td>Grand total</td>
               <td style={{ textAlign: 'right' }}>
                 <span className="editable num" style={{ cursor: 'default' }}>
-                  {allCashSet ? fmtCurrencyTrim(totalCash) : '—'}
+                  {allCashSet ? fmtCurrency(totalCash) : '—'}
                   <span className="pen" style={{ visibility: 'hidden' }}><PenLine size={10} /></span>
                 </span>
               </td>

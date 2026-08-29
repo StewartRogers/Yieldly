@@ -524,6 +524,13 @@ h2 {
   max-height: min(70vh, 640px);
 }
 
+/* Opt-out for tables that are short by nature (one row per portfolio/month)
+   and where the user wants the full table visible on the page rather than
+   scrolling inside its own box. Loses the sticky header along with the cap —
+   there's nothing to pin against once the wrapper can't scroll — but these
+   tables are short enough that a sticky header buys nothing anyway. */
+.tbl-wrap.no-inner-scroll { max-height: none; overflow-y: visible; }
+
 /* border-collapse MUST stay `separate` here.
    WebKit does not honour `position: sticky` on <th>/<td> in a table with
    `border-collapse: collapse`, so the `position: sticky` on `table.tbl th`

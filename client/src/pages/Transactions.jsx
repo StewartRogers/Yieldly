@@ -3,6 +3,8 @@ import { fmtCurrency } from '../utils/format'
 import { getPortfolioTransactions, createTransaction, updateTransaction, createTransfer, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import { Trash2, Pencil, X } from 'lucide-react'
 
@@ -184,6 +186,13 @@ export default function Transactions({ portfolios }) {
   const [loading, setLoading]                 = useState(false)
   const [loadError, setLoadError]             = useState('')
   const [editingId, setEditingId]             = useState(null)
+  // Pending yes/no confirmation, shown as an in-app Dialog rather than the
+  // native confirm() — { title, message, confirmLabel, destructive, resolve }
+  // while open, null otherwise. `resolve` is the pending Promise's resolver
+  // so callers can `await` the user's choice.
+  const [pendingConfirm, setPendingConfirm] = useState(null)
+  const askConfirm = (opts) =>
+    new Promise(resolve => setPendingConfirm({ confirmLabel: 'Confirm', ...opts, resolve }))
 
   const isTransfer = type === 'TRANSFER'
   const isCashOnly = CASH_ONLY_TYPES.has(type) || isTransfer
@@ -309,7 +318,12 @@ export default function Transactions({ portfolios }) {
       await save(txn)
     } catch (err) {
       if (err.code === 'DUPLICATE_TRANSACTION') {
-        if (!confirm(`${err.message}. Save it anyway?`)) return
+        const ok = await askConfirm({
+          title: 'Possible duplicate transaction',
+          message: `${err.message}. Save it anyway?`,
+          confirmLabel: 'Save anyway',
+        })
+        if (!ok) return
         try {
           await save({ ...txn, confirm_duplicate: true })
         } catch (err2) { toast.error(err2.message); return }
@@ -347,10 +361,16 @@ export default function Transactions({ portfolios }) {
   }
 
   const deleteTxn = async (t) => {
-    const msg = TRANSFER_LEG_TYPES.has(t.type)
-      ? 'Delete this transfer? This removes both the outgoing and incoming entries.'
-      : 'Delete this transaction?'
-    if (!confirm(msg)) return
+    const isTransferLeg = TRANSFER_LEG_TYPES.has(t.type)
+    const ok = await askConfirm({
+      title: isTransferLeg ? 'Delete transfer?' : 'Delete transaction?',
+      message: isTransferLeg
+        ? 'This removes both the outgoing and incoming entries. This cannot be undone.'
+        : 'This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
     try {
       await deleteTransaction(t.id)
       if (editingId === t.id) cancelEdit()
@@ -763,6 +783,27 @@ export default function Transactions({ portfolios }) {
         })}
         <span className="note">each type has its own hue + dot</span>
       </div>
+
+      <Dialog open={!!pendingConfirm} onOpenChange={open => {
+        if (!open) setPendingConfirm(c => { c?.resolve(false); return null })
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{pendingConfirm?.title}</DialogTitle>
+            <DialogDescription>{pendingConfirm?.message}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" type="button"
+              onClick={() => setPendingConfirm(c => { c?.resolve(false); return null })}>
+              Cancel
+            </Button>
+            <Button type="button" variant={pendingConfirm?.destructive ? 'destructive' : 'default'}
+              onClick={() => setPendingConfirm(c => { c?.resolve(true); return null })}>
+              {pendingConfirm?.confirmLabel}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

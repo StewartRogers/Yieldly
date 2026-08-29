@@ -129,7 +129,7 @@ function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
   const labelStyle = { width: `${labelCh}ch`, minWidth: `${labelCh}ch` }
 
   return (
-    <div className="tbl-wrap">
+    <div className="tbl-wrap no-inner-scroll">
       <table className="tbl matrix">
         <colgroup>
           <col style={labelStyle} />

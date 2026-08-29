@@ -27,7 +27,7 @@ function fmtDaysAway(n) {
 
 function UpcomingDividends({ data }) {
   return (
-    <div className="tbl-wrap">
+    <div className="tbl-wrap no-inner-scroll">
       <table className="tbl">
         <thead>
           <tr>
@@ -256,7 +256,7 @@ function DividendMatrix({ data }) {
   }
 
   return (
-    <div className="tbl-wrap">
+    <div className="tbl-wrap no-inner-scroll">
       <table className="tbl matrix">
         <thead>
           <tr>
