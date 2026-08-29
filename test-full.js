@@ -878,6 +878,20 @@ section('C2g. computeMonthlyACB — over-sell clamps at zero, never negative');
   check('Feb = $0, not negative', acb.find(r => r.month === 2)?.total_acb, 0);
 }
 
+section('C2h. computeMonthlyACB — default `now` is Pacific-pinned, not server-local');
+{
+  // Bypasses the FIXED_NOW test wrapper to exercise the real default.
+  const txRows = [
+    { portfolio_id: 991, ticker: 'RY.TO', type: 'BUY', quantity: 10, total: 100, commission: 0, date: '2024-01-15' },
+  ];
+  const acb = _computeMonthlyACB(txRows);
+  const pacificNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const expectedLastMonth = { year: pacificNow.getFullYear(), month: pacificNow.getMonth() + 1 };
+  const lastRow = acb[acb.length - 1];
+  check('last row is the current Pacific year', lastRow?.year, expectedLastMonth.year);
+  check('last row is the current Pacific month', lastRow?.month, expectedLastMonth.month);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  PART D — CSV import parsing
 // ─────────────────────────────────────────────────────────────────────────────

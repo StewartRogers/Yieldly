@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { fmtCurrency } from '../utils/format'
-import { getPortfolioTransactions, createTransaction, createTransfer, deleteTransaction } from '../api/client'
+import { getPortfolioTransactions, createTransaction, updateTransaction, createTransfer, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
-import { Trash2, X } from 'lucide-react'
+import { Trash2, Pencil, X } from 'lucide-react'
 
 const PER_PAGE = 20
 const CASH_ONLY_TYPES = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
@@ -183,6 +183,7 @@ export default function Transactions({ portfolios }) {
   const [page, setPage]                       = useState(1)
   const [loading, setLoading]                 = useState(false)
   const [loadError, setLoadError]             = useState('')
+  const [editingId, setEditingId]             = useState(null)
 
   const isTransfer = type === 'TRANSFER'
   const isCashOnly = CASH_ONLY_TYPES.has(type) || isTransfer
@@ -301,12 +302,48 @@ export default function Transactions({ portfolios }) {
       const c = parseFloat(commission) || 0
       if (c > 0) txn.commission = c
     }
+    const save = editingId
+      ? (data) => updateTransaction(editingId, data)
+      : createTransaction
     try {
-      await createTransaction(txn)
-      setTicker(''); setQuantity(''); setPrice(''); setCashTotal('')
-      setCommission(''); setDate(todayLocal()); setMarket('TMX')
-      loadAllTxns()
-    } catch (err) { toast.error(err.message) }
+      await save(txn)
+    } catch (err) {
+      if (err.code === 'DUPLICATE_TRANSACTION') {
+        if (!confirm(`${err.message}. Save it anyway?`)) return
+        try {
+          await save({ ...txn, confirm_duplicate: true })
+        } catch (err2) { toast.error(err2.message); return }
+      } else {
+        toast.error(err.message)
+        return
+      }
+    }
+    setEditingId(null)
+    setTicker(''); setQuantity(''); setPrice(''); setCashTotal('')
+    setCommission(''); setDate(todayLocal()); setMarket('TMX')
+    loadAllTxns()
+  }
+
+  // Populates the form from an existing row and switches it into edit mode.
+  // Transfer legs are excluded (see the "Edit" button below) — the server
+  // rejects PUT on them outright since editing one leg would desync its twin.
+  const startEdit = (t) => {
+    setEditingId(t.id)
+    setFormPortfolioId(String(t._portfolioId))
+    setType(t.type)
+    setTicker(t.ticker === 'CASH' ? '' : t.ticker)
+    setQuantity(t.quantity > 0 ? String(t.quantity) : '')
+    setPrice(parseFloat(t.price) > 0 ? String(t.price) : '')
+    setCashTotal(String(t.total))
+    setCommission(t.commission > 0 ? String(t.commission) : '')
+    setDate(t.date)
+    setMarket(t.market || 'TMX')
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setTicker(''); setQuantity(''); setPrice(''); setCashTotal('')
+    setCommission(''); setDate(todayLocal()); setMarket('TMX')
   }
 
   const deleteTxn = async (t) => {
@@ -316,6 +353,7 @@ export default function Transactions({ portfolios }) {
     if (!confirm(msg)) return
     try {
       await deleteTransaction(t.id)
+      if (editingId === t.id) cancelEdit()
       loadAllTxns()
     } catch (err) { toast.error(err.message) }
   }
@@ -361,10 +399,17 @@ export default function Transactions({ portfolios }) {
 
       <div className="tx-layout">
 
-        {/* ── Add Transaction form ── */}
+        {/* ── Add/Edit Transaction form ── */}
         <div className="tc-card tc-card-pad">
-          <div className="disp" style={{ fontSize: 17, fontWeight: 600, marginBottom: 14, color: 'var(--ink)' }}>
-            Add transaction
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div className="disp" style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink)' }}>
+              {editingId ? 'Edit transaction' : 'Add transaction'}
+            </div>
+            {editingId && (
+              <button type="button" className="tc-btn sm ghost" onClick={cancelEdit}>
+                Cancel
+              </button>
+            )}
           </div>
           <form onSubmit={handleSubmit} className="col" style={{ gap: 12 }}>
 
@@ -441,7 +486,11 @@ export default function Transactions({ portfolios }) {
                   <SelectItem value="DIVIDEND_REINVEST">Dividend Reinvest</SelectItem>
                   <SelectItem value="CONTRIBUTION">Contribution</SelectItem>
                   <SelectItem value="WITHDRAWAL">Withdrawal</SelectItem>
-                  <SelectItem value="TRANSFER">Transfer</SelectItem>
+                  {/* Editing a transaction into a Transfer would create a new
+                      transfer via createTransfer() rather than update this
+                      row, and the server rejects PUT on transfer legs
+                      outright — so the option is hidden while editing. */}
+                  {!editingId && <SelectItem value="TRANSFER">Transfer</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -515,7 +564,7 @@ export default function Transactions({ portfolios }) {
                   </div>
                   <div className="tc-field">
                     <label htmlFor="tx-date">Date</label>
-                    <Input id="tx-date" className="h-9" type="date" value={date}
+                    <Input id="tx-date" className="h-9" type="date" value={date} max={todayLocal()}
                       style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                       onChange={e => setDate(e.target.value)} required />
                   </div>
@@ -533,14 +582,16 @@ export default function Transactions({ portfolios }) {
                 </div>
                 <div className="tc-field">
                   <label htmlFor="tx-cash-date">Date</label>
-                  <Input id="tx-cash-date" className="h-9" type="date" value={date}
+                  <Input id="tx-cash-date" className="h-9" type="date" value={date} max={todayLocal()}
                     style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
                     onChange={e => setDate(e.target.value)} required />
                 </div>
               </div>
             )}
 
-            <button type="submit" className="tc-btn primary block mt2">+ Add transaction</button>
+            <button type="submit" className="tc-btn primary block mt2">
+              {editingId ? 'Save changes' : '+ Add transaction'}
+            </button>
           </form>
 
           <div className="note" style={{ justifyContent: 'center', textAlign: 'center', lineHeight: 1.5, marginTop: 12 }}>
@@ -667,14 +718,26 @@ export default function Transactions({ portfolios }) {
                           <td className="num">{fmtCurrency(parseFloat(t.total))}</td>
                           <td className="num" style={{ color: 'var(--tc-muted)' }}>{t.date}</td>
                           <td>
-                            <button
-                              className="tc-btn sm ghost danger"
-                              onClick={() => deleteTxn(t)}
-                              title={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
-                              aria-label={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
-                            >
-                              <Trash2 size={12} />
-                            </button>
+                            <div className="row" style={{ gap: 4 }}>
+                              {!TRANSFER_LEG_TYPES.has(t.type) && (
+                                <button
+                                  className="tc-btn sm ghost"
+                                  onClick={() => startEdit(t)}
+                                  title="Edit transaction"
+                                  aria-label="Edit transaction"
+                                >
+                                  <Pencil size={12} />
+                                </button>
+                              )}
+                              <button
+                                className="tc-btn sm ghost danger"
+                                onClick={() => deleteTxn(t)}
+                                title={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
+                                aria-label={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )

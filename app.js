@@ -47,6 +47,14 @@ const isValidISODate = (v) => {
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 };
+
+// "Today" for the future-date bound, pinned to Pacific time rather than the
+// server's own clock (UTC in production, whatever the dev machine is
+// locally) — so the bound doesn't shift depending on where the code runs.
+const todayPacific = () =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+const isFutureDate = (v) => v > todayPacific();
 // Accepts numbers or numeric strings; rejects NaN/Infinity/garbage.
 const toFiniteNumber = (v) => {
   if (v === undefined || v === null || v === '') return null;
@@ -937,6 +945,9 @@ function createApp(db, options = {}) {
       if (!isValidISODate(date)) {
         return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD date' });
       }
+      if (isFutureDate(date)) {
+        return res.status(400).json({ error: 'date cannot be in the future' });
+      }
       if (!TRANSACTION_TYPES.has(normalizedType)) {
         return res.status(400).json({ error: 'Invalid transaction type' });
       }
@@ -999,14 +1010,21 @@ function createApp(db, options = {}) {
 
       // Reject an exact duplicate of an existing row (same shape the CSV bulk
       // import already dedupes on) so a double-click or double-submit doesn't
-      // silently double a position.
-      const duplicate = await db.get(
-        `SELECT id FROM transactions
-         WHERE portfolio_id = ? AND ticker = ? AND type = ? AND date = ? AND quantity = ? AND price = ? AND total = ?`,
-        portfolio_id, finalTickerUpper, normalizedType, date, finalQuantity, finalPrice, finalTotal,
-      );
-      if (duplicate) {
-        return res.status(409).json({ error: 'An identical transaction already exists for this portfolio/ticker/date' });
+      // silently double a position. A legitimate duplicate does happen (e.g.
+      // two identical DRIP lots on the same day), so the client can re-submit
+      // with `confirm_duplicate: true` once the user has seen the warning.
+      if (!req.body.confirm_duplicate) {
+        const duplicate = await db.get(
+          `SELECT id FROM transactions
+           WHERE portfolio_id = ? AND ticker = ? AND type = ? AND date = ? AND quantity = ? AND price = ? AND total = ?`,
+          portfolio_id, finalTickerUpper, normalizedType, date, finalQuantity, finalPrice, finalTotal,
+        );
+        if (duplicate) {
+          return res.status(409).json({
+            error: 'An identical transaction already exists for this portfolio/ticker/date',
+            code: 'DUPLICATE_TRANSACTION',
+          });
+        }
       }
 
       const cashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal) || 0;
@@ -1129,6 +1147,184 @@ function createApp(db, options = {}) {
     }
   });
 
+  app.put('/api/transactions/:id', async (req, res) => {
+    try {
+      const existing = await db.get('SELECT * FROM transactions WHERE id = ?', req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: 'Transaction not found' });
+      }
+      // A transfer's two legs are linked by transfer_peer_id and must stay in
+      // sync across two portfolios' cash_balance — editing one side in place
+      // would desync the twin. Simpler and safer to require delete + recreate
+      // via POST /api/transfers, same as the TODO called out.
+      if (existing.transfer_peer_id || existing.type === 'TRANSFER_IN' || existing.type === 'TRANSFER_OUT') {
+        return res.status(400).json({ error: 'Transfers cannot be edited — delete and recreate them instead' });
+      }
+
+      // Re-run every guard POST /api/transactions applies — an edit is just a
+      // write with different validity math (see below), not a lesser check.
+      const { portfolio_id, ticker, type, quantity, price, total, date, commission, market } = req.body;
+
+      const normalizedType = typeof type === 'string' ? type.toUpperCase() : type;
+      if (normalizedType === 'TRANSFER_IN' || normalizedType === 'TRANSFER_OUT') {
+        return res.status(400).json({ error: 'Use POST /api/transfers to move cash between portfolios' });
+      }
+      const isCashFlow = normalizedType === 'CONTRIBUTION' || normalizedType === 'WITHDRAWAL';
+      const finalTicker = (isCashFlow && !ticker) ? 'CASH' : ticker;
+
+      if (!portfolio_id || !finalTicker || !type || !date) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+      if (!isValidISODate(date)) {
+        return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD date' });
+      }
+      if (isFutureDate(date)) {
+        return res.status(400).json({ error: 'date cannot be in the future' });
+      }
+      if (!TRANSACTION_TYPES.has(normalizedType)) {
+        return res.status(400).json({ error: 'Invalid transaction type' });
+      }
+      if (finalTicker !== 'CASH' && !TICKER_REGEX.test(finalTicker.toUpperCase())) {
+        return res.status(400).json({ error: 'Invalid ticker' });
+      }
+      const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolio_id);
+      if (!portfolio) {
+        return res.status(404).json({ error: 'Portfolio not found' });
+      }
+
+      const numericFields = { quantity, price, total, commission };
+      for (const [field, value] of Object.entries(numericFields)) {
+        if (value === undefined) continue;
+        const n = toFiniteNumber(value);
+        if (n === null || Number.isNaN(n)) {
+          return res.status(400).json({ error: `${field} must be a number` });
+        }
+        if (n < 0) {
+          return res.status(400).json({ error: `${field} cannot be negative` });
+        }
+      }
+
+      const finalQuantity = quantity !== undefined ? Number(quantity) : 0;
+      const finalPrice = price !== undefined ? Number(price) : 0;
+      const finalTotal = total !== undefined ? Number(total) : (finalQuantity * finalPrice);
+      if (!isFiniteNumber(finalTotal)) {
+        return res.status(400).json({ error: 'total could not be computed' });
+      }
+
+      const finalTickerUpper = finalTicker.toUpperCase();
+
+      // Same ownership/oversell guard as POST, but excluding this row's own
+      // current values from NET_SHARES — otherwise editing a BUY's quantity
+      // down would compare a SELL against a share count that still includes
+      // the pre-edit BUY, and editing this row's own SELL would double-count
+      // it against itself.
+      if (normalizedType === 'SELL' || normalizedType === 'DIVIDEND' || normalizedType === 'DIVIDEND_REINVEST') {
+        const row = await db.get(
+          `SELECT COALESCE(${NET_SHARES}, 0) AS shares FROM transactions t
+           WHERE t.portfolio_id = ? AND t.ticker = ? AND t.id != ?`,
+          portfolio_id, finalTickerUpper, existing.id,
+        );
+        const currentShares = Number(row?.shares) || 0;
+        if (currentShares <= 0) {
+          return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
+        }
+        if (normalizedType === 'SELL' && finalQuantity > currentShares) {
+          return res.status(400).json({
+            error: `Cannot sell ${finalQuantity} shares of ${finalTickerUpper} — only ${currentShares} held in this portfolio`,
+          });
+        }
+      }
+
+      // Same duplicate guard as POST, excluding this row itself (otherwise a
+      // no-op edit — same values, e.g. just fixing the market field — would
+      // always collide with its own pre-edit row).
+      if (!req.body.confirm_duplicate) {
+        const duplicate = await db.get(
+          `SELECT id FROM transactions
+           WHERE portfolio_id = ? AND ticker = ? AND type = ? AND date = ? AND quantity = ? AND price = ? AND total = ? AND id != ?`,
+          portfolio_id, finalTickerUpper, normalizedType, date, finalQuantity, finalPrice, finalTotal, existing.id,
+        );
+        if (duplicate) {
+          return res.status(409).json({
+            error: 'An identical transaction already exists for this portfolio/ticker/date',
+            code: 'DUPLICATE_TRANSACTION',
+          });
+        }
+      }
+
+      // The old row's CASH_BALANCE_DELTA must be reversed before the new one
+      // is applied, or cash drifts on every edit of a CONTRIBUTION/WITHDRAWAL
+      // — reversing against the *old* portfolio_id/type/total in case those
+      // changed too (e.g. moving the entry to a different portfolio).
+      const oldCashDelta = CASH_BALANCE_DELTA[existing.type]?.(existing.total) || 0;
+      const newCashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal) || 0;
+
+      let nextDividendDate = null;
+      if (normalizedType === 'DIVIDEND' || normalizedType === 'DIVIDEND_REINVEST') {
+        const info = await db.get(
+          'SELECT dividend_frequency FROM stock_info WHERE portfolio_id = ? AND ticker = ?',
+          portfolio_id, finalTickerUpper,
+        );
+        nextDividendDate = guessNextDividendDate(date, info?.dividend_frequency);
+      }
+
+      const tx = await db.transaction('write');
+      try {
+        await tx.execute({
+          sql: `UPDATE transactions SET portfolio_id = ?, ticker = ?, type = ?, quantity = ?, price = ?, total = ?, commission = ?, date = ?, market = ? WHERE id = ?`,
+          args: [portfolio_id, finalTickerUpper, normalizedType, finalQuantity, finalPrice, finalTotal,
+                 commission ? Number(commission) : 0, date, market || existing.market || 'TMX', existing.id],
+        });
+        if (existing.portfolio_id !== portfolio_id) {
+          if (oldCashDelta !== 0) {
+            await tx.execute({
+              sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) - ? WHERE id = ?',
+              args: [oldCashDelta, existing.portfolio_id],
+            });
+          }
+          if (newCashDelta !== 0) {
+            await tx.execute({
+              sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
+              args: [newCashDelta, portfolio_id],
+            });
+          }
+        } else {
+          const netDelta = newCashDelta - oldCashDelta;
+          if (netDelta !== 0) {
+            await tx.execute({
+              sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
+              args: [netDelta, portfolio_id],
+            });
+          }
+        }
+        if (nextDividendDate) {
+          await tx.execute({
+            sql: 'UPDATE stock_info SET next_dividend_date = ?, updated_at = CURRENT_TIMESTAMP WHERE portfolio_id = ? AND ticker = ?',
+            args: [nextDividendDate, portfolio_id, finalTickerUpper],
+          });
+        }
+        await tx.commit();
+      } catch (e) {
+        await tx.rollback();
+        throw e;
+      }
+
+      res.json({
+        id: existing.id,
+        portfolio_id,
+        ticker: finalTickerUpper,
+        type: normalizedType,
+        quantity: finalQuantity,
+        price: finalPrice,
+        total: finalTotal,
+        commission: commission ? Number(commission) : 0,
+        date,
+      });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
   // Cash moved between two of the user's own portfolios (e.g. RRSP -> TFSA).
   // Recorded as two linked ledger rows (TRANSFER_OUT / TRANSFER_IN) rather than
   // a single CONTRIBUTION+WITHDRAWAL pair, so it can be told apart from real
@@ -1145,6 +1341,9 @@ function createApp(db, options = {}) {
       }
       if (!isValidISODate(date)) {
         return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD date' });
+      }
+      if (isFutureDate(date)) {
+        return res.status(400).json({ error: 'date cannot be in the future' });
       }
       const finalAmount = toFiniteNumber(amount);
       if (finalAmount === null || Number.isNaN(finalAmount)) {
@@ -1303,6 +1502,10 @@ function createApp(db, options = {}) {
           const parsedDate = parseDate(dateStr);
           if (!parsedDate) {
             errors.push({ line: i + 1, error: `Unrecognized date '${dateStr}' — expected DD-MMM-YY, DD-MMM-YYYY, or YYYY-MM-DD`, data: truncate(line) });
+            continue;
+          }
+          if (isFutureDate(parsedDate)) {
+            errors.push({ line: i + 1, error: `Date '${dateStr}' is in the future`, data: truncate(line) });
             continue;
           }
 
@@ -1641,7 +1844,18 @@ async function fetchYahooQuote(ticker, retry = true) {
 
 // ─── Monthly ACB (pure; no DB dependency) ────────────────────────────────────
 
-function computeMonthlyACB(allTxRows, now = new Date()) {
+// Pacific-pinned "now" for computeMonthlyACB's default, matching isFutureDate
+// above — the previous default (`new Date()`) read the *server's* local time
+// (UTC in production), so a UTC evening call to /api/summary/monthly-acb
+// could compute one month later than the same moment shows anywhere else.
+// The toLocaleString round-trip re-parses Pacific wall-clock components as if
+// they were the server's own local time, so the plain `now.getFullYear()`/
+// `now.getMonth()` calls below (unchanged, and still exactly what explicit
+// callers like the test suite get when they pass their own `now`) read
+// Pacific values regardless of what timezone the server process is in.
+const nowInPacific = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+
+function computeMonthlyACB(allTxRows, now = nowInPacific()) {
   // Guard against malformed dates (e.g. from a corrupted/hand-edited backup
   // restore) reaching the substring(0, 7) month-key logic below, which assumes
   // a well-formed YYYY-MM-DD string.

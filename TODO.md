@@ -56,18 +56,14 @@ and some have shifted. Symbol names are reliable.
 
 ## P2 — Correctness (server)
 
-- [ ] **Transactions can be dated in the future.** `isValidISODate`
-      (`app.js:44`) only checks that the string is a real calendar date — it
-      has no upper bound, so `POST /api/transactions` (`app.js:937`) and the
-      transfer route (`app.js:1146`) both accept a date years out. The CSV
-      import's `parseDate` (`lib/parse.js`) is unbounded too, and neither
-      client date input sets a `max` (`Transactions.jsx:518`, `:536`).
-      Reported 2026-08-28 after a mistyped year sorted a new row to the top of
-      the list — `ORDER BY date DESC` puts any future row above everything,
-      and it silently distorts ACB ordering and the monthly buckets as well.
-      Fix at all three write paths, not just the form: bound to today in the
-      market's timezone (a trade dated "tomorrow" is legitimate in a
-      UTC-ahead zone), and add the `max` attribute for immediate feedback.
+- [x] **Transactions can be dated in the future.** Fixed 2026-08-28: added
+      `isFutureDate` (`app.js`), comparing against "today" pinned to Pacific
+      time (`America/Los_Angeles`) rather than the server's own clock, so the
+      bound is consistent regardless of where the code runs. Wired into
+      `POST /api/transactions`, the transfer route, and the CSV import's
+      per-row date check. The client date inputs (`Transactions.jsx`) now set
+      `max={todayLocal()}` (client-local, informational only — the server
+      check is authoritative). Regression coverage in `test-auth.js` section 39.
 - [ ] **DIVIDEND_REINVEST income vanishes from `return` and the dividend
       chart.** DRIP adds to `buy_total` but never to `dividends_paid`, and
       `/api/dividends/monthly` filters `WHERE t.type = 'DIVIDEND'`. BUY 100 @
@@ -97,10 +93,10 @@ and some have shifted. Symbol names are reliable.
       so a holding appears in `/api/dividends/upcoming` with a payout it
       contributes $0 of annual income for. The yield-first branch handles the
       same case correctly — the two branches disagree.
-- [ ] **`computeMonthlyACB` reads `now` in local time** while every other date
-      path is UTC/NY-pinned, so on a UTC host it can emit an extra month on the
-      last evening of a month. It also depends on the caller's `ORDER BY`
-      despite being exported as pure.
+- [ ] **`computeMonthlyACB` depends on the caller's `ORDER BY`** despite being
+      exported as pure. (The `now`-in-local-time half of this item is fixed —
+      2026-08-28: its default is now pinned to Pacific time via `nowInPacific`
+      in `app.js`, matching `isFutureDate`.)
 - [ ] **Cron snapshot labels Friday's close as Saturday and Sunday**, adding
       two duplicate weekend rows per week (~40% row inflation). Harmless for
       month-end bucketing; skip the write when the computed date is a weekend.
@@ -195,17 +191,20 @@ and some have shifted. Symbol names are reliable.
 
 ## Feature requests
 
-- [ ] **Edit an existing transaction.** There is no update path: transactions
-      have `DELETE /api/transactions/:id` (`app.js:1086`) and nothing else —
-      no `PUT`/`PATCH` — so correcting a typo means deleting the row and
-      retyping it. Requested 2026-08-28 (a wrong date, which currently cannot
-      be corrected in place). An edit route has to re-run the same guards as
-      `POST`: the type whitelist, the finite/non-negative number checks, the
-      date validation, the oversell guard against `NET_SHARES`, and the
-      duplicate check — and it must reverse the *old* row's
-      `CASH_BALANCE_DELTA` before applying the new one, or cash drifts on
-      every edit of a CONTRIBUTION/WITHDRAWAL. Editing a `TRANSFER_IN`/`OUT`
-      needs to update its `transfer_peer_id` twin too, or reject outright.
+- [x] **Edit an existing transaction.** Implemented 2026-08-28: added
+      `PUT /api/transactions/:id` (`app.js`), re-running every guard
+      `POST /api/transactions` applies (type whitelist, finite/non-negative
+      checks, date/future-date validation, the `NET_SHARES` oversell guard,
+      the duplicate check) with the row's own id excluded from the
+      self-comparisons so a no-op re-save doesn't reject itself. Reverses the
+      *old* row's `CASH_BALANCE_DELTA` before applying the new one (including
+      across a portfolio change). `TRANSFER_IN`/`OUT` legs are rejected
+      outright — delete and recreate via `POST /api/transfers` instead, since
+      editing one leg in place would desync its `transfer_peer_id` twin.
+      Client: `Transactions.jsx` gained an edit (pencil) button per row that
+      loads the form into edit mode with a Cancel affordance; the Transfer
+      type option is hidden while editing. Regression coverage in
+      `test-auth.js` section 46.
 
 ---
 

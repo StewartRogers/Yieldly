@@ -721,6 +721,21 @@ async function run() {
       { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 5, price: 10, total: 50, date: '2024-04-06' }, cookie, cash.base);
     checkEq('same shape but different date → 200 (not a duplicate)', notDupBuy.status, 200);
 
+    checkEq('duplicate 409 body has code DUPLICATE_TRANSACTION', dupBuy2.body.code, 'DUPLICATE_TRANSACTION');
+
+    // Confirmed-duplicate insert is deleted immediately after asserting — later
+    // sections (42) assert CASHA's exact buy_total against ABC+GHI+JKL and can't
+    // absorb an extra $50 ABC lot.
+    const dupBuyConfirmed = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 5, price: 10, total: 50, date: '2024-04-05', confirm_duplicate: true }, cookie, cash.base);
+    checkEq('same duplicate resubmitted with confirm_duplicate:true → 200', dupBuyConfirmed.status, 200);
+    await req('DELETE', `/api/transactions/${dupBuyConfirmed.body.id}`, null, cookie, cash.base);
+
+    const futureDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10);
+    const futureBuy = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 1, price: 1, total: 1, date: futureDate }, cookie, cash.base);
+    checkEq('date 30 days in the future → 400', futureBuy.status, 400);
+
     section('40. Logging a DIVIDEND re-derives next_dividend_date from payment date + frequency');
     await req('PUT', `/api/portfolios/${p1id}/stocks/ABC`,
       { dividend_frequency: 'Quarterly' }, cookie, cash.base);
@@ -821,6 +836,83 @@ async function run() {
 
     const otherPortfolioTxns = await req('GET', `/api/portfolios/${p2id}/transactions/ticker/GHI`, null, cookie, cash.base);
     checkEq('scoped to portfolio — CASHB has no GHI', otherPortfolioTxns.body.length, 0);
+
+    // Isolated on its own ticker (EDT) so nothing here can perturb the fixed
+    // totals section 42 already asserted against ABC/GHI/JKL.
+    section('46. PUT /api/transactions/:id — edit re-runs POST\'s guards, self-excluded');
+    const editNoAuth = await req('PUT', '/api/transactions/1', { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 1, price: 1, total: 1, date: '2024-04-20' }, null, cash.base);
+    checkEq('no cookie → 401', editNoAuth.status, 401);
+
+    const editMissing = await req('PUT', '/api/transactions/999999', { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 1, price: 1, total: 1, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('nonexistent id → 404', editMissing.status, 404);
+
+    const edtBuy = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 10, price: 5, total: 50, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('seed BUY 10 EDT → 200', edtBuy.status, 200);
+
+    const editQty = await req('PUT', `/api/transactions/${edtBuy.body.id}`,
+      { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 20, price: 5, total: 100, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('edit quantity/total → 200', editQty.status, 200);
+    checkEq('response reflects new quantity', editQty.body.quantity, 20);
+    checkEq('response reflects new total', editQty.body.total, 100);
+
+    const edtAfterEdit = await req('GET', `/api/portfolios/${p1id}/transactions/ticker/EDT`, null, cookie, cash.base);
+    checkEq('edit persisted — ticker history shows updated quantity', edtAfterEdit.body[0]?.quantity, 20);
+
+    const noopEdit = await req('PUT', `/api/transactions/${edtBuy.body.id}`,
+      { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 20, price: 5, total: 100, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('no-op re-save of the same row → 200, not 409 (self-excluded from duplicate check)', noopEdit.status, 200);
+
+    const edtBuy2 = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 1, price: 9, total: 9, date: '2024-04-21' }, cookie, cash.base);
+    checkEq('second EDT lot → 200', edtBuy2.status, 200);
+
+    const editIntoDuplicate = await req('PUT', `/api/transactions/${edtBuy2.body.id}`,
+      { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 20, price: 5, total: 100, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('editing a row to match a DIFFERENT existing row → 409 (duplicate check still fires)', editIntoDuplicate.status, 409);
+    checkEq('carries DUPLICATE_TRANSACTION code', editIntoDuplicate.body.code, 'DUPLICATE_TRANSACTION');
+
+    const editIntoDuplicateConfirmed = await req('PUT', `/api/transactions/${edtBuy2.body.id}`,
+      { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 20, price: 5, total: 100, date: '2024-04-20', confirm_duplicate: true }, cookie, cash.base);
+    checkEq('same edit with confirm_duplicate:true → 200', editIntoDuplicateConfirmed.status, 200);
+
+    // 40 EDT shares open now (edtBuy at 20 + edtBuy2 edited to also be a 20-share row).
+    const edtSell = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'EDT', type: 'SELL', quantity: 5, price: 6, total: 30, date: '2024-04-22' }, cookie, cash.base);
+    checkEq('seed SELL 5 EDT → 200', edtSell.status, 200);
+
+    const noopSellEdit = await req('PUT', `/api/transactions/${edtSell.body.id}`,
+      { portfolio_id: p1id, ticker: 'EDT', type: 'SELL', quantity: 5, price: 6, total: 30, date: '2024-04-22' }, cookie, cash.base);
+    checkEq('editing a SELL to its own unchanged quantity → 200 (oversell guard excludes self)', noopSellEdit.status, 200);
+
+    const oversellEdit = await req('PUT', `/api/transactions/${edtSell.body.id}`,
+      { portfolio_id: p1id, ticker: 'EDT', type: 'SELL', quantity: 999, price: 6, total: 5994, date: '2024-04-22' }, cookie, cash.base);
+    checkEq('editing a SELL to exceed current holdings → 400', oversellEdit.status, 400);
+
+    const futureEdit = await req('PUT', `/api/transactions/${edtBuy.body.id}`,
+      { portfolio_id: p1id, ticker: 'EDT', type: 'BUY', quantity: 20, price: 5, total: 100, date: futureDate }, cookie, cash.base);
+    checkEq('editing a date into the future → 400', futureEdit.status, 400);
+
+    const cashEditPortfolio = await req('POST', '/api/portfolios', { name: 'Edit Test', code: 'EDITX' }, cookie, cash.base);
+    const editPid = cashEditPortfolio.body.id;
+    const editContribSeed = await req('POST', '/api/transactions',
+      { portfolio_id: editPid, type: 'CONTRIBUTION', total: 100, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('seed CONTRIBUTION 100 → 200', editContribSeed.status, 200);
+    const overviewBefore = await req('GET', '/api/overview', null, cookie, cash.base);
+    check('cash after $100 contribution', overviewBefore.body.find(p => p.code === 'EDITX')?.cash, 100);
+
+    const editContrib = await req('PUT', `/api/transactions/${editContribSeed.body.id}`,
+      { portfolio_id: editPid, type: 'CONTRIBUTION', total: 40, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('edit CONTRIBUTION amount 100 → 40 → 200', editContrib.status, 200);
+    const overviewAfter = await req('GET', '/api/overview', null, cookie, cash.base);
+    check('cash reflects only the NEW amount (old delta reversed, not stacked)', overviewAfter.body.find(p => p.code === 'EDITX')?.cash, 40);
+
+    const xfer2 = await req('POST', '/api/transfers',
+      { from_portfolio_id: p1id, to_portfolio_id: p2id, amount: 15, date: '2024-04-23' }, cookie, cash.base);
+    checkEq('seed transfer for edit-rejection test → 200', xfer2.status, 200);
+    const editTransferLeg = await req('PUT', `/api/transactions/${xfer2.body.from.id}`,
+      { portfolio_id: p1id, ticker: 'CASH', type: 'CONTRIBUTION', total: 1, date: '2024-04-20' }, cookie, cash.base);
+    checkEq('editing a transfer leg → 400 (rejected outright)', editTransferLeg.status, 400);
   } finally {
     cash.close();
   }

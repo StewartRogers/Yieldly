@@ -21,7 +21,9 @@ async function request(url, options = {}) {
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || `Request failed (${res.status})`)
+    const err = new Error(data.error || `Request failed (${res.status})`)
+    if (data.code) err.code = data.code
+    throw err
   }
   return res.json()
 }
@@ -84,6 +86,9 @@ export const getTickerTransactions = (portfolioId, ticker) =>
 
 export const createTransaction = (data) =>
   request('/api/transactions', { method: 'POST', body: json(data) })
+
+export const updateTransaction = (id, data) =>
+  request(`/api/transactions/${id}`, { method: 'PUT', body: json(data) })
 
 export const deleteTransaction = (id) =>
   request(`/api/transactions/${id}`, { method: 'DELETE' })
