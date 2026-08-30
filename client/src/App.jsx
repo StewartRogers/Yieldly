@@ -85,6 +85,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // The browser's back/forward cache can restore this page from an in-memory
+  // snapshot — including whatever financial data was on screen — without
+  // re-running any of the above and without a network request. `persisted`
+  // is only true on that kind of restore (not a normal load), so re-check
+  // the session then to catch a since-expired token or a logout that
+  // happened in another tab.
+  useEffect(() => {
+    const onPageShow = (e) => { if (e.persisted) checkSession() }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleAuth = async (username, password) => {
     const authenticate = authState.needsSetup ? setupAccount : login
     const data = await authenticate(username, password)

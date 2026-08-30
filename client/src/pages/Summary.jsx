@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, PenLine, Check } from 'lucide-react'
+import { RefreshCw, PenLine, Check, ClipboardCopy, FileText } from 'lucide-react'
 import { fmtCurrency, fmtCurrencyTrim } from '../utils/format'
 import { Input } from '@/components/ui/input'
-import { getOverview, refreshAllPrices, updateCashBalance } from '../api/client'
+import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/components/ui/toast'
+import { getOverview, refreshAllPrices, updateCashBalance, getPortfolioSummary } from '../api/client'
 
 function fmtTime(date) {
   return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })
@@ -115,6 +117,108 @@ function OverviewTable({ data, onRefresh, totalCash, totalInv, totalMkt }) {
         </table>
       </div>
     </>
+  )
+}
+
+function HoldingsExportCard({ portfolios }) {
+  const toast = useToast()
+  const [selected, setSelected]     = useState(() => new Set(portfolios.map(p => p.id)))
+  const [text, setText]             = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError]     = useState('')
+
+  const toggle = (id) => setSelected(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  const generate = async () => {
+    const chosen = portfolios.filter(p => selected.has(p.id))
+    if (chosen.length === 0) {
+      setGenError('Select at least one portfolio.')
+      setText('')
+      return
+    }
+    setGenError('')
+    setGenerating(true)
+    try {
+      const results = await Promise.all(chosen.map(p => getPortfolioSummary(p.id)))
+      const sections = chosen.map((p, i) => {
+        const holdings = results[i]
+          .filter(h => h.shares > 0)
+          .sort((a, b) => a.ticker.localeCompare(b.ticker))
+        const label = p.name || p.code
+        if (holdings.length === 0) return `${label}\n  (no holdings)`
+        const lines = holdings.map(h =>
+          `  - ${h.ticker}: ${h.shares.toLocaleString('en-CA', { maximumFractionDigits: 4 })} shares`)
+        return `${label}\n${lines.join('\n')}`
+      })
+      setText(sections.join('\n\n'))
+    } catch (e) {
+      setGenError(e.message || 'Could not generate summary')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success('Copied to clipboard')
+    } catch {
+      toast.error('Could not copy — select the text and copy manually')
+    }
+  }
+
+  return (
+    <div className="tc-card">
+      <div className="tc-card-head">
+        <div className="t">Export holdings as text</div>
+        <div className="a">For pasting into an AI chat or notes</div>
+      </div>
+      <div className="tc-card-pad flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-semibold text-foreground">Portfolios to include</span>
+          <div className="flex flex-col gap-2">
+            {portfolios.map(p => (
+              <label key={p.id} className="tc-checkbox-label">
+                <input
+                  type="checkbox"
+                  className="tc-checkbox"
+                  checked={selected.has(p.id)}
+                  onChange={() => toggle(p.id)}
+                />
+                {p.name || p.code}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <button type="button" className="tc-btn sm primary" onClick={generate} disabled={generating}>
+            <FileText size={13} /> {generating ? 'Generating…' : 'Generate summary'}
+          </button>
+          {text && (
+            <button type="button" className="tc-btn sm ghost" onClick={copy}>
+              <ClipboardCopy size={13} /> Copy
+            </button>
+          )}
+        </div>
+
+        {genError && <p className="text-destructive text-sm">{genError}</p>}
+
+        {text && (
+          <Textarea
+            readOnly
+            value={text}
+            aria-label="Generated holdings summary"
+            className="min-h-48 font-mono text-sm"
+            onFocus={e => e.target.select()}
+          />
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -279,6 +383,8 @@ export default function Summary({ pricesTick = 0 }) {
           <OverviewTable data={rows} onRefresh={loadOverview} totalCash={totalCash} totalInv={totalInvested} totalMkt={totalMkt} />
         )}
       </div>
+
+      {rows.length > 0 && <HoldingsExportCard portfolios={rows} />}
 
       <div className="row between">
         <span className="note"><PenLine size={11} /> Tap a cash balance to edit inline</span>
