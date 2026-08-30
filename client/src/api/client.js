@@ -40,8 +40,8 @@ export const login = (username, password) =>
 export const logout = () =>
   request('/api/auth/logout', { method: 'POST' })
 
-export const setupAccount = (username, password) =>
-  request('/api/auth/setup', { method: 'POST', body: json({ username, password }) })
+export const setupAccount = (username, password, setupToken) =>
+  request('/api/auth/setup', { method: 'POST', body: json({ username, password, setupToken }) })
 
 export const changePassword = (currentPassword, newPassword) =>
   request('/api/change-password', { method: 'POST', body: json({ currentPassword, newPassword }) })

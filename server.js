@@ -46,6 +46,7 @@ async function main() {
     serveClient: isProduction ? 'production' : 'development',
     verbose: process.env.DEBUG_IMPORT === '1',
     cronSecret: process.env.CRON_SECRET,
+    setupToken: process.env.SETUP_TOKEN,
   });
 
   await backupPortfolios(); // ensure portfolios.json is in sync on startup

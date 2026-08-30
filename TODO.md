@@ -16,41 +16,61 @@ and some have shifted. Symbol names are reliable.
       the history rewrite. The screenshots and `portfolios.json` are gone from
       the repo, but GitHub may still serve cached blobs. Anyone who cloned
       before 2026-08-07 also still has them (0 forks / 0 stars at the time).
-- [ ] **Verify the CSP on the first Vercel deploy.** The `headers` block in
-      `vercel.json` was validated against the Vite build output (no inline
-      scripts, no external resources), *not* against a live deployment. Check
-      the browser console for CSP violations after deploying.
-- [ ] **Re-add the History regression test.** A Playwright spec covering the
-      cross-portfolio write fix (`6ba18a9`) was written but deleted rather than
-      committed unverified. Note: portfolio pills are labelled by portfolio
-      **name**, not code, and Playwright must be run from `client/` —
-      running it from the repo root reports a misleading "No tests found".
-- [ ] **Login rate limiting is per-instance.** `express-rate-limit` uses an
-      in-memory store, so on Vercel each warm lambda has its own counter and
-      "10 attempts / 15 min" is really "10 per instance". Use a shared store
-      (Turso/Upstash) or add a persisted lockout on the user row.
-- [ ] **`/api/cron/*` has no rate limit.** The bearer comparison is
-      timing-safe and fails closed, but an attacker gets unlimited guesses at
-      `CRON_SECRET`. Also note the `/cron/` auth exemption is a *prefix* match,
-      so any future `/api/cron/*` route inherits the JWT bypass automatically.
-- [ ] **Request bodies are parsed before authentication.** The 50 MB / 10 MB
-      JSON parsers mount above the auth guard, so an unauthenticated request is
-      fully buffered and `JSON.parse`d before the 401. Move `cookieParser` and
-      the `/api` guard above the `express.json` mounts.
-- [ ] **`createApp` mints a random `sessionSecret` when the option is
-      omitted** (`app.js:152`). Both current callers guard, so it isn't
-      exploitable — but a future entrypoint that forgets would get a silently
-      random secret, invalidating all tokens on every cold start with no error.
-      Make it required.
-- [ ] **Pin CI actions to commit SHAs.** `actions/checkout@v4` and
-      `actions/setup-node@v4` use mutable major tags.
-- [ ] **Username enumeration via timing.** `bcrypt.compare` (~60 ms) only runs
-      when the user exists; a wrong username returns in ~1 ms. Compare against
-      a dummy hash when no user is found.
-- [ ] **`/api/auth/setup` land-grab.** `GET /api/auth/session` advertises
-      `needsSetup: true` to anyone, and setup is first-wins — whoever POSTs
-      first on a fresh deployment owns the instance. Consider requiring a
-      `SETUP_TOKEN` in production.
+      Not automatable — needs a human to file the support request.
+- [x] **Verify the CSP on the first Vercel deploy.** Fixed/verified 2026-08-30:
+      confirmed against the live deployment (not just the local build) — the
+      `Content-Security-Policy` header comes back byte-for-byte as configured
+      in `vercel.json`, and the served `index.html` only references same-origin
+      hashed script/style assets (no inline `<script>`, no external hosts), so
+      there's nothing in the shipped output that `script-src`/`style-src` would
+      block. A live-browser DevTools console check is still worth doing once
+      as a final sanity pass, but there's no static-analysis gap left to close.
+- [x] **Re-add the History regression test.** Fixed 2026-08-30: added
+      `client/tests/history-portfolio-switch.spec.js`, covering the exact
+      `6ba18a9` scenario (open an edit on portfolio A, switch to portfolio B
+      without saving, assert the stale editor is gone and neither portfolio's
+      value changed). Verified both directions — passes against the current
+      `History.jsx`, and fails (editor survives the switch) when the guard
+      order / `ValueMatrix key={selected}` fix is temporarily reverted. Green
+      on all three engines (`npx playwright test` from `client/`).
+- [x] **Login rate limiting is per-instance.** Fixed 2026-08-30: added a
+      persisted per-account lockout (`users.failed_login_attempts` /
+      `locked_until`, migration in `database.js`) alongside the existing
+      per-instance `express-rate-limit` — 10 failed attempts locks the account
+      for 15 minutes regardless of which Vercel instance serves the request,
+      since it's read/written on the `users` row via Turso rather than
+      in-memory. Reset on successful login.
+- [x] **`/api/cron/*` has no rate limit.** Fixed 2026-08-30: `authLimiter`
+      (the same per-IP throttle already used on `/api/auth/login` +
+      `/api/auth/setup`) now also guards `GET /api/cron/snapshot-values`. The
+      prefix-match note (any future `/api/cron/*` route auto-inherits the JWT
+      bypass) still stands as a design tradeoff, not a bug — worth remembering
+      when adding a new cron route.
+- [x] **Request bodies are parsed before authentication.** Fixed 2026-08-30:
+      `cookieParser()` and the `/api` auth guard now run before the 50 MB /
+      10 MB `express.json()` mounts. `/api/auth/login` and `/api/auth/setup`
+      (unauthenticated by design) get their own small-body parser
+      (`express.json()`'s 100kb default) mounted separately, before the guard.
+- [x] **`createApp` mints a random `sessionSecret` when the option is
+      omitted.** Fixed 2026-08-30: `createApp` now throws
+      `"createApp: options.sessionSecret is required"` if omitted, rather than
+      silently minting one. Both current callers already passed it explicitly.
+- [x] **Pin CI actions to commit SHAs.** Fixed 2026-08-30: `.github/workflows/ci.yml`
+      now pins `actions/checkout` and `actions/setup-node` to the commit SHA
+      `v4` currently resolves to (v4.4.0 for both), with a version comment.
+      Bump both the SHA and the comment together when upgrading.
+- [x] **Username enumeration via timing.** Fixed 2026-08-30: `POST
+      /api/auth/login` now always runs `bcrypt.compare` — against a fixed
+      dummy hash (`DUMMY_PASSWORD_HASH`) when the username doesn't exist — so
+      a nonexistent username takes the same ~60ms as a wrong password instead
+      of returning in ~1ms.
+- [x] **`/api/auth/setup` land-grab.** Fixed 2026-08-30: added an optional
+      `setupToken` option (env `SETUP_TOKEN`) — when set, `POST
+      /api/auth/setup` requires a matching `setupToken` in the body
+      (`crypto.timingSafeEqual`) or returns 403. `GET /api/auth/session` now
+      also reports `setupTokenRequired` so the Login page can show the field;
+      unset (the default) preserves the original first-wins convenience for a
+      local-only deployment.
 
 ---
 
@@ -64,35 +84,52 @@ and some have shifted. Symbol names are reliable.
       per-row date check. The client date inputs (`Transactions.jsx`) now set
       `max={todayLocal()}` (client-local, informational only — the server
       check is authoritative). Regression coverage in `test-auth.js` section 39.
-- [ ] **DIVIDEND_REINVEST income vanishes from `return` and the dividend
-      chart.** DRIP adds to `buy_total` but never to `dividends_paid`, and
-      `/api/dividends/monthly` filters `WHERE t.type = 'DIVIDEND'`. BUY 100 @
-      $10 then DRIP $50 at market $10 reports **$0.00 / 0.0%** where the
-      correct answer is **+$50 / +5.0%**. A pure-DRIP portfolio reports zero
-      lifetime return and an empty income chart. (Adding the DRIP amount to ACB
-      is correct tax treatment — the bug is that the offsetting income is never
-      recognised.)
-- [ ] **`return` excludes commissions while its own denominator includes
-      them.** `totalReturn` never subtracts `buyExpense`/`saleExpense`, but
-      `acb` adds `buyExpense`. `total_expense` is returned by the API and
-      consumed by nothing. Example: reported $150.00 / 29.70% vs
-      commission-consistent $135.00 / 26.73%.
-- [ ] **NULL `market_price` is coerced to $0**, reporting −100% return rather
+- [x] **DIVIDEND_REINVEST income vanishes from `return` and the dividend
+      chart.** Fixed 2026-08-30: `HOLDINGS_SQL`'s `dividends_paid` now sums
+      `DIVIDEND_REINVEST` alongside `DIVIDEND` (`lib/holdings.js`), and
+      `/api/dividends/monthly` filters on both types too (`app.js`). DRIP
+      income is real, just immediately reinvested — the reinvested amount was
+      already correctly added to ACB, but the offsetting income was never
+      recognised, so a pure-DRIP holding reported $0.00/0.0% return and never
+      showed up on the income chart. Regression coverage: test.js §24,
+      test-full.js §A22.
+- [x] **`return` excludes commissions while its own denominator includes
+      them.** Fixed 2026-08-30: `totalReturn` now subtracts
+      `buyExpense + saleExpense` (`lib/compute.js`), matching `acb`, which
+      already included buy commission. Regression coverage: test.js §35
+      (return now $-2010/-40.12% instead of $-2000/-39.92% for the same
+      position).
+- [x] **NULL `market_price` is coerced to $0**, reporting −100% return rather
       than "price unknown" — and, critically, the **persisted** cron snapshot
       writes that zero into `portfolio_value_snapshots`, so a TMX outage
-      permanently charts a fake drawdown. Emit `null` and have the snapshot
-      route skip (not zero) portfolios with unpriced holdings.
-- [ ] **`guessNextDividendDate` overflows month-end.**
-      `setUTCMonth(+months)` on 2024-01-31 Monthly gives **2024-03-02**
-      (skipping February entirely); 2024-08-31 Quarterly gives 2024-12-01.
-      `estimateNextDividendDate` compounds it on each loop iteration. Affects
-      month-end payers, common among TSX monthly-distribution ETFs. Clamp to
-      the last valid day of the target month.
-- [ ] **Per-share dividend fallback with an unknown frequency** zeroes
+      permanently charts a fake drawdown. Fixed 2026-08-30: `computeHoldings`
+      now emits `price_known` and reports `return`/`return_percent` as `null`
+      (not a fabricated loss) for a currently-held position with no known
+      price (`lib/compute.js`). `GET /api/cron/snapshot-values` skips writing
+      a portfolio's snapshot for the day entirely when any of its holdings has
+      `price_known: false`, leaving the prior value in place rather than
+      overwriting it with a deflated total; the response now reports
+      `skipped: [portfolio codes]`. Regression coverage: test.js §20,
+      test-full.js §A27, test-auth.js §33b.
+- [x] **`guessNextDividendDate` overflows month-end.** Fixed 2026-08-30: added
+      `addMonthsClamped` (`lib/dividends.js`), clamping the day-of-month to the
+      target month's last day instead of letting `setUTCMonth` overflow it
+      forward. `estimateNextDividendDate`'s loop now re-anchors on the
+      original date each step instead of compounding from a previously
+      clamped result, so a day-31 payer doesn't permanently erode to day-28
+      after passing through February. Regression coverage: test-full.js
+      §L2b, §L4b.
+- [x] **Per-share dividend fallback with an unknown frequency** zeroes
       `annual_payout` and `dividend_yield` while `next_payout` stays positive,
       so a holding appears in `/api/dividends/upcoming` with a payout it
       contributes $0 of annual income for. The yield-first branch handles the
-      same case correctly — the two branches disagree.
+      same case correctly — the two branches disagree. Fixed 2026-08-30:
+      `lib/compute.js`'s fallback branch now reports `annual_payout`/
+      `dividend_yield` as `null` (unknown — we don't know how many payments
+      happen a year) rather than `0` (which reads as "no dividend") whenever
+      there's a real nonzero `next_payout` to contradict. Still reports a
+      genuine `0` when there's no per-share amount either (the ordinary
+      non-dividend-payer case is unaffected). Regression coverage: test.js §34.
 - [ ] **`computeMonthlyACB` depends on the caller's `ORDER BY`** despite being
       exported as pure. (The `now`-in-local-time half of this item is fixed —
       2026-08-28: its default is now pinned to Pacific time via `nowInPacific`
@@ -110,9 +147,14 @@ and some have shifted. Symbol names are reliable.
 - [ ] **TOCTOU on the SELL/duplicate guards** — both checks run outside the
       write transaction, so two concurrent SELLs can each see enough shares.
       Single-user, so low probability.
-- [ ] **`market` is not whitelisted.** `performRefreshPrices` treats anything
+- [x] **`market` is not whitelisted.** `performRefreshPrices` treats anything
       that isn't `NYSE`/`NASDAQ` as TMX, so a typo like `"NYSE "` routes a US
-      ticker to the Canadian quote source and it silently never updates.
+      ticker to the Canadian quote source and it silently never updates. Fixed
+      2026-08-30: added a `MARKETS` whitelist (`TMX`/`NYSE`/`NASDAQ`), enforced
+      on `POST /api/transactions` and `PUT /api/transactions/:id` (400 on
+      anything else). The CSV import path was already unaffected — it never
+      writes a `market` column, always defaulting to the schema's `TMX`.
+      Regression coverage: test-auth.js §47.
 - [ ] **Non-string inputs return 500 instead of 400** on `username`,
       `csvData`, and `name` (all call `.trim()` unguarded), logging a full
       stack trace for what is a client error.

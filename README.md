@@ -107,6 +107,7 @@ The app loads `.env` automatically. Copy `.env.example` to `.env` to get started
 - `TRUST_PROXY=1` - set when running behind a reverse proxy with HTTPS (trusts `X-Forwarded-*` headers from the proxy). The auth cookie's `Secure` flag is on by default whenever `NODE_ENV=production`, independent of this setting.
 - `DEBUG_IMPORT=1` - log per-row detail during CSV import
 - `CRON_SECRET` - bearer token required on `GET /api/cron/snapshot-values` (the daily portfolio value snapshot). Vercel sends it automatically as `Authorization: Bearer <value>` when a cron job triggers the route. Unset = route disabled. Generate with `openssl rand -hex 32`.
+- `SETUP_TOKEN` - optional token required to complete first-run account setup (`POST /api/auth/setup`). Without it, whoever submits the setup form first on a fresh deployment becomes the superuser — fine for a local DB only you can reach, but worth setting on a public deployment during the window between deploying and creating your account. The Login page shows a "Setup token" field automatically when this is set. Generate with `openssl rand -hex 32`.
 
 ## Deploying to Vercel + Turso
 

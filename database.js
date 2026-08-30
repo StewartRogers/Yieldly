@@ -120,10 +120,12 @@ async function runMigrations(db) {
     );
 
     CREATE TABLE IF NOT EXISTS users (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      username      TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      username              TEXT NOT NULL UNIQUE,
+      password_hash         TEXT NOT NULL,
+      failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until          DATETIME,
+      created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS portfolio_value_snapshots (
@@ -150,6 +152,8 @@ async function runMigrations(db) {
   await addColumnIfMissing(db, 'stock_info', 'investment_type', 'TEXT');
   await addColumnIfMissing(db, 'stock_info', 'dividend_yield', 'REAL');
   await addColumnIfMissing(db, 'stock_info', 'next_dividend_date', 'TEXT');
+  await addColumnIfMissing(db, 'users', 'failed_login_attempts', 'INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing(db, 'users', 'locked_until', 'DATETIME');
 
   // --- Widen the transactions.type CHECK constraint (cash-flow + transfer types) ---
   // Old DBs were created with a narrower CHECK; a constraint can't be altered in

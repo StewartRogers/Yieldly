@@ -541,9 +541,11 @@ section('A22. DRIP + cash dividend combined');
   const [h] = getHoldings(pid);
   check('shares = 102',              h.shares,         102);
   check('buy_total = $5100',         h.buy_total,      5100);
-  check('dividends_paid = $80',      h.dividends_paid, 80);
+  // DRIP's $100 is income too (see the comment on HOLDINGS_SQL's
+  // dividends_paid) — $80 cash + $100 reinvested = $180.
+  check('dividends_paid = $180',     h.dividends_paid, 180);
   check('market_value = $5304',      h.market_value,   5304);
-  check('return = $284',             h.return,         284);
+  check('return = $384',             h.return,         384);
   checkEq('buy_count = 2',           h.buy_count,      2);
 }
 
@@ -596,16 +598,21 @@ section('A26. Multiple cash dividends accumulate');
   check('return = -$20',         h.return,         -20.00);
 }
 
-section('A27. No market price — return uses only realized values');
+section('A27. No market price — return is unknown, not a fabricated loss');
 {
   const pid = mkPortfolio('A27');
   buy(pid, 'NEW.TO', 100, 10.00);
   dividend(pid, 'NEW.TO', 25.00);
   const [h] = getHoldings(pid);
-  check('market_value = 0',      h.market_value,  0);
-  check('dividends_paid = $25',  h.dividends_paid, 25);
-  check('return = -$975',        h.return,        -975);
-  check('dividend_yield = 0',    h.dividend_yield,  0);
+  // Unknown price for 100 real shares is not the same as "worth $0" — treating
+  // it that way used to compute return = 0 + 0 + 25 - 1000 = -975, a fabricated
+  // ~98% loss for a holding whose current value nobody actually knows.
+  check('market_value = 0',        h.market_value,  0);
+  check('dividends_paid = $25',    h.dividends_paid, 25);
+  checkEq('price_known = false',   h.price_known,   false);
+  checkEq('return = null (unknown price, not -$975)', h.return, null);
+  checkEq('return_percent = null', h.return_percent, null);
+  check('dividend_yield = 0',      h.dividend_yield, 0);
 }
 
 section('A28. Zero shares edge: shares field is 0');
@@ -1421,6 +1428,17 @@ section('L2. guessNextDividendDate — missing/unknown inputs return null');
   checkEq('no payment date → null',           guessNextDividendDate(null, 'Monthly'), null);
 }
 
+section('L2b. guessNextDividendDate — month-end payers clamp instead of overflowing');
+{
+  // Feb 2026 has 28 days. Unclamped, setUTCMonth(Jan 31 + 1) normalizes to
+  // Mar 3, silently skipping February for a month-end Monthly payer.
+  checkEq('Jan 31 Monthly → Feb 28 (not Mar 3)',        guessNextDividendDate('2026-01-31', 'Monthly'),   '2026-02-28');
+  // 2024 is a leap year — Feb has 29 days.
+  checkEq('Jan 31 Monthly, leap year → Feb 29',         guessNextDividendDate('2024-01-31', 'Monthly'),   '2024-02-29');
+  // Nov has 30 days. Unclamped this gives Dec 1, per the original bug report.
+  checkEq('Aug 31 Quarterly → Nov 30 (not Dec 1)',      guessNextDividendDate('2026-08-31', 'Quarterly'), '2026-11-30');
+}
+
 section('L3. shouldAcceptTmxDate — grace window and historical rejection');
 {
   // Local midnight, matching how app.js builds `today` (new Date(); today.setHours(0,0,0,0)) —
@@ -1443,6 +1461,19 @@ section('L4. estimateNextDividendDate — rolls a stale TMX payable date forward
   checkEq('payable date exactly today → still rolled one interval forward', estimateNextDividendDate('2026-08-05', 'Quarterly', today), '2026-11-05');
   checkEq('unknown frequency → null', estimateNextDividendDate('2026-07-03', 'Weekly', today), null);
   checkEq('no payable date → null', estimateNextDividendDate(null, 'Quarterly', today), null);
+}
+
+section('L4b. estimateNextDividendDate — month-end payers do not erode across repeated rolls');
+{
+  // A Monthly, day-31 payer several months stale must roll forward without
+  // permanently drifting to day-28 once it has passed through February: each
+  // step re-anchors on the ORIGINAL day-31 date, not the previous (possibly
+  // clamped) result. Paid 2025-08-31, "today" 2026-02-05 — six monthly steps
+  // behind (Sep 30, Oct 31, Nov 30, Dec 31, Jan 31, Feb 28 all already past
+  // or equal), landing on Feb 28, 2026 (2026 is not a leap year).
+  const today = new Date(2026, 1, 5); // Feb 5, 2026
+  checkEq('day-31 Monthly, 6 intervals behind → Feb 28, 2026',
+    estimateNextDividendDate('2025-08-31', 'Monthly', today), '2026-02-28');
 }
 
 section('L5. isStaleNextDividendDate — null/missing or >7 days old counts as stale');

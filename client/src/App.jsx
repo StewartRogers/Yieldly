@@ -49,7 +49,7 @@ function NavLinks() {
 }
 
 export default function App() {
-  const [authState, setAuthState] = useState({ loading: true, user: null, needsSetup: false, error: null })
+  const [authState, setAuthState] = useState({ loading: true, user: null, needsSetup: false, setupTokenRequired: false, error: null })
   const [portfolios, setPortfolios] = useState([])
 
   const [pricesTick,     setPricesTick]     = useState(0)
@@ -65,10 +65,10 @@ export default function App() {
   const checkSession = () => {
     getSession()
       .then(data => {
-        setAuthState({ loading: false, user: data.authenticated ? data.user : null, needsSetup: !!data.needsSetup, error: null })
+        setAuthState({ loading: false, user: data.authenticated ? data.user : null, needsSetup: !!data.needsSetup, setupTokenRequired: !!data.setupTokenRequired, error: null })
         if (data.authenticated) loadPortfolios()
       })
-      .catch(e => setAuthState({ loading: false, user: null, needsSetup: false, error: e?.message || 'Could not reach the server.' }))
+      .catch(e => setAuthState({ loading: false, user: null, needsSetup: false, setupTokenRequired: false, error: e?.message || 'Could not reach the server.' }))
   }
 
   // Re-run the session check on demand (retry button): flip to the loading
@@ -79,7 +79,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    setOnUnauthorized(() => setAuthState({ loading: false, user: null, needsSetup: false, error: null }))
+    setOnUnauthorized(() => setAuthState({ loading: false, user: null, needsSetup: false, setupTokenRequired: false, error: null }))
     checkSession()
     // Run once on mount — checkSession is stable for our purposes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,16 +98,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleAuth = async (username, password) => {
-    const authenticate = authState.needsSetup ? setupAccount : login
-    const data = await authenticate(username, password)
-    setAuthState({ loading: false, user: data.user, needsSetup: false, error: null })
+  const handleAuth = async (username, password, setupToken) => {
+    const data = authState.needsSetup
+      ? await setupAccount(username, password, setupToken)
+      : await login(username, password)
+    setAuthState({ loading: false, user: data.user, needsSetup: false, setupTokenRequired: false, error: null })
     loadPortfolios()
   }
 
   const handleLogout = async () => {
     try { await logout() } catch { /* proceed anyway */ }
-    setAuthState({ loading: false, user: null, needsSetup: false, error: null })
+    setAuthState({ loading: false, user: null, needsSetup: false, setupTokenRequired: false, error: null })
     setPortfolios([])
   }
 
@@ -144,7 +145,7 @@ export default function App() {
   }
 
   if (!authState.user) {
-    return <Login needsSetup={authState.needsSetup} onAuthenticated={handleAuth} />
+    return <Login needsSetup={authState.needsSetup} setupTokenRequired={authState.setupTokenRequired} onAuthenticated={handleAuth} />
   }
 
   return (

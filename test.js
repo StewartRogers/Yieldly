@@ -479,7 +479,7 @@ section('19. Yield-First Path — Quarterly (TMX)');
 }
 
 // ── 20. No market price: no yield/return calculations ────────────────────────
-section('20. No Market Price — Return Uses Only Realized Values');
+section('20. No Market Price — Return Is Unknown, Not a Fabricated Loss');
 {
   const pid = makePortfolio('T20');
   buy(pid, 'NEW.TO', 100, 10.00);   // $1000 cost, no market price set
@@ -487,13 +487,17 @@ section('20. No Market Price — Return Uses Only Realized Values');
 
   const [h] = getHoldings(pid);
 
-  // market_value = 0 (no price)
-  // return = 0 + 0 + 25 - 1000 = -975
-  // dividend_yield = 0 (no market value)
-  check('market_value = 0',          h.market_value,   0);
-  check('dividends_paid = $25',      h.dividends_paid, 25);
-  check('return = -$975',            h.return,         -975);
-  check('dividend_yield = 0',        h.dividend_yield,  0);
+  // market_value = 0 (no price known — 100 real shares, so this is NOT the
+  // same as "worth $0"). Treating unknown-price-as-$0 used to compute
+  // return = 0 + 0 + 25 - 1000 = -975 (a fabricated ~98% loss for a holding
+  // whose current value nobody actually knows). price_known=false with
+  // shares>0 now reports return/return_percent as null instead.
+  check('market_value = 0',                h.market_value,   0);
+  check('dividends_paid = $25',            h.dividends_paid, 25);
+  checkEq('price_known = false',           h.price_known,    false);
+  checkEq('return = null (unknown price, not -$975)', h.return, null);
+  checkEq('return_percent = null',         h.return_percent, null);
+  check('dividend_yield = 0',              h.dividend_yield, 0);
 }
 
 // ── 21. Multiple tickers in same portfolio ───────────────────────────────────
@@ -559,14 +563,15 @@ section('24. DRIP + Cash Dividend Combined');
 
   // shares_bought = 100 (buy) + 2 (drip) = 102; shares = 102
   // buy_total = 5000 + 100 = 5100
-  // dividends_paid = 80 (DIVIDEND only, not DRIP)
+  // dividends_paid = 80 (cash) + 100 (DRIP total is income too, immediately
+  // reinvested — see the comment on HOLDINGS_SQL's dividends_paid) = 180
   // market_value = 102 × 52 = 5304
-  // return = 5304 + 0 + 80 - 5100 = 284
+  // return = 5304 + 0 + 180 - 5100 - 0 (no commission) = 384
   check('shares = 102 (buy + drip)',        h.shares,         102);
   check('buy_total = $5100',                h.buy_total,      5100);
-  check('dividends_paid = $80 (cash only)', h.dividends_paid, 80);
+  check('dividends_paid = $180 (cash + DRIP)', h.dividends_paid, 180);
   check('market_value = $5304',             h.market_value,   5304);
-  check('return = $284',                    h.return,          284);
+  check('return = $384',                    h.return,          384);
   checkEq('buy_count = 2 (buy + drip)',     h.buy_count,       2);
 }
 
@@ -770,12 +775,14 @@ section('34. Unknown Frequency → Multiplier 0');
   });
   const [h] = getHoldings(pid);
 
-  // fallback path: next_payout = 100 × 0.10 = 10
-  // annual_payout = 10 × 0 = 0 ; yield = 0/1000 = 0
+  // fallback path: next_payout = 100 × 0.10 = 10, a real known amount.
+  // annual_payout/dividend_yield must be null (unknown), not 0 — an unknown
+  // frequency means we can't say how many times a year this pays, so 0 would
+  // read as "no dividend" and contradict the $10 next_payout right next to it.
   check('next_payout = $10',          h.next_payout,          10.00);
-  check('annual_payout = 0 (bad freq)', h.annual_payout,       0);
+  checkEq('annual_payout = null (unknown freq, real payout)', h.annual_payout, null);
   check('div_per_share = $0.10',      h.dividend_per_share,    0.10);
-  check('dividend_yield = 0',         h.dividend_yield,        0);
+  checkEq('dividend_yield = null (unknown freq, real payout)', h.dividend_yield, null);
 }
 
 // ── 35. Negative Return % on a Loss Position ──────────────────────────────────
@@ -789,11 +796,11 @@ section('35. Negative Return %');
 
   // acb = (5000 + 10) × 100/100 = 5010
   // market_value = 100 × 30 = 3000
-  // return = 3000 + 0 + 0 - 5000 = -2000
-  // return_percent = -2000 / 5010 × 100 = -39.9202%
+  // return = 3000 + 0 + 0 - 5000 - 10 (buy commission, now counted) = -2010
+  // return_percent = -2010 / 5010 × 100 = -40.1198%
   check('acb = $5010',                h.acb,               5010.00);
-  check('return = -$2000',            h.return,           -2000.00);
-  check('return_percent ≈ -39.92%',   h.return_percent,    -39.9202, 0.001);
+  check('return = -$2010 (commission-consistent with acb)', h.return, -2010.00);
+  check('return_percent ≈ -40.12%',   h.return_percent,    -40.1198, 0.001);
 }
 
 // ── 36. Zero-Cost Position → Return % Guards Against $0 ACB ───────────────────

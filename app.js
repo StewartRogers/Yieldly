@@ -22,6 +22,13 @@ const TRANSACTION_TYPES = new Set([
   'BUY', 'SELL', 'DIVIDEND', 'DIVIDEND_REINVEST', 'CONTRIBUTION', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT',
 ]);
 
+// performRefreshPrices() treats anything that isn't exactly 'NYSE'/'NASDAQ' as
+// TMX (Canadian) — so an unvalidated typo like 'NYSE ' silently routes a US
+// ticker to the wrong quote source, which won't recognize it, and the price
+// just never updates again with no visible error. Whitelist at write time
+// instead, same as TRANSACTION_TYPES.
+const MARKETS = new Set(['TMX', 'NYSE', 'NASDAQ']);
+
 // CONTRIBUTION/WITHDRAWAL move cash_balance by their own total; a transfer's two
 // linked legs (TRANSFER_IN/TRANSFER_OUT, see POST /api/transfers) move it the
 // same way from each side. Shared here so the create and delete/reversal paths
@@ -37,6 +44,21 @@ const CASH_BALANCE_DELTA = {
 // plus '-' for TSX unit-trust tickers (e.g. REI-UN.TO) which normalizeTicker()
 // converts to '.' before quoting.
 const TICKER_REGEX = /^[A-Z0-9.-]{1,12}$/;
+
+// bcrypt.compare (~60ms) only runs when the username matches a row, so a
+// wrong username used to return in ~1ms while a wrong password took ~60ms —
+// enough of a gap to enumerate valid usernames by timing alone. Comparing
+// against this fixed hash on a miss keeps both paths' cost the same. The
+// password it hashes is never used for anything else and isn't a real secret.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('no-such-user-timing-equalizer', 10);
+
+// express-rate-limit below is per-IP and per-instance — on Vercel each warm
+// lambda keeps its own counter, so "10 attempts / 15 min" is really 10 per
+// instance, not 10 total. This is the persisted backstop: a per-*account*
+// lockout written to the users row, so it holds regardless of which instance
+// serves the request. Thresholds match the rate limiter's defaults.
+const LOGIN_LOCKOUT_THRESHOLD = 10;
+const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -183,10 +205,12 @@ function validateBackupPayload(payload) {
  *   rateLimit       {{windowMs,max}|false} auth rate-limit config (false disables)
  *   verbose         {boolean}  emit per-row CSV import logs (default false)
  *   cronSecret      {string}   bearer token required on /api/cron/* routes (unset = disabled)
+ *   setupToken      {string}   token required in the body of POST /api/auth/setup (unset = open,
+ *                              i.e. first POST wins — fine for a fresh local DB, not for a public deployment)
  */
 function createApp(db, options = {}) {
   const {
-    sessionSecret = crypto.randomBytes(32).toString('hex'),
+    sessionSecret,
     secureCookies = false,
     trustProxy = false,
     backupPortfolios = noop,
@@ -194,7 +218,17 @@ function createApp(db, options = {}) {
     rateLimit: rateLimitOpts,
     verbose = false,
     cronSecret,
+    setupToken,
   } = options;
+
+  // Every JWT this instance signs/verifies depends on this secret. Minting a
+  // random one when it's omitted used to be the fallback here — harmless for
+  // the two current callers (both guard it themselves) but a silent trap for
+  // a future entrypoint that forgets: it would boot fine and invalidate every
+  // token on each cold start with no error pointing at why. Fail loudly instead.
+  if (!sessionSecret) {
+    throw new Error('createApp: options.sessionSecret is required');
+  }
 
   const holdings = prepareHoldings(db);
   const queryHoldings = (portfolioId) => holdings.query(portfolioId);
@@ -213,13 +247,17 @@ function createApp(db, options = {}) {
   // to the built client's asset hashes); helmet's default CSP would block the SPA.
   app.use(helmet({ contentSecurityPolicy: false }));
 
-  // A full backup can be larger than any normal request body. Give the import
-  // route a higher cap (registered first, so the global parser below sees the
-  // body already parsed and skips it) — otherwise an export that succeeds could
-  // exceed the 10mb limit and fail to re-import with a 413.
-  app.use('/api/import', express.json({ limit: '50mb' }));
-  app.use(express.json({ limit: '10mb' }));
+  // cookieParser only reads the Cookie header — no body I/O — so it (and the
+  // auth guard below) must run before any express.json() mount. Otherwise an
+  // unauthenticated request to a protected route would be fully read off the
+  // socket and JSON.parse'd before the 401, letting anyone force that work
+  // for free up to the parser's size cap.
   app.use(cookieParser());
+
+  // /api/auth/login and /api/auth/setup are unauthenticated by design but
+  // still need a parsed body — scoped small (express.json's 100kb default,
+  // plenty for credentials) rather than the 10mb cap the protected routes get.
+  app.use('/api/auth', express.json());
 
   // Throttle credential endpoints to blunt brute-force attempts.
   const authLimiter = rateLimitOpts === false
@@ -245,7 +283,7 @@ function createApp(db, options = {}) {
     try {
       const userCount = Number((await db.get('SELECT COUNT(*) as count FROM users')).count);
       if (userCount === 0) {
-        return res.json({ authenticated: false, needsSetup: true });
+        return res.json({ authenticated: false, needsSetup: true, setupTokenRequired: !!setupToken });
       }
       const payload = verifyToken(sessionSecret, req.cookies[TOKEN_COOKIE]);
       if (payload) {
@@ -260,6 +298,19 @@ function createApp(db, options = {}) {
 
   app.post('/api/auth/setup', authLimiter, async (req, res) => {
     try {
+      // Without a configured setupToken, GET /api/auth/session's needsSetup
+      // flag is a standing invitation: anyone who reaches a fresh deployment
+      // before the real owner does becomes the superuser. When setupToken is
+      // set, require it in the body — timing-safe so it can't be brute-forced
+      // by byte via response latency.
+      if (setupToken) {
+        const expected = Buffer.from(setupToken);
+        const actual = Buffer.from(String(req.body?.setupToken ?? ''));
+        const authorized = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+        if (!authorized) {
+          return res.status(403).json({ error: 'A valid setup token is required.' });
+        }
+      }
       const { username, password } = req.body;
       // Atomic "first user wins" creation lives in lib/auth.createFirstUser,
       // shared with the manage-user CLI.
@@ -282,9 +333,31 @@ function createApp(db, options = {}) {
       if (!username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
       }
-      const user = await db.get('SELECT id, username, password_hash FROM users WHERE username = ?', username.trim());
-      if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      const user = await db.get(
+        'SELECT id, username, password_hash, failed_login_attempts, locked_until FROM users WHERE username = ?',
+        username.trim()
+      );
+
+      if (user?.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
+        return res.status(429).json({ error: 'Too many failed attempts. Please try again later.' });
+      }
+
+      // Always run bcrypt.compare, even on a miss (against DUMMY_PASSWORD_HASH),
+      // so a nonexistent username takes the same time as a wrong password.
+      const passwordOk = await bcrypt.compare(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
+      if (!user || !passwordOk) {
+        if (user) {
+          const attempts = (user.failed_login_attempts || 0) + 1;
+          const lockedUntil = attempts >= LOGIN_LOCKOUT_THRESHOLD
+            ? new Date(Date.now() + LOGIN_LOCKOUT_MS).toISOString()
+            : null;
+          await db.run('UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?', attempts, lockedUntil, user.id);
+        }
         return res.status(401).json({ error: 'Invalid username or password' });
+      }
+
+      if (user.failed_login_attempts || user.locked_until) {
+        await db.run('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?', user.id);
       }
       const token = signToken(sessionSecret, { userId: user.id, username: user.username });
       setAuthCookie(res, token, secureCookies);
@@ -299,7 +372,9 @@ function createApp(db, options = {}) {
     res.json({ success: true });
   });
 
-  // Auth guard — all routes below this require a valid token
+  // Auth guard — all routes below this require a valid token. Runs before any
+  // other body parsing (see the cookieParser comment above) so an
+  // unauthenticated request never gets its body buffered/parsed.
   app.use('/api', (req, res, next) => {
     // /cron/* routes are hit by Vercel Cron (no session cookie); they're
     // instead guarded by their own CRON_SECRET bearer-token check.
@@ -309,6 +384,14 @@ function createApp(db, options = {}) {
     req.userId = payload.userId;
     next();
   });
+
+  // A full backup can be larger than any normal request body. Give the import
+  // route a higher cap (registered first, so the global parser below sees the
+  // body already parsed and skips it) — otherwise an export that succeeds could
+  // exceed the 10mb limit and fail to re-import with a 413. Both run only for
+  // requests that already passed the guard above.
+  app.use('/api/import', express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '10mb' }));
 
   app.post('/api/change-password', async (req, res) => {
     try {
@@ -656,9 +739,11 @@ function createApp(db, options = {}) {
   // $CRON_SECRET` when CRON_SECRET is configured on the project (see
   // vercel.json). This route is excluded from the JWT auth guard above and
   // instead checks that header itself. Disabled (always 401) if cronSecret
-  // wasn't passed to createApp.
-
-  app.get('/api/cron/snapshot-values', async (req, res) => {
+  // wasn't passed to createApp. The comparison is timing-safe and fails
+  // closed, but without a rate limit an attacker still gets unlimited guesses
+  // at CRON_SECRET — reuse authLimiter (same per-IP throttle as the login
+  // routes) rather than leaving this endpoint unbounded.
+  app.get('/api/cron/snapshot-values', authLimiter, async (req, res) => {
     const expected = Buffer.from(`Bearer ${cronSecret ?? ''}`);
     const actual = Buffer.from(req.headers.authorization ?? '');
     const authorized = cronSecret && expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
@@ -685,8 +770,23 @@ function createApp(db, options = {}) {
       const snapshotDate = priorDay.toISOString().slice(0, 10);
 
       let written = 0;
+      const skipped = [];
       for (const p of portfolios) {
         const holdings = computeHoldings(await queryHoldings(p.id));
+        // A holding with an unknown price (a TMX/Yahoo outage, a brand-new
+        // ticker not yet quoted, etc.) has `market_value: 0` from
+        // computeHoldings — not because it's worthless, but because there's
+        // nothing better to sum. Writing that deflated total here would
+        // permanently bake a fake one-day drawdown into the History chart
+        // (unlike a live page render, which can and does hide the number
+        // instead of showing it). Skip the whole portfolio for today rather
+        // than record a total_value that misrepresents it — leaving
+        // yesterday's snapshot in place beats overwriting it with a bad one.
+        const hasUnknownPrice = holdings.some(h => !h.price_known);
+        if (hasUnknownPrice) {
+          skipped.push(p.code);
+          continue;
+        }
         const marketValue = holdings.reduce((s, h) => s + h.market_value, 0);
         const cash = p.cash_balance ?? 0;
         const total = marketValue + cash;
@@ -702,7 +802,10 @@ function createApp(db, options = {}) {
         written++;
       }
 
-      res.json({ message: `Snapshot recorded for ${written} portfolio(s) on ${snapshotDate}`, snapshotDate, written, priceRefresh });
+      const message = skipped.length
+        ? `Snapshot recorded for ${written} portfolio(s) on ${snapshotDate}; skipped ${skipped.length} with an unpriced holding (${skipped.join(', ')})`
+        : `Snapshot recorded for ${written} portfolio(s) on ${snapshotDate}`;
+      res.json({ message, snapshotDate, written, skipped, priceRefresh });
     } catch (error) {
       serverError(res, error);
     }
@@ -735,7 +838,7 @@ function createApp(db, options = {}) {
           SUM(t.total) AS total
         FROM transactions t
         JOIN portfolios p ON t.portfolio_id = p.id
-        WHERE t.type = 'DIVIDEND'
+        WHERE t.type IN ('DIVIDEND', 'DIVIDEND_REINVEST')
         GROUP BY p.code, year, month
         ORDER BY p.code, year, month
       `);
@@ -953,6 +1056,9 @@ function createApp(db, options = {}) {
       }
       if (finalTicker !== 'CASH' && !TICKER_REGEX.test(finalTicker.toUpperCase())) {
         return res.status(400).json({ error: 'Invalid ticker' });
+      }
+      if (market !== undefined && market !== null && !MARKETS.has(market)) {
+        return res.status(400).json({ error: 'Invalid market' });
       }
       const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolio_id);
       if (!portfolio) {
@@ -1186,6 +1292,9 @@ function createApp(db, options = {}) {
       }
       if (finalTicker !== 'CASH' && !TICKER_REGEX.test(finalTicker.toUpperCase())) {
         return res.status(400).json({ error: 'Invalid ticker' });
+      }
+      if (market !== undefined && market !== null && !MARKETS.has(market)) {
+        return res.status(400).json({ error: 'Invalid market' });
       }
       const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolio_id);
       if (!portfolio) {

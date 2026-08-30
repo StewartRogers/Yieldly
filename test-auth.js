@@ -586,6 +586,23 @@ async function run() {
     checkEq('delete → 200', del.status, 200);
     const rows4 = await req('GET', '/api/summary/value-snapshots', null, cookie, snap.base);
     checkEq('backfilled row gone', rows4.body.some(r => r.date === '2020-01-31'), false);
+
+    section('33b. Cron snapshot – skips a portfolio with an unpriced holding instead of writing a deflated total');
+    // No stock_info row for this ticker at all, so its market_price is unknown
+    // (not $0) — writing a total anyway would silently zero out $1,000 of real
+    // cost basis and permanently bake that into the History chart.
+    await req('POST', '/api/transactions',
+      { portfolio_id: pid, ticker: 'NOPX', type: 'BUY', quantity: 10, price: 100, total: 1000, date: '2024-01-10' }, cookie, snap.base);
+    const run3 = await req('GET', '/api/cron/snapshot-values', null, null, snap.base,
+      { Authorization: `Bearer ${CRON_SECRET}` });
+    checkEq('status = 200', run3.status, 200);
+    checkEq('0 portfolios written (the only one has an unpriced holding)', run3.body.written, 0);
+    checkEq('SNAP reported as skipped', run3.body.skipped.join(','), 'SNAP');
+
+    const rows5 = await req('GET', '/api/summary/value-snapshots', null, cookie, snap.base);
+    const todaysRow = rows5.body.find(r => r.date === run1.body.snapshotDate);
+    check('existing snapshot for today left untouched, not overwritten with a deflated total',
+      todaysRow.total_value, 750);
   } finally {
     snap.close();
   }
@@ -913,6 +930,22 @@ async function run() {
     const editTransferLeg = await req('PUT', `/api/transactions/${xfer2.body.from.id}`,
       { portfolio_id: p1id, ticker: 'CASH', type: 'CONTRIBUTION', total: 1, date: '2024-04-20' }, cookie, cash.base);
     checkEq('editing a transfer leg → 400 (rejected outright)', editTransferLeg.status, 400);
+
+    section('47. POST/PUT /api/transactions — market is whitelisted (TMX/NYSE/NASDAQ only)');
+    // performRefreshPrices() treats anything that isn't exactly 'NYSE'/'NASDAQ'
+    // as TMX — an unvalidated typo would silently route a US ticker to the
+    // wrong quote source and it would just never update again.
+    const badMarket = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'MKT', type: 'BUY', quantity: 1, price: 1, total: 1, date: '2024-04-20', market: 'NYSE ' }, cookie, cash.base);
+    checkEq('trailing-space market → 400', badMarket.status, 400);
+
+    const goodMarket = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'MKT', type: 'BUY', quantity: 1, price: 1, total: 1, date: '2024-04-20', market: 'NASDAQ' }, cookie, cash.base);
+    checkEq('valid market → 200', goodMarket.status, 200);
+
+    const badMarketEdit = await req('PUT', `/api/transactions/${goodMarket.body.id}`,
+      { portfolio_id: p1id, ticker: 'MKT', type: 'BUY', quantity: 1, price: 1, total: 1, date: '2024-04-20', market: 'nasdaq' }, cookie, cash.base);
+    checkEq('lowercase market on edit → 400 (not auto-normalized)', badMarketEdit.status, 400);
   } finally {
     cash.close();
   }

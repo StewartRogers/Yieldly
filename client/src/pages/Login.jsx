@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-export default function Login({ needsSetup, onAuthenticated }) {
+export default function Login({ needsSetup, setupTokenRequired, onAuthenticated }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [setupToken, setSetupToken] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -20,7 +21,7 @@ export default function Login({ needsSetup, onAuthenticated }) {
 
     setLoading(true)
     try {
-      await onAuthenticated(username, password)
+      await onAuthenticated(username, password, needsSetup ? setupToken : undefined)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -82,6 +83,19 @@ export default function Login({ needsSetup, onAuthenticated }) {
 
         {needsSetup && (
           <p className="login-hint">Password must be at least 8 characters.</p>
+        )}
+
+        {needsSetup && setupTokenRequired && (
+          <label className="login-label">
+            Setup token
+            <Input
+              type="password"
+              value={setupToken}
+              onChange={(e) => setSetupToken(e.target.value)}
+              autoComplete="off"
+              required
+            />
+          </label>
         )}
 
         <Button type="submit" disabled={loading} className="login-btn">
