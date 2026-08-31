@@ -1,16 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import { RefreshCw, Check, LogOut } from 'lucide-react'
 import { getPortfolios, refreshAllPrices, getSession, login, logout, setupAccount, setOnUnauthorized } from './api/client'
-import Home from './pages/Home'
-import Summary from './pages/Summary'
-import History from './pages/History'
-import Dividends from './pages/Dividends'
-import Portfolios from './pages/Portfolios'
-import Transactions from './pages/Transactions'
-import Import from './pages/Import'
 import Login from './pages/Login'
 import { Button } from '@/components/ui/button'
+
+// Login is needed immediately for unauthenticated visitors, so it stays a
+// normal eager import. The rest only matter once logged in, and are the
+// bulk of the >500kB main chunk — lazy-loading them keeps first load light
+// on slow/mobile connections; each page's JS downloads only when visited.
+const Home = lazy(() => import('./pages/Home'))
+const Summary = lazy(() => import('./pages/Summary'))
+const History = lazy(() => import('./pages/History'))
+const Dividends = lazy(() => import('./pages/Dividends'))
+const Portfolios = lazy(() => import('./pages/Portfolios'))
+const Transactions = lazy(() => import('./pages/Transactions'))
+const Import = lazy(() => import('./pages/Import'))
 
 const navCls = ({ isActive }) => 'app-nav-link' + (isActive ? ' app-nav-link--active' : '')
 
@@ -188,15 +193,17 @@ export default function App() {
       </nav>
 
       <div className="app-page">
-        <Routes>
-          <Route path="/"             element={<Home />} />
-          <Route path="/summary"      element={<Summary      pricesTick={pricesTick} />} />
-          <Route path="/history"      element={<History      portfolios={portfolios} />} />
-          <Route path="/dividends"    element={<Dividends    portfolios={portfolios} />} />
-          <Route path="/portfolios"   element={<Portfolios   portfolios={portfolios} onPortfoliosChange={loadPortfolios} pricesTick={pricesTick} />} />
-          <Route path="/transactions" element={<Transactions portfolios={portfolios} />} />
-          <Route path="/import"       element={<Import       onImported={loadPortfolios} />} />
-        </Routes>
+        <Suspense fallback={<p style={{ color: 'var(--tc-muted)' }}>Loading...</p>}>
+          <Routes>
+            <Route path="/"             element={<Home />} />
+            <Route path="/summary"      element={<Summary      pricesTick={pricesTick} />} />
+            <Route path="/history"      element={<History      portfolios={portfolios} />} />
+            <Route path="/dividends"    element={<Dividends    portfolios={portfolios} />} />
+            <Route path="/portfolios"   element={<Portfolios   portfolios={portfolios} onPortfoliosChange={loadPortfolios} pricesTick={pricesTick} />} />
+            <Route path="/transactions" element={<Transactions portfolios={portfolios} />} />
+            <Route path="/import"       element={<Import       onImported={loadPortfolios} />} />
+          </Routes>
+        </Suspense>
       </div>
     </BrowserRouter>
   )
