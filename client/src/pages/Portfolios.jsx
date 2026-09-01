@@ -398,7 +398,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
       {/* ── Holdings: List view ── */}
       {!holdingsError && view === 'list' && (
         <div className="tc-card">
-          <div className="tbl-wrap">
+          <div className="tbl-wrap no-inner-scroll">
             <table className="tbl">
               <thead>
                 <tr>
