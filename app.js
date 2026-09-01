@@ -1107,7 +1107,7 @@ function createApp(db, options = {}) {
         if (currentShares <= 0) {
           return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
         }
-        if (normalizedType === 'SELL' && finalQuantity > currentShares) {
+        if (normalizedType === 'SELL' && finalQuantity > currentShares + SHARE_EPSILON) {
           return res.status(400).json({
             error: `Cannot sell ${finalQuantity} shares of ${finalTickerUpper} — only ${currentShares} held in this portfolio`,
           });
@@ -1337,7 +1337,7 @@ function createApp(db, options = {}) {
         if (currentShares <= 0) {
           return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
         }
-        if (normalizedType === 'SELL' && finalQuantity > currentShares) {
+        if (normalizedType === 'SELL' && finalQuantity > currentShares + SHARE_EPSILON) {
           return res.status(400).json({
             error: `Cannot sell ${finalQuantity} shares of ${finalTickerUpper} — only ${currentShares} held in this portfolio`,
           });
@@ -1665,7 +1665,7 @@ function createApp(db, options = {}) {
               errors.push({ line: i + 1, error: `You don't own ${cleanTicker} in ${portfolio.code} — cannot import a ${type}`, data: truncate(line) });
               continue;
             }
-            if (type === 'SELL' && quantity > held) {
+            if (type === 'SELL' && quantity > held + SHARE_EPSILON) {
               errors.push({ line: i + 1, error: `Cannot sell ${quantity} shares of ${cleanTicker} — only ${held} held in ${portfolio.code}`, data: truncate(line) });
               continue;
             }
