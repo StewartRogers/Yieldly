@@ -31,14 +31,24 @@ const MARKETS = new Set(['TMX', 'NYSE', 'NASDAQ']);
 
 // CONTRIBUTION/WITHDRAWAL move cash_balance by their own total; a transfer's two
 // linked legs (TRANSFER_IN/TRANSFER_OUT, see POST /api/transfers) move it the
-// same way from each side. Shared here so the create and delete/reversal paths
-// can't drift on the sign convention.
+// same way from each side. BUY/SELL settle in cash too — a buy spends
+// total+commission, a sell nets total-commission. DIVIDEND/DIVIDEND_REINVEST
+// deliberately don't touch cash_balance: a cash dividend is tracked via
+// dividends_paid instead, and a reinvest converts it straight to shares with
+// no cash ever landing in the account. Shared here so the create and
+// delete/reversal paths can't drift on the sign convention.
 const CASH_BALANCE_DELTA = {
+  BUY:          (total, commission = 0) => -(total + commission),
+  SELL:         (total, commission = 0) => total - commission,
   CONTRIBUTION: (total) => total,
   WITHDRAWAL:   (total) => -total,
   TRANSFER_IN:  (total) => total,
   TRANSFER_OUT: (total) => -total,
 };
+
+// Tolerance for cash comparisons — well below a cent, just enough to absorb
+// IEEE-754 noise from repeated additions (same rationale as SHARE_EPSILON).
+const CASH_EPSILON = 1e-6;
 
 // Same allow-list the market-price fetchers require (see fetchTMXQuote below),
 // plus '-' for TSX unit-trust tickers (e.g. REI-UN.TO) which normalizeTicker()
@@ -1060,7 +1070,7 @@ function createApp(db, options = {}) {
       if (market !== undefined && market !== null && !MARKETS.has(market)) {
         return res.status(400).json({ error: 'Invalid market' });
       }
-      const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolio_id);
+      const portfolio = await db.get('SELECT id, cash_balance FROM portfolios WHERE id = ?', portfolio_id);
       if (!portfolio) {
         return res.status(404).json({ error: 'Portfolio not found' });
       }
@@ -1088,6 +1098,7 @@ function createApp(db, options = {}) {
       const finalQuantity = quantity !== undefined ? Number(quantity) : 0;
       const finalPrice = price !== undefined ? Number(price) : 0;
       const finalTotal = total !== undefined ? Number(total) : (finalQuantity * finalPrice);
+      const finalCommission = commission ? Number(commission) : 0;
       if (!isFiniteNumber(finalTotal)) {
         return res.status(400).json({ error: 'total could not be computed' });
       }
@@ -1114,6 +1125,18 @@ function createApp(db, options = {}) {
         }
       }
 
+      // A BUY spends cash it doesn't have to be given a negative cash_balance
+      // no one intended — mirrors the SELL oversell guard above.
+      if (normalizedType === 'BUY') {
+        const requiredCash = finalTotal + finalCommission;
+        const availableCash = Number(portfolio.cash_balance) || 0;
+        if (requiredCash > availableCash + CASH_EPSILON) {
+          return res.status(400).json({
+            error: `Insufficient cash: this buy needs $${requiredCash.toFixed(2)} but only $${availableCash.toFixed(2)} is available in this portfolio`,
+          });
+        }
+      }
+
       // Reject an exact duplicate of an existing row (same shape the CSV bulk
       // import already dedupes on) so a double-click or double-submit doesn't
       // silently double a position. A legitimate duplicate does happen (e.g.
@@ -1133,7 +1156,7 @@ function createApp(db, options = {}) {
         }
       }
 
-      const cashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal) || 0;
+      const cashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal, finalCommission) || 0;
 
       // A logged dividend payment is real, confirmed data — re-derive the
       // next-payment guesstimate from it (payment date + frequency interval),
@@ -1224,7 +1247,7 @@ function createApp(db, options = {}) {
       const tx = await db.transaction('write');
       try {
         await tx.execute({ sql: 'DELETE FROM transactions WHERE id = ?', args: [row.id] });
-        const delta = CASH_BALANCE_DELTA[row.type]?.(row.total) || 0;
+        const delta = CASH_BALANCE_DELTA[row.type]?.(row.total, row.commission) || 0;
         if (delta !== 0) {
           await tx.execute({
             sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) - ? WHERE id = ?',
@@ -1296,7 +1319,7 @@ function createApp(db, options = {}) {
       if (market !== undefined && market !== null && !MARKETS.has(market)) {
         return res.status(400).json({ error: 'Invalid market' });
       }
-      const portfolio = await db.get('SELECT id FROM portfolios WHERE id = ?', portfolio_id);
+      const portfolio = await db.get('SELECT id, cash_balance FROM portfolios WHERE id = ?', portfolio_id);
       if (!portfolio) {
         return res.status(404).json({ error: 'Portfolio not found' });
       }
@@ -1316,9 +1339,16 @@ function createApp(db, options = {}) {
       const finalQuantity = quantity !== undefined ? Number(quantity) : 0;
       const finalPrice = price !== undefined ? Number(price) : 0;
       const finalTotal = total !== undefined ? Number(total) : (finalQuantity * finalPrice);
+      const finalCommission = commission ? Number(commission) : 0;
       if (!isFiniteNumber(finalTotal)) {
         return res.status(400).json({ error: 'total could not be computed' });
       }
+
+      // The old row's CASH_BALANCE_DELTA must be reversed before the new one
+      // is evaluated/applied, or cash drifts (and the BUY affordability check
+      // below would double-count this same row's own old cash effect).
+      const oldCashDelta = CASH_BALANCE_DELTA[existing.type]?.(existing.total, existing.commission) || 0;
+      const newCashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal, finalCommission) || 0;
 
       const finalTickerUpper = finalTicker.toUpperCase();
 
@@ -1344,6 +1374,21 @@ function createApp(db, options = {}) {
         }
       }
 
+      // Same BUY affordability guard as POST, but first undoing this row's own
+      // old cash effect if it's staying in the same portfolio — otherwise
+      // re-editing a BUY (e.g. just fixing its date) would find its own
+      // already-spent cash "unavailable" and reject a no-op edit.
+      if (normalizedType === 'BUY') {
+        const requiredCash = finalTotal + finalCommission;
+        let availableCash = Number(portfolio.cash_balance) || 0;
+        if (existing.portfolio_id === portfolio_id) availableCash -= oldCashDelta;
+        if (requiredCash > availableCash + CASH_EPSILON) {
+          return res.status(400).json({
+            error: `Insufficient cash: this buy needs $${requiredCash.toFixed(2)} but only $${availableCash.toFixed(2)} is available in this portfolio`,
+          });
+        }
+      }
+
       // Same duplicate guard as POST, excluding this row itself (otherwise a
       // no-op edit — same values, e.g. just fixing the market field — would
       // always collide with its own pre-edit row).
@@ -1360,13 +1405,6 @@ function createApp(db, options = {}) {
           });
         }
       }
-
-      // The old row's CASH_BALANCE_DELTA must be reversed before the new one
-      // is applied, or cash drifts on every edit of a CONTRIBUTION/WITHDRAWAL
-      // — reversing against the *old* portfolio_id/type/total in case those
-      // changed too (e.g. moving the entry to a different portfolio).
-      const oldCashDelta = CASH_BALANCE_DELTA[existing.type]?.(existing.total) || 0;
-      const newCashDelta = CASH_BALANCE_DELTA[normalizedType]?.(finalTotal) || 0;
 
       let nextDividendDate = null;
       if (normalizedType === 'DIVIDEND' || normalizedType === 'DIVIDEND_REINVEST') {
@@ -1567,6 +1605,15 @@ function createApp(db, options = {}) {
       // route does. Accumulated per portfolio and applied once after the loop.
       const cashDeltas = new Map();
 
+      // Running cash balance per portfolio, seeded from the current DB value
+      // and updated as rows are applied — same pattern as netShares — so a
+      // BUY's affordability check sees the effect of earlier rows in this
+      // same file, not just what's already committed.
+      const cashBalances = new Map(
+        (await db.all('SELECT id, COALESCE(cash_balance, 0) AS cash_balance FROM portfolios'))
+          .map(p => [p.id, Number(p.cash_balance) || 0])
+      );
+
       // Skip header row
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -1671,6 +1718,16 @@ function createApp(db, options = {}) {
             }
           }
 
+          // Same BUY affordability guard as POST /api/transactions. The CSV
+          // format has no commission column, so required cash is just total.
+          if (type === 'BUY') {
+            const available = cashBalances.get(portfolio.id) || 0;
+            if (total > available + CASH_EPSILON) {
+              errors.push({ line: i + 1, error: `Insufficient cash: this buy needs $${total.toFixed(2)} but only $${available.toFixed(2)} is available in ${portfolio.code}`, data: truncate(line) });
+              continue;
+            }
+          }
+
           await db.run(`
             INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1691,6 +1748,7 @@ function createApp(db, options = {}) {
           const cashDelta = CASH_BALANCE_DELTA[type]?.(total) || 0;
           if (cashDelta !== 0) {
             cashDeltas.set(portfolio.id, (cashDeltas.get(portfolio.id) || 0) + cashDelta);
+            cashBalances.set(portfolio.id, (cashBalances.get(portfolio.id) || 0) + cashDelta);
           }
 
           imported.push({ line: i + 1, symbol, portfolio: portfolioCode, date: parsedDate });

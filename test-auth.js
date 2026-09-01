@@ -362,6 +362,10 @@ async function run() {
 
     const p = await req('POST', '/api/portfolios', { name: 'Registered', code: 'REG' }, cookie, backup.base);
     const pid = p.body.id;
+    // Fund cash directly (not via a CONTRIBUTION transaction) so the BUY below
+    // can afford its $1000 cost without adding a row to the counts this
+    // section asserts against.
+    await req('PUT', `/api/portfolios/${pid}/cash-balance`, { cash_balance: 1000 }, cookie, backup.base);
     await req('POST', '/api/transactions',
       { portfolio_id: pid, ticker: 'RY.TO', type: 'BUY', quantity: 10, price: 100, total: 1000, date: '2024-01-02' }, cookie, backup.base);
     await req('POST', '/api/transactions',
@@ -588,6 +592,11 @@ async function run() {
     checkEq('backfilled row gone', rows4.body.some(r => r.date === '2020-01-31'), false);
 
     section('33b. Cron snapshot – skips a portfolio with an unpriced holding instead of writing a deflated total');
+    // Cash was last set to 750 (section 30) — not enough to afford this $1000
+    // BUY now that a BUY spends cash. Fund it well past that first; the
+    // snapshot row asserted below (line ~605) was already written before this
+    // point and is untouched by it.
+    await req('PUT', `/api/portfolios/${pid}/cash-balance`, { cash_balance: 2000 }, cookie, snap.base);
     // No stock_info row for this ticker at all, so its market_price is unknown
     // (not $0) — writing a total anyway would silently zero out $1,000 of real
     // cost basis and permanently bake that into the History chart.
@@ -807,7 +816,12 @@ async function run() {
     const oviewB = overview.body.find(p => p.code === 'CASHB');
     checkTruthy('CASHA present', !!oviewA);
     checkTruthy('CASHB present', !!oviewB);
-    check('CASHA cash = 500 (1000 contrib - 200 withdraw - 300 transfer out)', oviewA.cash, 500);
+    // 500 from section 38 (1000 contrib - 200 withdraw - 300 transfer out),
+    // then BUY/SELL now spend/receive cash too: section 39's XYZ/ABC trades
+    // net -90 (-50 XYZ buy +60 XYZ sell -50 ABC buy -50 ABC buy; the
+    // confirm_duplicate ABC lot is bought then immediately deleted, net 0),
+    // and section 41's GHI+JKL buys are -100 each. 500 - 90 - 200 = 210.
+    check('CASHA cash = 210 (500 from contrib/withdraw/transfer, less net BUY/SELL cash spent in sections 39 & 41)', oviewA.cash, 210);
     check('CASHB cash = 300 (transfer in)', oviewB.cash, 300);
     // ABC (10 shares @10) + GHI (10 shares @10) + JKL (10 shares @10); XYZ nets
     // to 0 shares (fully sold in section 39) so it's excluded from holdings.
