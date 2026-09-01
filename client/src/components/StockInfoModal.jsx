@@ -17,9 +17,9 @@ export default function StockInfoModal({ holding, portfolioId, onClose, onSaved 
   useEffect(() => {
     if (holding) {
       setForm({
-        marketPrice:       holding.market_price       || '',
+        marketPrice:       holding.market_price       ? holding.market_price.toFixed(2)      : '',
         dividendFrequency: holding.dividend_frequency || '',
-        dividendPerShare:  holding.dividend_per_share || '',
+        dividendPerShare:  holding.dividend_per_share ? holding.dividend_per_share.toFixed(2) : '',
         lastDividendDate:  holding.last_dividend_date || '',
         sector:            holding.sector             || '',
         investmentType:    holding.investment_type    || '',

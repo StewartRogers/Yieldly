@@ -6,9 +6,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
-import { Trash2, Pencil, X } from 'lucide-react'
+import { Trash2, Pencil, X, TriangleAlert } from 'lucide-react'
 
 const PER_PAGE = 20
+// Flags a quantity that isn't a clean multiple of 0.0001 (e.g. an unrounded
+// DRIP reinvest amount) so it's easy to spot in the table and fix via Edit.
+const isUnroundedQty = q => q > 0 && Math.abs(q - Math.round(q * 10000) / 10000) > 1e-9
 const CASH_ONLY_TYPES = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
 const CASH_FLOW_TYPES = new Set(['CONTRIBUTION', 'WITHDRAWAL'])
 // 'TRANSFER' is a form-only pseudo-type: submitting it calls createTransfer(),
@@ -733,7 +736,17 @@ export default function Transactions({ portfolios }) {
                               {TYPE_LABEL[t.type] || t.type}
                             </span>
                           </td>
-                          <td className="num">{t.quantity > 0 ? t.quantity : '—'}</td>
+                          <td className="num">
+                            {t.quantity > 0 ? (
+                              isUnroundedQty(t.quantity) ? (
+                                <span className="row" style={{ gap: 4, justifyContent: 'flex-end', color: 'var(--tc-warn, #d9a441)' }}
+                                  title={`Not rounded to 4 decimals (exact: ${t.quantity})`}>
+                                  {t.quantity.toFixed(4)}
+                                  <TriangleAlert size={12} />
+                                </span>
+                              ) : t.quantity
+                            ) : '—'}
+                          </td>
                           <td className="num">{parseFloat(t.price) > 0 ? fmtCurrency(parseFloat(t.price)) : '—'}</td>
                           <td className="num">{fmtCurrency(parseFloat(t.total))}</td>
                           <td className="num" style={{ color: 'var(--tc-muted)' }}>{t.date}</td>

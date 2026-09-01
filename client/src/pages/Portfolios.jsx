@@ -11,7 +11,7 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
   const hasMarket = holding.market_price > 0
 
   const kvRows = [
-    ['Shares',    holding.shares.toFixed(2)],
+    ['Shares',    holding.shares.toFixed(4)],
     ['Buy price', fmtPrice(holding.buy_price)],
     ['Market',    hasMarket ? fmtPrice(holding.market_price) : '—'],
     ['Mkt total', hasMarket ? fmtCurrency(holding.market_value) : '—'],
