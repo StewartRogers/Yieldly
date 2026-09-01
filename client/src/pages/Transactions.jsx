@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { fmtCurrency } from '../utils/format'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { fmtCurrency, isUnroundedQty } from '../utils/format'
 import { getPortfolioTransactions, createTransaction, updateTransaction, createTransfer, deleteTransaction } from '../api/client'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -9,9 +10,6 @@ import { useToast } from '@/components/ui/toast'
 import { Trash2, Pencil, X, TriangleAlert } from 'lucide-react'
 
 const PER_PAGE = 20
-// Flags a quantity that isn't a clean multiple of 0.0001 (e.g. an unrounded
-// DRIP reinvest amount) so it's easy to spot in the table and fix via Edit.
-const isUnroundedQty = q => q > 0 && Math.abs(q - Math.round(q * 10000) / 10000) > 1e-9
 const CASH_ONLY_TYPES = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
 const CASH_FLOW_TYPES = new Set(['CONTRIBUTION', 'WITHDRAWAL'])
 // 'TRANSFER' is a form-only pseudo-type: submitting it calls createTransfer(),
@@ -171,6 +169,10 @@ function TickerCombobox({ id, value, options, onChange, placeholder, required })
 
 export default function Transactions({ portfolios }) {
   const toast = useToast()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const formCardRef = useRef(null)
+  const consumedNavEdit = useRef(false)
   const [formPortfolioId, setFormPortfolioId] = useState('')
   const [toPortfolioId, setToPortfolioId]     = useState('')
   const [type, setType]                       = useState('BUY')
@@ -355,7 +357,25 @@ export default function Transactions({ portfolios }) {
     setCommission(t.commission > 0 ? String(t.commission) : '')
     setDate(t.date)
     setMarket(t.market || 'TMX')
+    formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
+
+  // Jumping here from a holding's "Transactions" popup (e.g. to fix an
+  // unrounded quantity) arrives with { editTxnId, ticker } in router state.
+  // Consumed once allTxns has loaded, then cleared so a back/forward nav or
+  // re-render doesn't reopen the same row.
+  useEffect(() => {
+    if (consumedNavEdit.current) return
+    const editTxnId = location.state?.editTxnId
+    if (!editTxnId || allTxns.length === 0) return
+    const t = allTxns.find(x => x.id === editTxnId)
+    if (t) {
+      startEdit(t)
+      if (location.state?.ticker) setTickerFilter(location.state.ticker)
+    }
+    consumedNavEdit.current = true
+    navigate(location.pathname, { replace: true, state: null })
+  }, [allTxns, location.state, location.pathname, navigate])
 
   const cancelEdit = () => {
     setEditingId(null)
@@ -423,7 +443,7 @@ export default function Transactions({ portfolios }) {
       <div className="tx-layout">
 
         {/* ── Add/Edit Transaction form ── */}
-        <div className="tc-card tc-card-pad">
+        <div className="tc-card tc-card-pad" ref={formCardRef}>
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <div className="disp" style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink)' }}>
               {editingId ? 'Edit transaction' : 'Add transaction'}

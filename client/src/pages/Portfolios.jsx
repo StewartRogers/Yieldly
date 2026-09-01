@@ -1,17 +1,31 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, LayoutGrid, List, GripVertical, Pencil } from 'lucide-react'
-import { fmtCurrency, fmtCurrencyOr, fmtPrice, fmtPct, retClass, fmtFreqCode } from '../utils/format'
+import { RefreshCw, LayoutGrid, List, GripVertical, Pencil, TriangleAlert } from 'lucide-react'
+import { fmtCurrency, fmtCurrencyOr, fmtPrice, fmtPct, retClass, fmtFreqCode, fmtInvestmentType, isUnroundedQty } from '../utils/format'
 import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
 import { Input } from '@/components/ui/input'
 import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder, updatePortfolio } from '../api/client'
 
+// Renders a share count, flagging one that isn't cleanly rounded to 4
+// decimals (e.g. an unrounded DRIP amount) so it's visible right where the
+// user actually looks for it, not just buried in a transaction row.
+function SharesValue({ shares }) {
+  if (!isUnroundedQty(shares)) return shares.toFixed(4)
+  return (
+    <span className="row" style={{ gap: 4, alignItems: 'center', justifyContent: 'flex-end', color: 'var(--tc-warn, #d9a441)' }}
+      title={`Not rounded to 4 decimals (exact: ${shares}) — open Transactions to find and fix the source row`}>
+      {shares.toFixed(4)}
+      <TriangleAlert size={12} />
+    </span>
+  )
+}
+
 function HoldingCard({ holding, onEdit, onShowTxns }) {
   const hasMarket = holding.market_price > 0
 
   const kvRows = [
-    ['Shares',    holding.shares.toFixed(4)],
+    ['Shares',    <SharesValue shares={holding.shares} />],
     ['Buy price', fmtPrice(holding.buy_price)],
     ['Market',    hasMarket ? fmtPrice(holding.market_price) : '—'],
     ['Mkt total', hasMarket ? fmtCurrency(holding.market_value) : '—'],
@@ -29,11 +43,11 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
       <div className="top">
         <div>
           <div className="tk">{holding.ticker}</div>
-          {holding.investment_type && <div className="nm">{holding.investment_type}</div>}
+          {holding.investment_type && <div className="nm">{fmtInvestmentType(holding.investment_type)}</div>}
         </div>
         <span className="tc-badge type">
           <span className="dot" />
-          {holding.investment_type || 'Stock'}
+          {holding.investment_type ? fmtInvestmentType(holding.investment_type) : 'Stock'}
         </span>
       </div>
 
@@ -407,16 +421,16 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                   <tr key={h.ticker}>
                     <td>
                       <span className="ticker">{h.ticker}</span>
-                      {h.investment_type && <span className="sub"> {h.investment_type}</span>}
+                      {h.investment_type && <span className="sub"> {fmtInvestmentType(h.investment_type)}</span>}
                     </td>
                     <td>
                       {h.investment_type && (
                         <span className="tc-badge type">
-                          <span className="dot" />{h.investment_type}
+                          <span className="dot" />{fmtInvestmentType(h.investment_type)}
                         </span>
                       )}
                     </td>
-                    <td className="num">{h.shares.toFixed(4)}</td>
+                    <td className="num"><SharesValue shares={h.shares} /></td>
                     <td className="num">{fmtPrice(h.buy_price)}</td>
                     <td className="num">{h.market_price > 0 ? fmtPrice(h.market_price) : '—'}</td>
                     <td className="num">{fmtCurrency(h.buy_price * h.shares)}</td>

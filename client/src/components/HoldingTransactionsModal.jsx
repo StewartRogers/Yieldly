@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
-import { fmtCurrency } from '../utils/format'
+import { useNavigate } from 'react-router-dom'
+import { Pencil, TriangleAlert } from 'lucide-react'
+import { fmtCurrency, isUnroundedQty } from '../utils/format'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getTickerTransactions } from '../api/client'
@@ -7,6 +9,7 @@ import { getTickerTransactions } from '../api/client'
 function typeLabel(t) { return t.replace(/_/g, ' ') }
 
 export default function HoldingTransactionsModal({ portfolioId, ticker, onClose }) {
+  const navigate = useNavigate()
   const [txns, setTxns]       = useState(null)
   const [summary, setSummary] = useState(null)
   const [error, setError]     = useState(null)
@@ -66,6 +69,7 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
                   <TableHead className="text-right">Price</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead className="text-right">Commission</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -78,7 +82,15 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
                       </span>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {t.quantity > 0 ? t.quantity.toFixed(4) : '—'}
+                      {t.quantity > 0 ? (
+                        isUnroundedQty(t.quantity) ? (
+                          <span className="row" style={{ gap: 4, justifyContent: 'flex-end', color: 'var(--tc-warn, #d9a441)' }}
+                            title={`Not rounded to 4 decimals (exact: ${t.quantity})`}>
+                            {t.quantity.toFixed(4)}
+                            <TriangleAlert size={12} />
+                          </span>
+                        ) : t.quantity.toFixed(4)
+                      ) : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {t.price > 0 ? fmtCurrency(t.price) : '—'}
@@ -86,6 +98,22 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
                     <TableCell className="text-right tabular-nums">{fmtCurrency(t.total)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {t.commission > 0 ? fmtCurrency(t.commission) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {!t.type.startsWith('TRANSFER_') && (
+                        <button
+                          type="button"
+                          className="tc-btn sm ghost"
+                          title="Edit transaction"
+                          aria-label="Edit transaction"
+                          onClick={() => {
+                            onClose()
+                            navigate('/transactions', { state: { editTxnId: t.id, ticker } })
+                          }}
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
