@@ -616,17 +616,27 @@ function createApp(db, options = {}) {
 
   // ===== MARKET DATA =====
 
-  async function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, nextDividendDate) {
+  // dividendFrequency is TMX-only (Yahoo has no equivalent field), so
+  // US/Yahoo-quoted tickers pass undefined here and COALESCE leaves whatever
+  // was there (manually set or backfilled) untouched. For TMX tickers, unlike
+  // backfill-frequency (which only ever fills a blank via WHERE ... IS NULL),
+  // a refresh overwrites even a value set by hand — that's the point, so it
+  // stays in sync with TMX going forward. TMX returning null (no dividend on
+  // file) still falls through COALESCE and leaves a prior value alone, since
+  // that's more often a transient API miss than a confirmed "dividend
+  // stopped" signal.
+  async function upsertStockInfo(portfolioId, ticker, marketPrice, dividendYield, nextDividendDate, dividendFrequency) {
     await db.run(`
-      INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_yield, next_dividend_date, updated_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO stock_info (portfolio_id, ticker, market_price, dividend_yield, next_dividend_date, dividend_frequency, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(portfolio_id, ticker) DO UPDATE SET
         market_price       = COALESCE(?, market_price),
         dividend_yield     = COALESCE(?, dividend_yield),
         next_dividend_date = COALESCE(?, next_dividend_date),
+        dividend_frequency = COALESCE(?, dividend_frequency),
         updated_at         = CURRENT_TIMESTAMP
-    `, portfolioId, ticker, marketPrice ?? null, dividendYield ?? null, nextDividendDate ?? null,
-       marketPrice ?? null, dividendYield ?? null, nextDividendDate ?? null);
+    `, portfolioId, ticker, marketPrice ?? null, dividendYield ?? null, nextDividendDate ?? null, dividendFrequency ?? null,
+       marketPrice ?? null, dividendYield ?? null, nextDividendDate ?? null, dividendFrequency ?? null);
   }
 
   // Shared by POST /api/refresh-all-prices, POST /api/portfolios/:id/refresh-prices,
@@ -717,7 +727,12 @@ function createApp(db, options = {}) {
             nextDividendDate = estimateNextDividendDate(q.dividendPayDate, existing.dividend_frequency, today);
           }
         }
-        await upsertStockInfo(portfolio_id, ticker, price, divYield, nextDividendDate);
+        // Only TMX exposes dividendFrequency (Yahoo has no equivalent), and
+        // it already matches the app's own Monthly/Quarterly/Semi-Annual/
+        // Annual strings — but whitelist against INTERVAL_MONTHS anyway
+        // rather than trust an upstream API to never change its wording.
+        const dividendFrequency = INTERVAL_MONTHS[q.dividendFrequency] ? q.dividendFrequency : null;
+        await upsertStockInfo(portfolio_id, ticker, price, divYield, nextDividendDate, dividendFrequency);
       }
       updated++;
     }
@@ -1928,6 +1943,7 @@ async function fetchTMXQuote(ticker) {
       price
       dividendYield
       dividendPayDate
+      dividendFrequency
     }
   }`;
   const response = await fetch('https://app-money.tmx.com/graphql', {
