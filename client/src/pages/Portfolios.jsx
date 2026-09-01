@@ -421,14 +421,11 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                   <tr key={h.ticker}>
                     <td>
                       <span className="ticker">{h.ticker}</span>
-                      {h.investment_type && <span className="sub"> {fmtInvestmentType(h.investment_type)}</span>}
                     </td>
                     <td>
-                      {h.investment_type && (
-                        <span className="tc-badge type">
-                          <span className="dot" />{fmtInvestmentType(h.investment_type)}
-                        </span>
-                      )}
+                      <span className="tc-badge type">
+                        <span className="dot" />{h.investment_type ? fmtInvestmentType(h.investment_type) : 'Stock'}
+                      </span>
                     </td>
                     <td className="num"><SharesValue shares={h.shares} /></td>
                     <td className="num">{fmtPrice(h.buy_price)}</td>
