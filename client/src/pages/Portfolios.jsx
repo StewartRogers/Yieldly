@@ -28,29 +28,23 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
   // a field with no data renders '—' rather than disappearing and shifting
   // every row below it.
   const kvRows = [
-    ['Shares',         <SharesValue shares={holding.shares} />],
-    ['Buy price',      fmtPrice(holding.buy_price)],
-    ['Market price',   hasMarket ? fmtPrice(holding.market_price) : '—'],
-    ['Market total',   hasMarket ? fmtCurrency(holding.market_value) : '—'],
-    ['Dividends paid', fmtCurrencyOr(holding.dividends_paid)],
-    ['Dividend',       holding.dividend_per_share > 0 ? fmtPrice(holding.dividend_per_share) : '—'],
-    ['Dividend Yield', hasMarket && holding.dividend_yield > 0 ? holding.dividend_yield.toFixed(2) + '%' : '—'],
-    ['Frequency',      fmtFreqCode(holding.dividend_frequency)],
-    // Only applies to some holdings (a known payout estimate) — stays
-    // conditional rather than padded into the fixed set above, so a rare
-    // extra row doesn't become '—' noise on every card.
-    holding.annual_payout > 0 ? ['Annual', fmtCurrency(holding.annual_payout)] : null,
-  ].filter(Boolean)
+    ['Shares',           <SharesValue shares={holding.shares} />],
+    ['Buy price',        fmtPrice(holding.buy_price)],
+    ['Market price',     hasMarket ? fmtCurrency(holding.market_price) : '—'],
+    ['Market total',     hasMarket ? fmtCurrency(holding.market_value) : '—'],
+    ['Dividends paid',   fmtCurrencyOr(holding.dividends_paid)],
+    ['Dividend',         holding.dividend_per_share > 0 ? fmtPrice(holding.dividend_per_share) : '—'],
+    ['Dividend Yield',   hasMarket && holding.dividend_yield > 0 ? holding.dividend_yield.toFixed(2) + '%' : '—'],
+    ['Annual Dividends', holding.annual_payout > 0 ? fmtCurrency(holding.annual_payout) : '—'],
+    ['Frequency',        fmtFreqCode(holding.dividend_frequency)],
+  ]
 
   const isGain = holding.return >= 0
 
   return (
     <div className="hold">
       <div className="top">
-        <div>
-          <div className="tk">{holding.ticker}</div>
-          {holding.investment_type && <div className="nm">{fmtInvestmentType(holding.investment_type)}</div>}
-        </div>
+        <div className="tk">{holding.ticker}</div>
         <span className="tc-badge type">
           <span className="dot" />
           {holding.investment_type ? fmtInvestmentType(holding.investment_type) : 'Stock'}
