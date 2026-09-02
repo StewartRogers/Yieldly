@@ -726,6 +726,7 @@ export default function Transactions({ portfolios }) {
                 <table className="tbl">
                   <thead>
                     <tr>
+                      {historyFilter === 'ALL' && <th>Portfolio</th>}
                       <th>Ticker</th>
                       <th>Type</th>
                       <th>Shares</th>
@@ -740,13 +741,20 @@ export default function Transactions({ portfolios }) {
                       const badgeClass = TYPE_BADGE[t.type] || 'type'
                       return (
                         <tr key={t.id}>
+                          {historyFilter === 'ALL' && (
+                            <td className="muted-txt" style={{ fontSize: 12 }}>{t._portfolioCode}</td>
+                          )}
                           <td>
                             <span className="ticker" style={{ color: t.ticker === 'CASH' ? 'var(--faint)' : undefined }}>
                               {t.ticker}
                             </span>
                             {TRANSFER_LEG_TYPES.has(t.type) && t.transfer_peer_code && (
                               <div className="muted-txt" style={{ fontSize: 11, marginTop: 2 }}>
-                                {t.type === 'TRANSFER_OUT' ? `→ ${t.transfer_peer_code}` : `← ${t.transfer_peer_code}`}
+                                {/* Always shown from → to, regardless of which leg this row is,
+                                    so the direction reads the same on both portfolios' history. */}
+                                {t.type === 'TRANSFER_OUT'
+                                  ? `${t._portfolioCode} → ${t.transfer_peer_code}`
+                                  : `${t.transfer_peer_code} → ${t._portfolioCode}`}
                               </div>
                             )}
                           </td>
