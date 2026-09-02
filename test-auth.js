@@ -820,8 +820,9 @@ async function run() {
     // then BUY/SELL now spend/receive cash too: section 39's XYZ/ABC trades
     // net -90 (-50 XYZ buy +60 XYZ sell -50 ABC buy -50 ABC buy; the
     // confirm_duplicate ABC lot is bought then immediately deleted, net 0),
-    // and section 41's GHI+JKL buys are -100 each. 500 - 90 - 200 = 210.
-    check('CASHA cash = 210 (500 from contrib/withdraw/transfer, less net BUY/SELL cash spent in sections 39 & 41)', oviewA.cash, 210);
+    // section 40's two DIVIDEND payments on ABC add +5 +5, and section 41's
+    // GHI+JKL buys are -100 each. 500 - 90 + 10 - 200 = 220.
+    check('CASHA cash = 220 (500 from contrib/withdraw/transfer, plus DIVIDEND cash from section 40, less net BUY/SELL cash spent in sections 39 & 41)', oviewA.cash, 220);
     check('CASHB cash = 300 (transfer in)', oviewB.cash, 300);
     // ABC (10 shares @10) + GHI (10 shares @10) + JKL (10 shares @10); XYZ nets
     // to 0 shares (fully sold in section 39) so it's excluded from holdings.

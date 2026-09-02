@@ -32,18 +32,23 @@ const MARKETS = new Set(['TMX', 'NYSE', 'NASDAQ']);
 // CONTRIBUTION/WITHDRAWAL move cash_balance by their own total; a transfer's two
 // linked legs (TRANSFER_IN/TRANSFER_OUT, see POST /api/transfers) move it the
 // same way from each side. BUY/SELL settle in cash too — a buy spends
-// total+commission, a sell nets total-commission. DIVIDEND/DIVIDEND_REINVEST
-// deliberately don't touch cash_balance: a cash dividend is tracked via
-// dividends_paid instead, and a reinvest converts it straight to shares with
-// no cash ever landing in the account. Shared here so the create and
-// delete/reversal paths can't drift on the sign convention.
+// total+commission, a sell nets total-commission. DIVIDEND is cash landing in
+// the account (in addition to accumulating dividends_paid, unchanged) and
+// DIVIDEND_REINVEST spends that cash to buy shares (in addition to its
+// existing share/buy-cost effect, unchanged) — so a reinvest not preceded by
+// its own DIVIDEND can legitimately drive cash_balance negative; that's
+// allowed by design, same as CONTRIBUTION/WITHDRAWAL/transfers, not guarded
+// like BUY. Shared here so the create and delete/reversal paths can't drift
+// on the sign convention.
 const CASH_BALANCE_DELTA = {
-  BUY:          (total, commission = 0) => -(total + commission),
-  SELL:         (total, commission = 0) => total - commission,
-  CONTRIBUTION: (total) => total,
-  WITHDRAWAL:   (total) => -total,
-  TRANSFER_IN:  (total) => total,
-  TRANSFER_OUT: (total) => -total,
+  BUY:               (total, commission = 0) => -(total + commission),
+  SELL:              (total, commission = 0) => total - commission,
+  CONTRIBUTION:      (total) => total,
+  WITHDRAWAL:        (total) => -total,
+  TRANSFER_IN:       (total) => total,
+  TRANSFER_OUT:      (total) => -total,
+  DIVIDEND:          (total) => total,
+  DIVIDEND_REINVEST: (total) => -total,
 };
 
 // Tolerance for cash comparisons — well below a cent, just enough to absorb
