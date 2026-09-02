@@ -698,9 +698,12 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .hold .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 16px; font-size: 12.5px; }
 .hold .kv .k { color: var(--tc-muted); }
 .hold .kv .v { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-.hold .ret { display: flex; align-items: baseline; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 13px; }
-.hold .ret .lbl { font-size: 12px; color: var(--tc-muted); }
-.hold .ret .val { font-family: var(--font-num); font-size: 17px; font-weight: 600; letter-spacing: -0.03em; }
+/* Stacked (not side-by-side) so a large $ + % pair always has the card's
+   full width to itself — sharing a row with the "Total return" label wrapped
+   the value onto two lines once the dollar amount hit five figures. */
+.hold .ret { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; border-top: 1px solid var(--line); padding-top: 13px; }
+.hold .ret .lbl { align-self: flex-start; font-size: 12px; color: var(--tc-muted); }
+.hold .ret .val { font-family: var(--font-num); font-size: 16px; font-weight: 600; letter-spacing: -0.03em; white-space: nowrap; }
 .hold .foot { display: flex; gap: 8px; }
 .hold.add { border-style: dashed; align-items: center; justify-content: center; color: var(--tc-muted); cursor: pointer; min-height: 240px; }
 .hold.add:hover { color: var(--tc-accent); border-color: var(--accent-line); }

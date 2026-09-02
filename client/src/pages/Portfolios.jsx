@@ -24,15 +24,22 @@ function SharesValue({ shares }) {
 function HoldingCard({ holding, onEdit, onShowTxns }) {
   const hasMarket = holding.market_price > 0
 
+  // Fixed set, always in this order, so every card in a portfolio lines up —
+  // a field with no data renders '—' rather than disappearing and shifting
+  // every row below it.
   const kvRows = [
-    ['Shares',    <SharesValue shares={holding.shares} />],
-    ['Buy price', fmtPrice(holding.buy_price)],
-    ['Market',    hasMarket ? fmtPrice(holding.market_price) : '—'],
-    ['Mkt total', hasMarket ? fmtCurrency(holding.market_value) : '—'],
+    ['Shares',         <SharesValue shares={holding.shares} />],
+    ['Buy price',      fmtPrice(holding.buy_price)],
+    ['Market price',   hasMarket ? fmtPrice(holding.market_price) : '—'],
+    ['Market total',   hasMarket ? fmtCurrency(holding.market_value) : '—'],
+    ['Dividends paid', fmtCurrencyOr(holding.dividends_paid)],
+    ['Dividend',       holding.dividend_per_share > 0 ? fmtPrice(holding.dividend_per_share) : '—'],
+    ['Dividend Yield', hasMarket && holding.dividend_yield > 0 ? holding.dividend_yield.toFixed(2) + '%' : '—'],
+    ['Frequency',      fmtFreqCode(holding.dividend_frequency)],
+    // These two only apply to some holdings (a partial sell, or a payout
+    // estimate) — they stay conditional rather than padded into the fixed
+    // set above, so a rare extra row doesn't become '—' noise on every card.
     holding.sale_total > 0 ? ['Sale total', fmtCurrency(holding.sale_total)] : null,
-    ['Div paid',  fmtCurrencyOr(holding.dividends_paid)],
-    hasMarket && holding.dividend_yield > 0 ? ['Yield', holding.dividend_yield.toFixed(2) + '%'] : null,
-    holding.dividend_frequency ? ['Freq · /sh', `${holding.dividend_frequency} · ${holding.dividend_per_share > 0 ? '$' + holding.dividend_per_share.toFixed(2) : '—'}`] : null,
     holding.annual_payout > 0 ? ['Annual', fmtCurrency(holding.annual_payout)] : null,
   ].filter(Boolean)
 
