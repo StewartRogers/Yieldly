@@ -36,10 +36,9 @@ function HoldingCard({ holding, onEdit, onShowTxns }) {
     ['Dividend',       holding.dividend_per_share > 0 ? fmtPrice(holding.dividend_per_share) : '—'],
     ['Dividend Yield', hasMarket && holding.dividend_yield > 0 ? holding.dividend_yield.toFixed(2) + '%' : '—'],
     ['Frequency',      fmtFreqCode(holding.dividend_frequency)],
-    // These two only apply to some holdings (a partial sell, or a payout
-    // estimate) — they stay conditional rather than padded into the fixed
-    // set above, so a rare extra row doesn't become '—' noise on every card.
-    holding.sale_total > 0 ? ['Sale total', fmtCurrency(holding.sale_total)] : null,
+    // Only applies to some holdings (a known payout estimate) — stays
+    // conditional rather than padded into the fixed set above, so a rare
+    // extra row doesn't become '—' noise on every card.
     holding.annual_payout > 0 ? ['Annual', fmtCurrency(holding.annual_payout)] : null,
   ].filter(Boolean)
 
