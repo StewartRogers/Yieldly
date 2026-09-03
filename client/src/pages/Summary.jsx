@@ -149,10 +149,16 @@ function HoldingsExportCard({ portfolios }) {
           .filter(h => h.shares > 0)
           .sort((a, b) => a.ticker.localeCompare(b.ticker))
         const label = p.name || p.code
-        if (holdings.length === 0) return `${label}\n  (no holdings)`
-        const lines = holdings.map(h =>
-          `  - ${h.ticker}: ${h.shares.toLocaleString('en-CA', { maximumFractionDigits: 4 })} shares`)
-        return `${label}\n${lines.join('\n')}`
+        const cash = p.cash ?? 0
+        const mkt = p.market_value > 0 ? p.market_value : 0
+        const header = `${label} - ${fmtCurrency(mkt + cash)}`
+        const cashLine = `CASH - 0 - ${fmtCurrency(cash)}`
+        const lines = holdings.map(h => {
+          const year = h.first_buy_date ? h.first_buy_date.slice(0, 4) : '—'
+          const shares = h.shares.toLocaleString('en-CA', { maximumFractionDigits: 4 })
+          return `${h.ticker} - ${shares} - ${fmtCurrency(h.market_value)} - ${year}`
+        })
+        return [header, cashLine, ...lines].join('\n')
       })
       setText(sections.join('\n\n'))
     } catch (e) {
