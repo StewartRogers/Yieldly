@@ -735,6 +735,21 @@ async function run() {
       { portfolio_id: p1id, ticker: 'XYZ', type: 'SELL', quantity: 1, price: 6, date: '2024-04-04' }, cookie, cash.base);
     checkEq('SELL after fully sold out (history shows a past BUY, but 0 held now) → 400', sellAfterSoldOut.status, 400);
 
+    // A dividend can legitimately be paid after the position was fully sold
+    // (payment date lands after a sale that itself came after the ex-dividend
+    // date), so DIVIDEND gets a confirm-to-override instead of a hard 400.
+    const divAfterSoldOut = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'DIVIDEND', total: 5, date: '2024-04-05' }, cookie, cash.base);
+    checkEq('DIVIDEND after fully sold out, no confirm → 400', divAfterSoldOut.status, 400);
+    checkEq('...body has code NO_CURRENT_HOLDING', divAfterSoldOut.body.code, 'NO_CURRENT_HOLDING');
+
+    // Cleaned up immediately after asserting — section 42 checks CASHA's exact
+    // cash total and can't absorb an extra $5 dividend that isn't part of it.
+    const divAfterSoldOutConfirmed = await req('POST', '/api/transactions',
+      { portfolio_id: p1id, ticker: 'XYZ', type: 'DIVIDEND', total: 5, date: '2024-04-05', confirm_no_holding: true }, cookie, cash.base);
+    checkEq('same DIVIDEND resubmitted with confirm_no_holding:true → 200', divAfterSoldOutConfirmed.status, 200);
+    await req('DELETE', `/api/transactions/${divAfterSoldOutConfirmed.body.id}`, null, cookie, cash.base);
+
     const dupBuy1 = await req('POST', '/api/transactions',
       { portfolio_id: p1id, ticker: 'ABC', type: 'BUY', quantity: 5, price: 10, total: 50, date: '2024-04-05' }, cookie, cash.base);
     checkEq('first BUY → 200', dupBuy1.status, 200);

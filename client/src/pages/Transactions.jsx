@@ -332,6 +332,19 @@ export default function Transactions({ portfolios }) {
         try {
           await save({ ...txn, confirm_duplicate: true })
         } catch (err2) { toast.error(err2.message); return }
+      } else if (err.code === 'NO_CURRENT_HOLDING') {
+        // A dividend can arrive after the position was fully sold — the
+        // payment date often lands after the sale even though the sale
+        // happened after the stock's ex-dividend date.
+        const ok = await askConfirm({
+          title: "You don't currently hold this stock",
+          message: `${err.message} Save it anyway?`,
+          confirmLabel: 'Save anyway',
+        })
+        if (!ok) return
+        try {
+          await save({ ...txn, confirm_no_holding: true })
+        } catch (err2) { toast.error(err2.message); return }
       } else {
         toast.error(err.message)
         return

@@ -1136,7 +1136,22 @@ function createApp(db, options = {}) {
         );
         const currentShares = Number(row?.shares) || 0;
         if (currentShares <= 0) {
-          return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
+          // A cash DIVIDEND can legitimately be paid after the position was
+          // fully sold — the payment date usually lands well after the stock's
+          // ex-dividend date, and a sale in between doesn't retroactively
+          // forfeit a dividend already earned as of that ex-date. SELL and
+          // DIVIDEND_REINVEST still hard-require a current holding (a DRIP
+          // needs live shares to attach to); DIVIDEND instead asks the client
+          // to confirm once, the same pattern as the duplicate-transaction guard.
+          if (normalizedType === 'DIVIDEND' && !req.body.confirm_no_holding) {
+            return res.status(400).json({
+              error: `You don't currently own ${finalTickerUpper} in this portfolio. If this dividend was paid for shares you sold after its ex-dividend date, confirm to record it anyway.`,
+              code: 'NO_CURRENT_HOLDING',
+            });
+          }
+          if (normalizedType !== 'DIVIDEND') {
+            return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
+          }
         }
         if (normalizedType === 'SELL' && finalQuantity > currentShares + SHARE_EPSILON) {
           return res.status(400).json({
@@ -1385,7 +1400,16 @@ function createApp(db, options = {}) {
         );
         const currentShares = Number(row?.shares) || 0;
         if (currentShares <= 0) {
-          return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
+          // Same DIVIDEND-after-full-sell allowance as POST — see the comment there.
+          if (normalizedType === 'DIVIDEND' && !req.body.confirm_no_holding) {
+            return res.status(400).json({
+              error: `You don't currently own ${finalTickerUpper} in this portfolio. If this dividend was paid for shares you sold after its ex-dividend date, confirm to record it anyway.`,
+              code: 'NO_CURRENT_HOLDING',
+            });
+          }
+          if (normalizedType !== 'DIVIDEND') {
+            return res.status(400).json({ error: `You don't own ${finalTickerUpper} in this portfolio` });
+          }
         }
         if (normalizedType === 'SELL' && finalQuantity > currentShares + SHARE_EPSILON) {
           return res.status(400).json({
