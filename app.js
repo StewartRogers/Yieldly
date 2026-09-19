@@ -868,7 +868,7 @@ function createApp(db, options = {}) {
           SUM(t.total) AS total
         FROM transactions t
         JOIN portfolios p ON t.portfolio_id = p.id
-        WHERE t.type IN ('DIVIDEND', 'DIVIDEND_REINVEST')
+        WHERE t.type = 'DIVIDEND'
         GROUP BY p.code, year, month
         ORDER BY p.code, year, month
       `);

@@ -563,15 +563,16 @@ section('24. DRIP + Cash Dividend Combined');
 
   // shares_bought = 100 (buy) + 2 (drip) = 102; shares = 102
   // buy_total = 5000 + 100 = 5100
-  // dividends_paid = 80 (cash) + 100 (DRIP total is income too, immediately
-  // reinvested — see the comment on HOLDINGS_SQL's dividends_paid) = 180
+  // dividends_paid = 80 (cash only — DRIP's $100 is the same money already
+  // counted as the cash dividend elsewhere, not separate income; see the
+  // comment on HOLDINGS_SQL's dividends_paid) = 80
   // market_value = 102 × 52 = 5304
-  // return = 5304 + 0 + 180 - 5100 - 0 (no commission) = 384
+  // return = 5304 + 0 + 80 - 5100 - 0 (no commission) = 284
   check('shares = 102 (buy + drip)',        h.shares,         102);
   check('buy_total = $5100',                h.buy_total,      5100);
-  check('dividends_paid = $180 (cash + DRIP)', h.dividends_paid, 180);
+  check('dividends_paid = $80 (cash only, not DRIP)', h.dividends_paid, 80);
   check('market_value = $5304',             h.market_value,   5304);
-  check('return = $384',                    h.return,          384);
+  check('return = $284',                    h.return,          284);
   checkEq('buy_count = 2 (buy + drip)',     h.buy_count,       2);
 }
 

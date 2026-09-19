@@ -541,11 +541,12 @@ section('A22. DRIP + cash dividend combined');
   const [h] = getHoldings(pid);
   check('shares = 102',              h.shares,         102);
   check('buy_total = $5100',         h.buy_total,      5100);
-  // DRIP's $100 is income too (see the comment on HOLDINGS_SQL's
-  // dividends_paid) — $80 cash + $100 reinvested = $180.
-  check('dividends_paid = $180',     h.dividends_paid, 180);
+  // DRIP's $100 is the same money as a separately-recorded cash dividend, not
+  // new income (see the comment on HOLDINGS_SQL's dividends_paid) — only the
+  // $80 cash dividend counts.
+  check('dividends_paid = $80',      h.dividends_paid, 80);
   check('market_value = $5304',      h.market_value,   5304);
-  check('return = $384',             h.return,         384);
+  check('return = $284',             h.return,         284);
   checkEq('buy_count = 2',           h.buy_count,      2);
 }
 
