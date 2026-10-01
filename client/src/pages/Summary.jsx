@@ -239,9 +239,8 @@ export default function Summary({ pricesTick = 0 }) {
   const [updatedAt, setUpdatedAt]   = useState(null)
 
   const loadOverview = () => {
-    setLoadError('')
     return getOverview()
-      .then(data => { setOverview(data); setUpdatedAt(new Date()) })
+      .then(data => { setOverview(data); setUpdatedAt(new Date()); setLoadError('') })
       .catch(e => setLoadError(e.message || 'Could not load your accounts'))
   }
 

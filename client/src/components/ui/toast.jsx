@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import { CircleAlert, CircleCheck, X } from 'lucide-react'
 
 const ToastContext = createContext(null)
@@ -23,10 +23,12 @@ export function ToastProvider({ children }) {
     timers.current.set(id, setTimeout(() => dismiss(id), AUTO_DISMISS_MS))
   }, [dismiss])
 
-  const api = useRef({
+  // `push` is stable, so this object is too — consumers can safely list the
+  // toast api in effect deps without re-running on every toast.
+  const api = useMemo(() => ({
     error:   (message) => push(message, 'error'),
     success: (message) => push(message, 'success'),
-  }).current
+  }), [push])
 
   return (
     <ToastContext.Provider value={api}>

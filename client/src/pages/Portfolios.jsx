@@ -88,7 +88,7 @@ function AddHoldingCard({ portfolioCode, onClick }) {
 
 export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick = 0 }) {
   const navigate = useNavigate()
-  const [localPortfolios, setLocalPortfolios] = useState([])
+  const [localPortfolios, setLocalPortfolios] = useState(portfolios)
   const [selectedId, setSelectedId]           = useState(null)
   const [holdings, setHoldings]               = useState([])
   const [holdingsError, setHoldingsError]     = useState('')
@@ -107,13 +107,18 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   const [editCode, setEditCode]               = useState('')
   const dragId = useRef(null)
 
-  useEffect(() => { setLocalPortfolios(portfolios) }, [portfolios])
-
-  useEffect(() => {
-    if (localPortfolios.length > 0 && !selectedId) {
-      setSelectedId(localPortfolios[0].id)
-    }
-  }, [localPortfolios])
+  // Re-sync the local (drag-reorderable) copy whenever the parent's list
+  // changes, and default the selection to the first portfolio. Both happen
+  // during render rather than in effects, so there's no extra pass with a
+  // stale list or no tab selected.
+  const [syncedFrom, setSyncedFrom] = useState(portfolios)
+  if (portfolios !== syncedFrom) {
+    setSyncedFrom(portfolios)
+    setLocalPortfolios(portfolios)
+  }
+  if (!selectedId && localPortfolios.length > 0) {
+    setSelectedId(localPortfolios[0].id)
+  }
 
   // Monotonic request id. Switching portfolios fires a second /summary while
   // the first is still in flight; responses arrive in completion order, not
@@ -125,11 +130,11 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   const reloadHoldings = useCallback(() => {
     if (!selectedId) return
     const reqId = ++holdingsReq.current
-    setHoldingsError('')
     getPortfolioSummary(selectedId)
       .then(data => {
         if (reqId !== holdingsReq.current) return
         setHoldings(data.filter(h => h.shares > 0.00005))
+        setHoldingsError('')
       })
       .catch(e => {
         if (reqId !== holdingsReq.current) return
@@ -371,7 +376,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
       {holdingsError && (
         <div className="tc-card" style={{ padding: '16px 20px' }}>
           <p className="text-destructive text-sm">{holdingsError}</p>
-          <button type="button" className="tc-btn sm ghost mt2" onClick={reloadHoldings}>Try again</button>
+          <button type="button" className="tc-btn sm ghost mt2" onClick={() => { setHoldingsError(''); reloadHoldings() }}>Try again</button>
         </div>
       )}
 

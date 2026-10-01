@@ -18,4 +18,11 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // shadcn primitives export their cva variants (buttonVariants, …) and
+    // hooks (useToast) next to the component. That only costs a full reload
+    // instead of a hot update when one of these files is edited.
+    files: ['src/components/ui/**/*.{js,jsx}'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 ])

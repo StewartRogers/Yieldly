@@ -205,7 +205,6 @@ export default function History({ portfolios = [] }) {
   const [error, setError] = useState('')
 
   const load = () => {
-    setError('')
     // Without an error state a failed fetch left `snapshots` null forever and
     // the card showed "Loading…" indefinitely, with the only clue in devtools.
     getValueSnapshots().then(setSnapshots).catch(e => setError(e.message || 'Could not load value history'))
@@ -256,6 +255,7 @@ export default function History({ portfolios = [] }) {
     const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
     const targetDate = cell?.date || (isCurrentMonth ? todayISO() : monthEndISO(year, month))
     await setValueSnapshot(portfolioId, targetDate, value)
+    setError('')
     load()
   }
 
@@ -301,7 +301,7 @@ export default function History({ portfolios = [] }) {
         {error && (
           <div style={{ padding: '16px 20px' }}>
             <p className="text-destructive text-sm">{error}</p>
-            <button type="button" className="tc-btn sm ghost mt2" onClick={load}>Try again</button>
+            <button type="button" className="tc-btn sm ghost mt2" onClick={() => { setError(''); load() }}>Try again</button>
           </div>
         )}
         {!error && snapshots === null && (

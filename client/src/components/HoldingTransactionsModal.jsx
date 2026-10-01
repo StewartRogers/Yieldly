@@ -14,9 +14,18 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
   const [summary, setSummary] = useState(null)
   const [error, setError]     = useState(null)
 
+  // Clear the previous ticker's rows as soon as a different one is opened —
+  // during render, so they never flash under the new title. Closing (ticker ->
+  // null) keeps them so the dialog doesn't blank while it animates out.
+  const [shownFor, setShownFor] = useState(null)
+  const openKey = portfolioId && ticker ? `${portfolioId}:${ticker}` : null
+  if (openKey !== shownFor) {
+    setShownFor(openKey)
+    if (openKey) { setTxns(null); setSummary(null); setError(null) }
+  }
+
   useEffect(() => {
     if (!portfolioId || !ticker) return
-    setTxns(null); setSummary(null); setError(null)
     // Opening one ticker, closing, then opening another leaves two requests in
     // flight. Without this flag the first could resolve last and render its
     // rows and ACB under the second ticker's title — and the ACB strip is the

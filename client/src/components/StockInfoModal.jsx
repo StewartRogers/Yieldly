@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -6,26 +6,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { useToast } from '@/components/ui/toast'
 import { updateStockInfo } from '../api/client'
 
+const formFromHolding = (holding) => ({
+  marketPrice:       holding?.market_price       ? holding.market_price.toFixed(2)      : '',
+  dividendFrequency: holding?.dividend_frequency || '',
+  dividendPerShare:  holding?.dividend_per_share ? holding.dividend_per_share.toFixed(2) : '',
+  lastDividendDate:  holding?.last_dividend_date || '',
+  sector:            holding?.sector             || '',
+  investmentType:    holding?.investment_type    || '',
+})
+
 export default function StockInfoModal({ holding, portfolioId, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState({
-    marketPrice: '', dividendFrequency: '', dividendPerShare: '',
-    lastDividendDate: '', sector: '', investmentType: ''
-  })
+  const [form, setForm] = useState(() => formFromHolding(holding))
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    if (holding) {
-      setForm({
-        marketPrice:       holding.market_price       ? holding.market_price.toFixed(2)      : '',
-        dividendFrequency: holding.dividend_frequency || '',
-        dividendPerShare:  holding.dividend_per_share ? holding.dividend_per_share.toFixed(2) : '',
-        lastDividendDate:  holding.last_dividend_date || '',
-        sector:            holding.sector             || '',
-        investmentType:    holding.investment_type    || '',
-      })
-    }
-  }, [holding])
+  // The dialog stays mounted (so it can animate closed), so re-seed the form
+  // when a different holding is opened. Done during render rather than in an
+  // effect so the first frame already shows the new holding's values. Closing
+  // (holding -> null) keeps the old values so they don't blank mid-animation.
+  const [seededFrom, setSeededFrom] = useState(holding)
+  if (holding !== seededFrom) {
+    setSeededFrom(holding)
+    if (holding) setForm(formFromHolding(holding))
+  }
 
   const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
   const setVal = (key) => (val) => setForm(f => ({ ...f, [key]: val }))

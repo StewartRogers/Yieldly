@@ -237,11 +237,12 @@ export default function Transactions({ portfolios }) {
   // until the next reload.
   const txnsReq = useRef(0)
 
-  const loadAllTxns = useCallback(() => {
+  // Fetch only — every state update happens in a callback, so the mount/
+  // portfolios-changed effect can call it directly. `loadAllTxns` below is the
+  // version for user actions, which also shows the spinner straight away.
+  const fetchAllTxns = useCallback(() => {
     if (!portfolios?.length) return
     const reqId = ++txnsReq.current
-    setLoading(true)
-    setLoadError('')
     Promise.all(
       portfolios.map(p =>
         getPortfolioTransactions(p.id)
@@ -270,7 +271,23 @@ export default function Transactions({ portfolios }) {
       })
   }, [portfolios])
 
-  useEffect(() => { loadAllTxns() }, [loadAllTxns])
+  const loadAllTxns = useCallback(() => {
+    if (!portfolios?.length) return
+    setLoading(true)
+    setLoadError('')
+    fetchAllTxns()
+  }, [portfolios, fetchAllTxns])
+
+  // Show the spinner as soon as the portfolio list arrives or changes, during
+  // render so there's no frame of "No transactions" before the fetch starts.
+  const [fetchedFor, setFetchedFor] = useState(null)
+  if (portfolios?.length && portfolios !== fetchedFor) {
+    setFetchedFor(portfolios)
+    setLoading(true)
+    setLoadError('')
+  }
+
+  useEffect(() => { fetchAllTxns() }, [fetchAllTxns])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -383,6 +400,9 @@ export default function Transactions({ portfolios }) {
     if (!editTxnId || allTxns.length === 0) return
     const t = allTxns.find(x => x.id === editTxnId)
     if (t) {
+      // A one-shot reaction to navigation, not derived state: startEdit also
+      // scrolls the form into view, and the router state is cleared below.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       startEdit(t)
       if (location.state?.ticker) setTickerFilter(location.state.ticker)
     }

@@ -320,7 +320,6 @@ export default function Dividends({ portfolios = [] }) {
   // Without an error state these left `allData`/`upcoming` null forever and
   // both cards showed "Loading…" indefinitely on any API failure.
   const loadDividends = useCallback(() => {
-    setLoadError('')
     getDividendsMonthly().then(setAllData).catch(e => setLoadError(e.message || 'Could not load dividend history'))
     getUpcomingDividends().then(setUpcoming).catch(e => setLoadError(e.message || 'Could not load upcoming dividends'))
   }, [])
@@ -416,7 +415,7 @@ export default function Dividends({ portfolios = [] }) {
         {loadError && (
           <div style={{ padding: '16px 20px' }}>
             <p className="text-destructive text-sm">{loadError}</p>
-            <button type="button" className="tc-btn sm ghost mt2" onClick={loadDividends}>Try again</button>
+            <button type="button" className="tc-btn sm ghost mt2" onClick={() => { setLoadError(''); loadDividends() }}>Try again</button>
           </div>
         )}
         {!loadError && upcoming === null && (
