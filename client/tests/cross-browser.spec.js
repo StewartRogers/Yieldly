@@ -95,11 +95,13 @@ test('the active nav tab is brought into view on a phone', async ({ page }) => {
 
 test('a long table pins its header while scrolling', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.setViewportSize({ width: 1280, height: 700 })
+  // .tbl-wrap caps at 70vh. A short window keeps the cap below the seeded
+  // ledger's height, so the table has to scroll inside its own box.
+  await page.setViewportSize({ width: 1280, height: 300 })
   await signIn(page)
-  // The dividend matrix is twelve months plus a total — reliably taller than
-  // .tbl-wrap's max-height cap.
-  await page.goto('/dividends')
+  // The transactions ledger is the table that keeps the height cap. The
+  // dividend tables opted out (`.no-inner-scroll`) and grow with the page.
+  await page.goto('/transactions')
   await page.getByRole('table').first().waitFor()
 
   const wrap = page.locator('.tbl-wrap').filter({ has: page.locator('table.tbl') }).last()

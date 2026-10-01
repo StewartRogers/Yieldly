@@ -5,6 +5,10 @@ import { signIn } from './helpers/app.js'
 // All tests in this file share one server + DB for the whole run (see
 // playwright.config.js). Authentication comes from the `setup` project's
 // saved storageState, so signIn() here just waits for the shell to be up.
+// Seeding + filtering takes 30–45 s on Firefox/WebKit on a slow machine (a
+// Raspberry Pi), past Playwright's 30 s default. Matches cross-browser.spec.js.
+test.describe.configure({ timeout: 120_000 })
+
 test.beforeEach(async ({ page }) => {
   await signIn(page)
 
@@ -16,6 +20,8 @@ test.beforeEach(async ({ page }) => {
   const code = `X${crypto.randomBytes(2).toString('hex').toUpperCase()}`
   const created = await page.request.post('/api/portfolios', { data: { name: 'E2E Test', code } })
   const { id: portfolioId } = await created.json()
+  // A BUY the account can't afford is rejected, so fund it first.
+  await page.request.put(`/api/portfolios/${portfolioId}/cash-balance`, { data: { cash_balance: 10000 } })
 
   const seed = [
     { ticker: 'AAPL', quantity: 10, price: 150 },
@@ -24,13 +30,14 @@ test.beforeEach(async ({ page }) => {
     { ticker: 'GOOG', quantity: 3, price: 120 },
   ]
   for (const s of seed) {
-    await page.request.post('/api/transactions', {
+    const res = await page.request.post('/api/transactions', {
       data: {
         portfolio_id: portfolioId, ticker: s.ticker, type: 'BUY',
         quantity: s.quantity, price: s.price, total: s.quantity * s.price,
         date: '2026-01-15', market: 'NASDAQ',
       },
     })
+    expect(res.ok(), `seed ${s.ticker}: ${await res.text()}`).toBe(true)
   }
 
   await page.goto('/transactions')
