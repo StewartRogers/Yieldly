@@ -11,7 +11,7 @@ const path = require('path');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
 const { prepareHoldings, NET_SHARES, SHARE_EPSILON } = require('./lib/holdings');
-const { guessNextDividendDate, shouldAcceptTmxDate, estimateNextDividendDate, isStaleNextDividendDate, INTERVAL_MONTHS } = require('./lib/dividends');
+const { guessNextDividendDate, resolveRefreshedNextDividendDate, INTERVAL_MONTHS } = require('./lib/dividends');
 const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
 
 const noop = async () => {};
@@ -702,7 +702,7 @@ function createApp(db, options = {}) {
 
     // Existing next_dividend_date/dividend_frequency, needed to decide whether
     // a stale TMX payable date should be projected forward into an estimate
-    // (see estimateNextDividendDate) rather than left untouched.
+    // (see resolveRefreshedNextDividendDate) rather than left untouched.
     const existingInfoRows = await db.all(
       'SELECT portfolio_id, ticker, next_dividend_date, dividend_frequency FROM stock_info'
     );
@@ -720,18 +720,14 @@ function createApp(db, options = {}) {
       } else {
         const price    = q.price         != null ? parseFloat(q.price)         : null;
         const divYield = q.dividendYield != null ? parseFloat(q.dividendYield) : null;
-        let nextDividendDate = null;
-        if (shouldAcceptTmxDate(q.dividendPayDate, today)) {
-          nextDividendDate = q.dividendPayDate;
-        } else if (q.dividendPayDate) {
-          // TMX's date is historical/too-near — if what we have on file is
-          // missing or stale, re-estimate from this payable date + frequency
-          // instead of leaving a months-old guess in place.
-          const existing = existingInfoByKey.get(`${portfolio_id}|${ticker}`);
-          if (existing?.dividend_frequency && isStaleNextDividendDate(existing.next_dividend_date, today)) {
-            nextDividendDate = estimateNextDividendDate(q.dividendPayDate, existing.dividend_frequency, today);
-          }
-        }
+        const existing = existingInfoByKey.get(`${portfolio_id}|${ticker}`);
+        const nextDividendDate = resolveRefreshedNextDividendDate({
+          tmxPayDate: q.dividendPayDate,
+          tmxFrequency: q.dividendFrequency,
+          storedDate: existing?.next_dividend_date,
+          storedFrequency: existing?.dividend_frequency,
+          today,
+        });
         // Only TMX exposes dividendFrequency (Yahoo has no equivalent), and
         // it already matches the app's own Monthly/Quarterly/Semi-Annual/
         // Annual strings — but whitelist against INTERVAL_MONTHS anyway

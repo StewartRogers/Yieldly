@@ -18,7 +18,7 @@ const Database = require('better-sqlite3');
 const { computeHoldings, applyRunningACB } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
 const { HOLDINGS_SQL, GROUP_ORDER, ACB_TX_SQL, ACB_TX_ORDER } = require('./lib/holdings');
-const { guessNextDividendDate, shouldAcceptTmxDate, estimateNextDividendDate, isStaleNextDividendDate } = require('./lib/dividends');
+const { guessNextDividendDate, shouldAcceptTmxDate, estimateNextDividendDate, isStaleNextDividendDate, isOnDividendSchedule, resolveRefreshedNextDividendDate } = require('./lib/dividends');
 const { computeMonthlyACB: _computeMonthlyACB } = require('./app');
 
 // ─── In-memory database ──────────────────────────────────────────────────────
@@ -1485,6 +1485,47 @@ section('L5. isStaleNextDividendDate — null/missing or >7 days old counts as s
   checkEq('exactly 7 days old → not stale',  isStaleNextDividendDate('2026-07-29', today), false);
   checkEq('recent date → not stale',         isStaleNextDividendDate('2026-08-01', today), false);
   checkEq('future date → not stale',         isStaleNextDividendDate('2026-10-03', today), false);
+}
+
+section('L6. isOnDividendSchedule — is a stored date a plausible pay date?');
+{
+  checkEq('Semi-Annual Jun 30 anchor: Dec 30 on schedule',        isOnDividendSchedule('2026-12-30', '2026-06-30', 'Semi-Annual'), true);
+  checkEq('Semi-Annual Jun 30 anchor: Sep 30 off schedule (XAW)', isOnDividendSchedule('2026-09-30', '2026-06-30', 'Semi-Annual'), false);
+  checkEq('Quarterly Jun 30 anchor: Sep 30 on schedule',          isOnDividendSchedule('2026-09-30', '2026-06-30', 'Quarterly'), true);
+  checkEq('the anchor itself is on schedule',                     isOnDividendSchedule('2026-06-30', '2026-06-30', 'Semi-Annual'), true);
+  checkEq('date before the anchor, on schedule',                  isOnDividendSchedule('2025-12-30', '2026-06-30', 'Semi-Annual'), true);
+  checkEq('a few days off (guessed from a recorded payment)',     isOnDividendSchedule('2027-01-05', '2026-06-30', 'Semi-Annual'), true);
+  checkEq('8 days off → off schedule',                            isOnDividendSchedule('2027-01-07', '2026-06-30', 'Semi-Annual'), false);
+  checkEq('month-end clamp: Monthly Jan 31 anchor, Feb 28',       isOnDividendSchedule('2026-02-28', '2026-01-31', 'Monthly'), true);
+  checkEq('missing stored date → no opinion (true)',              isOnDividendSchedule(null, '2026-06-30', 'Semi-Annual'), true);
+  checkEq('unknown frequency → no opinion (true)',                isOnDividendSchedule('2026-09-30', '2026-06-30', 'Weekly'), true);
+}
+
+section('L7. resolveRefreshedNextDividendDate — what a TMX refresh writes');
+{
+  const oct1 = new Date(2026, 9, 1);
+  const base = { tmxPayDate: '2026-06-30', tmxFrequency: 'Semi-Annual', storedFrequency: 'Semi-Annual', today: oct1 };
+  checkEq('XAW: wrong (Quarterly-derived) Sep 30 fixed immediately → Dec 30',
+    resolveRefreshedNextDividendDate({ ...base, storedDate: '2026-09-30', storedFrequency: 'Quarterly' }), '2026-12-30');
+  checkEq('TMX frequency wins over a stale stored frequency',
+    resolveRefreshedNextDividendDate({ ...base, storedDate: null, storedFrequency: 'Quarterly' }), '2026-12-30');
+  checkEq('falls back to stored frequency when TMX has none',
+    resolveRefreshedNextDividendDate({ ...base, tmxFrequency: null, storedDate: null }), '2026-12-30');
+  checkEq('no frequency anywhere → leave alone',
+    resolveRefreshedNextDividendDate({ ...base, tmxFrequency: null, storedFrequency: null, storedDate: null }), null);
+
+  // Late-payment grace: a correct date that just passed stays listed for a week.
+  const lateBase = { tmxPayDate: '2026-07-02', tmxFrequency: 'Quarterly', storedFrequency: 'Quarterly' };
+  checkEq('on-schedule Oct 2, 3 days past → kept (payment may be late)',
+    resolveRefreshedNextDividendDate({ ...lateBase, storedDate: '2026-10-02', today: new Date(2026, 9, 5) }), null);
+  checkEq('on-schedule Oct 2, 8 days past → rolled to Jan 2',
+    resolveRefreshedNextDividendDate({ ...lateBase, storedDate: '2026-10-02', today: new Date(2026, 9, 10) }), '2027-01-02');
+  checkEq('on-schedule future date → kept',
+    resolveRefreshedNextDividendDate({ ...lateBase, storedDate: '2026-10-02', today: new Date(2026, 7, 5) }), null);
+  checkEq('TMX date clearly in the future → used as-is',
+    resolveRefreshedNextDividendDate({ ...lateBase, tmxPayDate: '2026-10-02', storedDate: '2026-09-15', today: new Date(2026, 8, 20) }), '2026-10-02');
+  checkEq('no TMX date → leave alone',
+    resolveRefreshedNextDividendDate({ ...lateBase, tmxPayDate: null, storedDate: '2026-01-01', today: oct1 }), null);
 }
 
 section('K5. Return percent when acb = 0 returns 0');
