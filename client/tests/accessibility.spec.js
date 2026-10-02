@@ -10,7 +10,7 @@
  * browser's job, not the app's, and the engines do not always agree.
  */
 import { test, expect } from '@playwright/test'
-import { signIn } from './helpers/app.js'
+import { signIn, gotoSettled } from './helpers/app.js'
 
 const PAGES = ['/', '/summary', '/history', '/dividends', '/portfolios', '/transactions', '/import']
 
@@ -50,8 +50,7 @@ test('every visible form control has an accessible name', async ({ page }) => {
   await signIn(page)
   const failures = []
   for (const path of PAGES) {
-    await page.goto(path)
-    await page.waitForLoadState('networkidle')
+    await gotoSettled(page, path)
     const unnamed = await unnamedControls(page)
     if (unnamed.length) failures.push(`${path}:\n      ${unnamed.join('\n      ')}`)
   }

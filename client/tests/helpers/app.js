@@ -50,6 +50,23 @@ async function settle(page) {
 }
 
 /**
+ * Navigates and waits until the app has actually loaded, not just gone quiet.
+ *
+ * `networkidle` alone is not enough on a slow machine: after the module
+ * requests finish, the browser can spend >500 ms executing the dev bundle
+ * with no network traffic at all, which counts as idle. The next goto then
+ * lands just as App starts its session check + getPortfolios(), aborts them,
+ * and App logs the aborted fetch as a console error. The nav only renders
+ * once the session check resolves, so wait for it first — by then
+ * getPortfolios() is already in flight and networkidle waits it out.
+ */
+export async function gotoSettled(page, path) {
+  await page.goto(path)
+  await page.getByRole('link', { name: 'Transactions' }).waitFor({ timeout: 30_000 })
+  await settle(page)
+}
+
+/**
  * Creates one portfolio with holdings, dividends and a cash balance, via the
  * API rather than the UI — these suites are about layout, not data entry.
  * Returns { id, code }.

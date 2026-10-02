@@ -7,7 +7,7 @@
  * without a Mac.
  */
 import { test, expect } from '@playwright/test'
-import { signIn } from './helpers/app.js'
+import { signIn, gotoSettled } from './helpers/app.js'
 
 const PAGES = ['/', '/summary', '/history', '/dividends', '/portfolios', '/transactions', '/import']
 
@@ -16,6 +16,14 @@ const PAGES = ['/', '/summary', '/history', '/dividends', '/portfolios', '/trans
 // Production bundles the fonts as hashed assets, so this failure mode does not
 // exist there; ignoring it keeps the check meaningful instead of noisy.
 const IGNORED_CONSOLE = [/downloadable font: download failed/i]
+
+// Same class of dev-only failure for pre-bundled dependencies: when Vite's
+// optimizer re-bundles mid-session it bumps the `?v=` hash, and a lazy route
+// still importing the old URL fails (seen in Firefox, roughly 1 run in 50).
+// Only URLs under /node_modules/.vite/deps/ are ignored — that directory does
+// not exist in a production build — so a failed lazy load of the app's own
+// code (e.g. /src/pages/*.jsx) still fails this test.
+const IGNORED_PAGEERRORS = [/error loading dynamically imported module: \S*\/node_modules\/\.vite\/deps\//i]
 
 test('every page renders without console or page errors', async ({ page }) => {
   test.setTimeout(120_000)
@@ -26,12 +34,14 @@ test('every page renders without console or page errors', async ({ page }) => {
     if (IGNORED_CONSOLE.some(re => re.test(text))) return
     errors.push(`console: ${text}`)
   })
-  page.on('pageerror', e => errors.push(`pageerror: ${e.message}`))
+  page.on('pageerror', e => {
+    if (IGNORED_PAGEERRORS.some(re => re.test(e.message))) return
+    errors.push(`pageerror: ${e.message}`)
+  })
 
   await signIn(page)
   for (const path of PAGES) {
-    await page.goto(path)
-    await page.waitForLoadState('networkidle')
+    await gotoSettled(page, path)
   }
   expect(errors.join('\n')).toBe('')
 })
