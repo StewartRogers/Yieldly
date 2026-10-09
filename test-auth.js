@@ -314,19 +314,22 @@ async function run() {
     checkEq('returned username trimmed', r.body.user.username, 'admin');
   }
 
-  // ── 21. Portfolio delete cascades to transactions/stock_info ───────────────
-  section('21. Portfolio delete – explicit cascade');
+  // ── 21. No portfolio delete — archive is the only way to retire one ────────
+  section('21. Portfolio delete – endpoint removed, ledger kept');
   {
     const login = await req('POST', '/api/auth/login', { username: 'admin', password: 'newpass12345' });
     const cookie = extractToken(login.cookie);
-    const created = await req('POST', '/api/portfolios', { name: 'Cascade', code: 'CAS' }, cookie);
+    const created = await req('POST', '/api/portfolios', { name: 'Keep', code: 'KEEP' }, cookie);
     const pid = created.body.id;
+    await req('PUT', `/api/portfolios/${pid}/cash-balance`, { cash_balance: 1000 }, cookie);
     await req('POST', '/api/transactions',
-      { portfolio_id: pid, ticker: 'RY.TO', type: 'BUY', quantity: 10, price: 100, date: '2024-01-01' }, cookie);
+      { portfolio_id: pid, ticker: 'RY.TO', type: 'BUY', quantity: 1, price: 100, date: '2024-01-01' }, cookie);
     const del = await req('DELETE', `/api/portfolios/${pid}`, null, cookie);
-    checkEq('delete → 200', del.status, 200);
+    checkEq('DELETE /api/portfolios/:id → 404', del.status, 404);
+    const list = await req('GET', '/api/portfolios', null, cookie);
+    checkEq('portfolio still exists', list.body.some(p => p.id === pid), true);
     const txns = await req('GET', `/api/portfolios/${pid}/transactions`, null, cookie);
-    checkEq('transactions gone after cascade', Array.isArray(txns.body) ? txns.body.length : -1, 0);
+    checkEq('transactions untouched', Array.isArray(txns.body) ? txns.body.length : -1, 1);
   }
 
   // ── 22. Rate limiting on login ─────────────────────────────────────────────

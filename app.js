@@ -617,34 +617,6 @@ function createApp(db, options = {}) {
     }
   });
 
-  app.delete('/api/portfolios/:id', async (req, res) => {
-    try {
-      // Explicit cascade: don't rely on the foreign_keys pragma being on for
-      // every connection (notably on serverless / Turso).
-      const id = req.params.id;
-      const exists = await db.get('SELECT id FROM portfolios WHERE id = ?', id);
-      if (!exists) return res.status(404).json({ error: 'Portfolio not found' });
-
-      const tx = await db.transaction('write');
-      try {
-        await tx.execute({ sql: 'DELETE FROM stock_info WHERE portfolio_id = ?', args: [id] });
-        await tx.execute({ sql: 'DELETE FROM transactions WHERE portfolio_id = ?', args: [id] });
-        await tx.execute({ sql: 'DELETE FROM portfolios WHERE id = ?', args: [id] });
-        // Nothing fallible runs after commit, so a rollback in catch can only be
-        // reached on a pre-commit failure — no "committed" flag needed.
-        await tx.commit();
-      } catch (e) {
-        await tx.rollback();
-        throw e;
-      }
-
-      await backupPortfolios();
-      res.json({ message: 'Portfolio deleted' });
-    } catch (error) {
-      serverError(res, error);
-    }
-  });
-
   // ===== STOCK INFO MANAGEMENT =====
 
   app.put('/api/portfolios/:portfolioId/stocks/:ticker', async (req, res) => {
