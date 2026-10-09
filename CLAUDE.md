@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+Node 24 is managed per project by **mise** (`mise.toml`); there is no system Node or nvm. `engines.node` in `package.json` is `24.x` to match the Vercel project's runtime — CI reads it too, so bump all three together. If `node` isn't on PATH, run commands via `mise exec -- <cmd>`.
+
 ```bash
 # Full dev environment (server + client with hot reload)
 npm run dev

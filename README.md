@@ -22,7 +22,8 @@ Yieldly is a local stock portfolio tracker for managing multiple portfolios, tra
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 24 (pinned in `mise.toml` for local dev and `engines.node` in
+  `package.json`, which Vercel and CI both read)
 - npm
 
 ## Setup

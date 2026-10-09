@@ -27,6 +27,9 @@
   ],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": "24.x"
+  },
   "dependencies": {
     "@libsql/client": "^0.17.4",
     "bcryptjs": "^3.0.3",
