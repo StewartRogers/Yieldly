@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, LayoutGrid, List, GripVertical, Pencil, TriangleAlert } from 'lucide-react'
+import { RefreshCw, LayoutGrid, List, GripVertical, Pencil, TriangleAlert, Archive, ArchiveRestore } from 'lucide-react'
 import { fmtCurrency, fmtCurrencyOr, fmtPrice, fmtPct, retClass, fmtFreqCode, fmtInvestmentType, isUnroundedQty } from '../utils/format'
 import StockInfoModal from '../components/StockInfoModal'
 import HoldingTransactionsModal from '../components/HoldingTransactionsModal'
 import { Input } from '@/components/ui/input'
-import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder, updatePortfolio } from '../api/client'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { useToast } from '@/components/ui/toast'
+import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder, updatePortfolio, archivePortfolio, restorePortfolio } from '../api/client'
 
 // Renders a share count, flagging one that isn't cleanly rounded to 4
 // decimals (e.g. an unrounded DRIP amount) so it's visible right where the
@@ -86,9 +89,14 @@ function AddHoldingCard({ portfolioCode, onClick }) {
   )
 }
 
+// Archived portfolios are kept (their transactions still feed Transactions,
+// Dividends and History) but leave the tabs and get their own list below.
+const activeOnly = (list) => list.filter(p => !p.archived_at)
+
 export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick = 0 }) {
   const navigate = useNavigate()
-  const [localPortfolios, setLocalPortfolios] = useState(portfolios)
+  const toast = useToast()
+  const [localPortfolios, setLocalPortfolios] = useState(() => activeOnly(portfolios))
   const [selectedId, setSelectedId]           = useState(null)
   const [holdings, setHoldings]               = useState([])
   const [holdingsError, setHoldingsError]     = useState('')
@@ -105,6 +113,10 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   const [editing, setEditing]                 = useState(false)
   const [editName, setEditName]               = useState('')
   const [editCode, setEditCode]               = useState('')
+  const [archiveOpen, setArchiveOpen]         = useState(false)
+  const [archiving, setArchiving]             = useState(false)
+  const [archiveError, setArchiveError]       = useState('')
+  const [restoringId, setRestoringId]         = useState(null)
   const dragId = useRef(null)
 
   // Re-sync the local (drag-reorderable) copy whenever the parent's list
@@ -114,7 +126,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
   const [syncedFrom, setSyncedFrom] = useState(portfolios)
   if (portfolios !== syncedFrom) {
     setSyncedFrom(portfolios)
-    setLocalPortfolios(portfolios)
+    setLocalPortfolios(activeOnly(portfolios))
   }
   if (!selectedId && localPortfolios.length > 0) {
     setSelectedId(localPortfolios[0].id)
@@ -238,6 +250,41 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
     } catch (e) { setEditError(e.message) }
   }
 
+  const openArchive = () => { setArchiveError(''); setArchiveOpen(true) }
+
+  // The server decides whether the portfolio is empty (no open position, no
+  // cash) and says what's left if not; that message is shown in the dialog.
+  const confirmArchive = async () => {
+    setArchiving(true)
+    setArchiveError('')
+    try {
+      await archivePortfolio(selectedId)
+      const name = selectedPortfolio?.name || selectedPortfolio?.code
+      setArchiveOpen(false)
+      setSelectedId(null)
+      onPortfoliosChange()
+      toast.success(`${name} archived`)
+    } catch (e) {
+      setArchiveError(e.message)
+    } finally {
+      setArchiving(false)
+    }
+  }
+
+  const handleRestore = async (p) => {
+    setRestoringId(p.id)
+    try {
+      await restorePortfolio(p.id)
+      onPortfoliosChange()
+      toast.success(`${p.name || p.code} restored`)
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setRestoringId(null)
+    }
+  }
+
+  const archivedPortfolios = portfolios.filter(p => p.archived_at)
   const selectedPortfolio = localPortfolios.find(p => p.id === selectedId)
   const totalMktValue     = holdings.reduce((s, h) => s + h.market_value, 0)
 
@@ -365,6 +412,9 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                   <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
                   {refreshing ? 'Refreshing…' : 'Refresh Prices'}
                 </button>
+                <button className="tc-btn sm danger" onClick={openArchive} title="Archive this portfolio once it's empty">
+                  <Archive size={12} /> Archive
+                </button>
                 {refreshMsg && <span className="text-xs" style={{ color: 'var(--tc-muted)' }}>{refreshMsg}</span>}
               </>
             )}
@@ -473,6 +523,75 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
           </div>
         </div>
       )}
+
+      {/* ── Archived portfolios ── */}
+      {archivedPortfolios.length > 0 && (
+        <div className="tc-card">
+          <div className="tc-card-head">
+            <div className="t">Archived portfolios</div>
+            <span className="a">Transactions kept · shown in Transactions, Dividends &amp; History</span>
+          </div>
+          <div className="tbl-wrap no-inner-scroll">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Portfolio</th>
+                  <th>Code</th>
+                  <th>Archived</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {archivedPortfolios.map(p => (
+                  <tr key={p.id}>
+                    <td>{p.name}</td>
+                    <td className="muted-txt">{p.code}</td>
+                    <td className="num" style={{ color: 'var(--tc-muted)' }}>{String(p.archived_at).slice(0, 10)}</td>
+                    <td>
+                      <div className="row" style={{ justifyContent: 'flex-end' }}>
+                        <button
+                          className="tc-btn sm"
+                          onClick={() => handleRestore(p)}
+                          disabled={restoringId === p.id}
+                          aria-label={`Restore ${p.name || p.code}`}
+                        >
+                          <ArchiveRestore size={12} /> {restoringId === p.id ? 'Restoring…' : 'Restore'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={archiveOpen} onOpenChange={open => { if (!open && !archiving) setArchiveOpen(false) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Archive {selectedPortfolio?.name || selectedPortfolio?.code}?</DialogTitle>
+            <DialogDescription>
+              It leaves your portfolio tabs, Summary and the new-transaction form. Every transaction is
+              kept and still shows in Transactions, Dividends and History. You can restore it at any time.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm" style={{ color: 'var(--ink-2)' }}>Only an empty portfolio can be archived:</p>
+          <ul className="text-sm" style={{ color: 'var(--ink-2)', paddingLeft: 18, listStyle: 'disc', lineHeight: 1.6 }}>
+            <li>No open holdings (every position sold)</li>
+            <li>A cash balance of $0.00</li>
+          </ul>
+          {archiveError && <p className="text-destructive text-sm" role="alert">{archiveError}</p>}
+          <DialogFooter>
+            <Button variant="outline" type="button" onClick={() => setArchiveOpen(false)} disabled={archiving}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmArchive} disabled={archiving}>
+              {archiving ? 'Archiving…' : 'Archive portfolio'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <StockInfoModal
         holding={stockModal}

@@ -59,6 +59,12 @@ export const updatePortfolio = (id, data) =>
 export const updatePortfolioOrder = (id, display_order) =>
   request(`/api/portfolios/${id}/order`, { method: 'PUT', body: json({ display_order }) })
 
+export const archivePortfolio = (id) =>
+  request(`/api/portfolios/${id}/archive`, { method: 'POST' })
+
+export const restorePortfolio = (id) =>
+  request(`/api/portfolios/${id}/restore`, { method: 'POST' })
+
 export const updateCashBalance = (id, cash_balance) =>
   request(`/api/portfolios/${id}/cash-balance`, { method: 'PUT', body: json({ cash_balance }) })
 

@@ -179,7 +179,9 @@ All API routes except `/api/auth/*` and `/api/cron/*` require authentication (re
 - `PUT /api/portfolios/:id` - Rename a portfolio (update name/code)
 - `PUT /api/portfolios/:id/order` - Update portfolio display order
 - `PUT /api/portfolios/:id/cash-balance` - Set or clear a manual cash balance
-- `DELETE /api/portfolios/:id` - Delete a portfolio
+- `POST /api/portfolios/:id/archive` - Archive an empty portfolio (no holdings, $0.00 cash); its transactions are kept
+- `POST /api/portfolios/:id/restore` - Restore an archived portfolio
+- `DELETE /api/portfolios/:id` - Permanently delete a portfolio **and its transactions** (not exposed in the UI)
 - `GET /api/portfolios/:id/summary` - Get aggregated holdings for one portfolio
 - `GET /api/portfolios/:id/transactions` - Get all transactions for one portfolio
 - `GET /api/portfolios/:id/transactions/ticker/:ticker` - Get transactions for one ticker

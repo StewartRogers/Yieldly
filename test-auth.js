@@ -979,6 +979,91 @@ async function run() {
   } finally {
     cash.close();
   }
+
+  // ── 48-50. Portfolio archive ────────────────────────────────────────────────
+  const arch = await bootApp();
+  try {
+    const setup = await req('POST', '/api/auth/setup', { username: 'owner', password: 'archpass123' }, null, arch.base);
+    const cookie = extractToken(setup.cookie);
+    const call = (method, path, body) => req(method, path, body, cookie, arch.base);
+
+    const a = (await call('POST', '/api/portfolios', { name: 'Closing', code: 'ARCH' })).body.id;
+    const b = (await call('POST', '/api/portfolios', { name: 'Keeper', code: 'LIVE' })).body.id;
+
+    section('48. Archive – refused until the portfolio is empty');
+    const contrib = await call('POST', '/api/transactions', { portfolio_id: a, type: 'CONTRIBUTION', total: 1000, date: '2024-01-02' });
+    const buy = await call('POST', '/api/transactions', { portfolio_id: a, ticker: 'XYZ', type: 'BUY', quantity: 10, price: 50, total: 500, date: '2024-01-03' });
+    checkEq('seed BUY → 200', buy.status, 200);
+
+    const holding = await call('POST', `/api/portfolios/${a}/archive`);
+    checkEq('open position + cash → 409', holding.status, 409);
+    checkTruthy('error names the open ticker', /XYZ/.test(holding.body.error));
+    checkTruthy('error names the cash balance', /\$500\.00/.test(holding.body.error));
+    checkEq('open_positions lists XYZ', holding.body.open_positions?.[0]?.ticker, 'XYZ');
+
+    await call('POST', '/api/transactions', { portfolio_id: a, ticker: 'XYZ', type: 'SELL', quantity: 10, price: 60, total: 600, date: '2024-02-01' });
+    const cashOnly = await call('POST', `/api/portfolios/${a}/archive`);
+    checkEq('positions closed but $1,100 cash → 409', cashOnly.status, 409);
+    checkEq('no open positions reported', cashOnly.body.open_positions?.length, 0);
+    check('cash_balance reported', cashOnly.body.cash_balance, 1100);
+
+    const xfer = await call('POST', '/api/transfers', { from_portfolio_id: a, to_portfolio_id: b, amount: 1100, date: '2024-02-02' });
+    checkEq('transfer cash out → 200', xfer.status, 200);
+    const ok = await call('POST', `/api/portfolios/${a}/archive`);
+    checkEq('empty portfolio → 200', ok.status, 200);
+    checkEq('already archived → 409', (await call('POST', `/api/portfolios/${a}/archive`)).status, 409);
+    checkEq('unknown portfolio → 404', (await call('POST', '/api/portfolios/99999/archive')).status, 404);
+
+    const residue = (await call('POST', '/api/portfolios', { name: 'Residue', code: 'RES' })).body.id;
+    await call('PUT', `/api/portfolios/${residue}/cash-balance`, { cash_balance: 0.01 });
+    checkEq('$0.01 cash → 409', (await call('POST', `/api/portfolios/${residue}/archive`)).status, 409);
+    await call('PUT', `/api/portfolios/${residue}/cash-balance`, { cash_balance: 0.004 });
+    checkEq('sub-cent residue that displays as $0.00 → 200', (await call('POST', `/api/portfolios/${residue}/archive`)).status, 200);
+
+    section('49. Archive – ledger kept, portfolio read-only');
+    const list = (await call('GET', '/api/portfolios')).body;
+    checkTruthy('archived_at set', list.find(p => p.id === a)?.archived_at);
+    checkEq('active portfolio not archived', list.find(p => p.id === b)?.archived_at, null);
+    const overview = (await call('GET', '/api/overview')).body;
+    checkEq('archived portfolio left out of /overview', overview.some(p => p.id === a), false);
+    checkEq('active portfolio still in /overview', overview.some(p => p.id === b), true);
+    const txns = (await call('GET', `/api/portfolios/${a}/transactions`)).body;
+    checkEq('all 4 transactions kept', txns.length, 4);
+
+    checkEq('new transaction → 409',
+      (await call('POST', '/api/transactions', { portfolio_id: a, type: 'CONTRIBUTION', total: 5, date: '2024-03-01' })).status, 409);
+    checkEq('transfer into it → 409',
+      (await call('POST', '/api/transfers', { from_portfolio_id: b, to_portfolio_id: a, amount: 5, date: '2024-03-01' })).status, 409);
+    checkEq('cash-balance edit → 409',
+      (await call('PUT', `/api/portfolios/${a}/cash-balance`, { cash_balance: 5 })).status, 409);
+    checkEq('delete one of its transactions → 409',
+      (await call('DELETE', `/api/transactions/${buy.body.id}`)).status, 409);
+    checkEq('edit one of its transactions → 409',
+      (await call('PUT', `/api/transactions/${contrib.body.id}`, { portfolio_id: a, type: 'CONTRIBUTION', total: 900, date: '2024-01-02' })).status, 409);
+    checkEq('delete the active side of a transfer with it → 409',
+      (await call('DELETE', `/api/transactions/${xfer.body.to.id}`)).status, 409);
+    const bContrib = await call('POST', '/api/transactions', { portfolio_id: b, type: 'CONTRIBUTION', total: 50, date: '2024-03-01' });
+    checkEq('active portfolio still writable → 200', bContrib.status, 200);
+    checkEq('moving a transaction into it → 409',
+      (await call('PUT', `/api/transactions/${bContrib.body.id}`, { portfolio_id: a, type: 'CONTRIBUTION', total: 50, date: '2024-03-01' })).status, 409);
+    const csv = await call('POST', '/api/import/csv', {
+      csvData: 'Date,Symbol,Portfolio,Type,Quantity,Price,Total\n2024-03-01,XYZ,ARCH,B,1,10,10',
+    });
+    checkEq('CSV row into it not imported', csv.body.imported, 0);
+    checkTruthy('CSV error says archived', /archived/.test(csv.body.details?.errors?.[0]?.error));
+    check('ledger untouched: cash still 0', list.find(p => p.id === a)?.cash_balance, 0);
+
+    section('50. Restore – portfolio writable again');
+    checkEq('restore → 200', (await call('POST', `/api/portfolios/${a}/restore`)).status, 200);
+    checkEq('restore unknown → 404', (await call('POST', '/api/portfolios/99999/restore')).status, 404);
+    checkEq('archived_at cleared',
+      (await call('GET', '/api/portfolios')).body.find(p => p.id === a)?.archived_at, null);
+    checkEq('back in /overview', (await call('GET', '/api/overview')).body.some(p => p.id === a), true);
+    checkEq('new transaction after restore → 200',
+      (await call('POST', '/api/transactions', { portfolio_id: a, type: 'CONTRIBUTION', total: 5, date: '2024-03-01' })).status, 200);
+  } finally {
+    arch.close();
+  }
 }
 
 // ─── Boot and run ────────────────────────────────────────────────────────────

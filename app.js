@@ -55,6 +55,12 @@ const CASH_BALANCE_DELTA = {
 // IEEE-754 noise from repeated additions (same rationale as SHARE_EPSILON).
 const CASH_EPSILON = 1e-6;
 
+// "Empty enough to archive" is judged by what the user can see: a balance that
+// displays as $0.00. CASH_EPSILON is far stricter, so a $0.003 rounding
+// leftover would block archiving with nothing on screen to explain why.
+const ARCHIVE_CASH_TOLERANCE = 0.005;
+const ARCHIVED_ERROR = 'This portfolio is archived — restore it before changing it';
+
 // Same allow-list the market-price fetchers require (see fetchTMXQuote below),
 // plus '-' for TSX unit-trust tickers (e.g. REI-UN.TO) which normalizeTicker()
 // converts to '.' before quoting.
@@ -253,6 +259,17 @@ function createApp(db, options = {}) {
   function serverError(res, error) {
     console.error(error);
     res.status(500).json({ error: 'An internal error occurred' });
+  }
+
+  // True if any of the given portfolio ids (null/undefined skipped) is archived.
+  async function anyArchived(...ids) {
+    const wanted = ids.filter(id => id != null);
+    if (!wanted.length) return false;
+    const row = await db.get(
+      `SELECT COUNT(*) AS c FROM portfolios WHERE archived_at IS NOT NULL AND id IN (${wanted.map(() => '?').join(', ')})`,
+      ...wanted
+    );
+    return Number(row.c) > 0;
   }
 
   // ── Middleware ──────────────────────────────────────────────────────────────
@@ -500,8 +517,10 @@ function createApp(db, options = {}) {
       if (Number.isNaN(value)) {
         return res.status(400).json({ error: 'cash_balance must be a number' });
       }
-      const result = await db.run('UPDATE portfolios SET cash_balance = ? WHERE id = ?', value, req.params.id);
-      if (result.changes === 0) return res.status(404).json({ error: 'Portfolio not found' });
+      const portfolio = await db.get('SELECT archived_at FROM portfolios WHERE id = ?', req.params.id);
+      if (!portfolio) return res.status(404).json({ error: 'Portfolio not found' });
+      if (portfolio.archived_at) return res.status(409).json({ error: ARCHIVED_ERROR });
+      await db.run('UPDATE portfolios SET cash_balance = ? WHERE id = ?', value, req.params.id);
       res.json({ message: 'Cash balance updated', cash_balance: value });
     } catch (error) {
       serverError(res, error);
@@ -520,6 +539,79 @@ function createApp(db, options = {}) {
       if (result.changes === 0) return res.status(404).json({ error: 'Portfolio not found' });
       await backupPortfolios();
       res.json({ message: 'Portfolio updated', id: Number(req.params.id), name: name.trim(), code: upperCode });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // Archive rather than delete: the portfolio drops out of the active lists
+  // (tabs, pickers, /overview, the snapshot cron) but its transactions,
+  // stock_info and value snapshots are kept, so past dividends, cash flow and
+  // History don't change. Only an empty portfolio can be archived — no open
+  // position and no cash — since anything left in it would silently drop out
+  // of every total. An archived portfolio is read-only until restored.
+  app.post('/api/portfolios/:id/archive', async (req, res) => {
+    try {
+      const id = req.params.id;
+      // The emptiness check and the flag flip share one write transaction, so
+      // a transaction landing in between can't leave an archived portfolio
+      // holding shares or cash.
+      const tx = await db.transaction('write');
+      let blocked = null;
+      try {
+        const portfolio = (await tx.execute({
+          sql: 'SELECT id, cash_balance, archived_at FROM portfolios WHERE id = ?', args: [id],
+        })).rows[0];
+        if (!portfolio) {
+          blocked = { status: 404, body: { error: 'Portfolio not found' } };
+        } else if (portfolio.archived_at) {
+          blocked = { status: 409, body: { error: 'Portfolio is already archived' } };
+        } else {
+          // ABS: a negative share count is a broken ledger, not an empty one.
+          const open = (await tx.execute({
+            sql: `SELECT t.ticker, ${NET_SHARES} AS shares FROM transactions t
+                  WHERE t.portfolio_id = ? AND t.ticker != 'CASH'
+                  GROUP BY t.ticker
+                  HAVING ABS(${NET_SHARES}) > ${SHARE_EPSILON}
+                  ORDER BY t.ticker`,
+            args: [id],
+          })).rows.map(r => ({ ticker: r.ticker, shares: Number(r.shares) }));
+          const cash = Number(portfolio.cash_balance) || 0;
+          const problems = [];
+          if (open.length) problems.push(`it still holds ${open.map(r => r.ticker).join(', ')}`);
+          if (Math.abs(cash) >= ARCHIVE_CASH_TOLERANCE) {
+            problems.push(`its cash balance is ${cash < 0 ? '-' : ''}$${Math.abs(cash).toFixed(2)}`);
+          }
+          if (problems.length) {
+            blocked = {
+              status: 409,
+              body: { error: `Can't archive — ${problems.join(' and ')}`, open_positions: open, cash_balance: cash },
+            };
+          } else {
+            await tx.execute({ sql: 'UPDATE portfolios SET archived_at = CURRENT_TIMESTAMP WHERE id = ?', args: [id] });
+          }
+        }
+        if (blocked) await tx.rollback();
+        else await tx.commit();
+      } catch (e) {
+        await tx.rollback();
+        throw e;
+      }
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+
+      await backupPortfolios();
+      res.json({ message: 'Portfolio archived' });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  app.post('/api/portfolios/:id/restore', async (req, res) => {
+    try {
+      const result = await db.run('UPDATE portfolios SET archived_at = NULL WHERE id = ?', req.params.id);
+      if (result.changes === 0) return res.status(404).json({ error: 'Portfolio not found' });
+      await backupPortfolios();
+      res.json({ message: 'Portfolio restored' });
     } catch (error) {
       serverError(res, error);
     }
@@ -781,7 +873,9 @@ function createApp(db, options = {}) {
       // TMX/Yahoo outage shouldn't abort the snapshot.
       const priceRefresh = await performRefreshPrices().catch(e => ({ error: e.message }));
 
-      const portfolios = await db.all('SELECT * FROM portfolios');
+      // Archived portfolios are empty and frozen; snapshotting them would just
+      // append a $0 row to History every day.
+      const portfolios = await db.all('SELECT * FROM portfolios WHERE archived_at IS NULL');
       // Vercel Cron fires at 05:00 UTC (~midnight-1am America/New_York,
       // year-round) — before that trading day has opened, so the quotes
       // performRefreshPrices() just fetched are necessarily the PRIOR
@@ -1015,7 +1109,7 @@ function createApp(db, options = {}) {
 
   app.get('/api/overview', async (req, res) => {
     try {
-      const portfolios = await db.all('SELECT * FROM portfolios ORDER BY display_order, id');
+      const portfolios = await db.all('SELECT * FROM portfolios WHERE archived_at IS NULL ORDER BY display_order, id');
 
       const allHoldings = computeHoldings(await queryHoldings(null));
       const mktValById   = {};
@@ -1086,9 +1180,12 @@ function createApp(db, options = {}) {
       if (market !== undefined && market !== null && !MARKETS.has(market)) {
         return res.status(400).json({ error: 'Invalid market' });
       }
-      const portfolio = await db.get('SELECT id, cash_balance FROM portfolios WHERE id = ?', portfolio_id);
+      const portfolio = await db.get('SELECT id, cash_balance, archived_at FROM portfolios WHERE id = ?', portfolio_id);
       if (!portfolio) {
         return res.status(404).json({ error: 'Portfolio not found' });
+      }
+      if (portfolio.archived_at) {
+        return res.status(409).json({ error: ARCHIVED_ERROR });
       }
 
       // Numeric fields must parse to finite, non-negative numbers when present.
@@ -1274,6 +1371,11 @@ function createApp(db, options = {}) {
       const peer = row.transfer_peer_id
         ? await db.get('SELECT * FROM transactions WHERE id = ?', row.transfer_peer_id)
         : null;
+      // Deleting either leg of a transfer moves cash on both sides, so it's
+      // blocked when either portfolio is archived.
+      if (await anyArchived(row.portfolio_id, peer?.portfolio_id)) {
+        return res.status(409).json({ error: ARCHIVED_ERROR });
+      }
 
       const tx = await db.transaction('write');
       try {
@@ -1320,6 +1422,9 @@ function createApp(db, options = {}) {
       if (existing.transfer_peer_id || existing.type === 'TRANSFER_IN' || existing.type === 'TRANSFER_OUT') {
         return res.status(400).json({ error: 'Transfers cannot be edited — delete and recreate them instead' });
       }
+      if (await anyArchived(existing.portfolio_id)) {
+        return res.status(409).json({ error: ARCHIVED_ERROR });
+      }
 
       // Re-run every guard POST /api/transactions applies — an edit is just a
       // write with different validity math (see below), not a lesser check.
@@ -1350,9 +1455,12 @@ function createApp(db, options = {}) {
       if (market !== undefined && market !== null && !MARKETS.has(market)) {
         return res.status(400).json({ error: 'Invalid market' });
       }
-      const portfolio = await db.get('SELECT id, cash_balance FROM portfolios WHERE id = ?', portfolio_id);
+      const portfolio = await db.get('SELECT id, cash_balance, archived_at FROM portfolios WHERE id = ?', portfolio_id);
       if (!portfolio) {
         return res.status(404).json({ error: 'Portfolio not found' });
+      }
+      if (portfolio.archived_at) {
+        return res.status(409).json({ error: ARCHIVED_ERROR });
       }
 
       const numericFields = { quantity, price, total, commission };
@@ -1541,11 +1649,14 @@ function createApp(db, options = {}) {
       }
 
       const [fromPortfolio, toPortfolio] = await Promise.all([
-        db.get('SELECT id FROM portfolios WHERE id = ?', from_portfolio_id),
-        db.get('SELECT id FROM portfolios WHERE id = ?', to_portfolio_id),
+        db.get('SELECT id, archived_at FROM portfolios WHERE id = ?', from_portfolio_id),
+        db.get('SELECT id, archived_at FROM portfolios WHERE id = ?', to_portfolio_id),
       ]);
       if (!fromPortfolio || !toPortfolio) {
         return res.status(404).json({ error: 'Portfolio not found' });
+      }
+      if (fromPortfolio.archived_at || toPortfolio.archived_at) {
+        return res.status(409).json({ error: ARCHIVED_ERROR });
       }
 
       const tx = await db.transaction('write');
@@ -1614,7 +1725,7 @@ function createApp(db, options = {}) {
       // the DB for every CSV row — a per-row lookup is one remote round-trip per
       // line, which is the dominant cost on a large import against Turso.
       const portfoliosByCode = new Map(
-        (await db.all('SELECT id, code FROM portfolios')).map(p => [p.code.toUpperCase(), p])
+        (await db.all('SELECT id, code, archived_at FROM portfolios')).map(p => [p.code.toUpperCase(), p])
       );
 
       // Preload existing transaction keys once too, for the same reason —
@@ -1690,8 +1801,12 @@ function createApp(db, options = {}) {
           const cleanPortfolioCode = portfolioCode.toUpperCase().trim();
           const portfolio = portfoliosByCode.get(cleanPortfolioCode);
           if (!portfolio) {
-            const available = [...portfoliosByCode.values()].map(p => p.code).join(', ');
+            const available = [...portfoliosByCode.values()].filter(p => !p.archived_at).map(p => p.code).join(', ');
             errors.push({ line: i + 1, error: `Portfolio '${cleanPortfolioCode}' not found. Available portfolios: ${available}`, data: truncate(line) });
+            continue;
+          }
+          if (portfolio.archived_at) {
+            errors.push({ line: i + 1, error: `Portfolio '${cleanPortfolioCode}' is archived — restore it before importing into it`, data: truncate(line) });
             continue;
           }
 

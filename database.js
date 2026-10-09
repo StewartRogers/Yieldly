@@ -84,7 +84,8 @@ async function runMigrations(db) {
       code          TEXT NOT NULL UNIQUE,
       display_order INTEGER DEFAULT 0,
       cash_balance  REAL,
-      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+      archived_at   DATETIME
     );
 
     CREATE TABLE IF NOT EXISTS transactions (
@@ -145,6 +146,7 @@ async function runMigrations(db) {
   // --- Incremental column adds for databases created before these existed ---
   await addColumnIfMissing(db, 'portfolios', 'display_order', 'INTEGER DEFAULT 0');
   await addColumnIfMissing(db, 'portfolios', 'cash_balance', 'REAL');
+  await addColumnIfMissing(db, 'portfolios', 'archived_at', 'DATETIME');
   await addColumnIfMissing(db, 'transactions', 'commission', 'REAL DEFAULT 0');
   await addColumnIfMissing(db, 'transactions', 'market', "TEXT DEFAULT 'TMX'");
   await addColumnIfMissing(db, 'transactions', 'transfer_peer_id', 'INTEGER');

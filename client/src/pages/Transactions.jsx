@@ -199,6 +199,14 @@ export default function Transactions({ portfolios }) {
   const askConfirm = (opts) =>
     new Promise(resolve => setPendingConfirm({ confirmLabel: 'Confirm', ...opts, resolve }))
 
+  // Archived portfolios keep their history here (read-only — the server
+  // refuses writes to them) but can't be picked for a new transaction.
+  const activePortfolios = useMemo(() => (portfolios ?? []).filter(p => !p.archived_at), [portfolios])
+  const archivedCodes = useMemo(
+    () => new Set((portfolios ?? []).filter(p => p.archived_at).map(p => p.code)),
+    [portfolios]
+  )
+
   const isTransfer = type === 'TRANSFER'
   const isCashOnly = CASH_ONLY_TYPES.has(type) || isTransfer
   const isCashFlow = CASH_FLOW_TYPES.has(type)
@@ -502,7 +510,7 @@ export default function Transactions({ portfolios }) {
                     </span>
                   </SelectTrigger>
                   <SelectContent>
-                    {portfolios?.map(p => (
+                    {activePortfolios.map(p => (
                       <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -521,7 +529,7 @@ export default function Transactions({ portfolios }) {
                       </span>
                     </SelectTrigger>
                     <SelectContent>
-                      {portfolios?.map(p => (
+                      {activePortfolios.map(p => (
                         <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -538,7 +546,7 @@ export default function Transactions({ portfolios }) {
                       </span>
                     </SelectTrigger>
                     <SelectContent>
-                      {portfolios?.map(p => (
+                      {activePortfolios.map(p => (
                         <SelectItem key={p.id} value={String(p.id)}>{p.code} — {p.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -683,8 +691,14 @@ export default function Transactions({ portfolios }) {
               <div className="pills">
                 <button className={`pill${historyFilter === 'ALL' ? ' active' : ''}`} onClick={() => handleFilterChange('ALL')}>All portfolios</button>
                 {portfolios?.map(p => (
-                  <button key={p.id} className={`pill${historyFilter === String(p.id) ? ' active' : ''}`} onClick={() => handleFilterChange(String(p.id))}>
-                    {p.code}
+                  <button
+                    key={p.id}
+                    className={`pill${historyFilter === String(p.id) ? ' active' : ''}`}
+                    onClick={() => handleFilterChange(String(p.id))}
+                    title={p.archived_at ? `${p.name} (archived)` : p.name}
+                    style={p.archived_at ? { opacity: 0.65 } : undefined}
+                  >
+                    {p.code}{p.archived_at && ' · archived'}
                   </button>
                 ))}
               </div>
@@ -772,6 +786,9 @@ export default function Transactions({ portfolios }) {
                   <tbody>
                     {pageTxns.map(t => {
                       const badgeClass = TYPE_BADGE[t.type] || 'type'
+                      // A transfer moves cash on both sides, so either side
+                      // being archived locks the row.
+                      const locked = archivedCodes.has(t._portfolioCode) || archivedCodes.has(t.transfer_peer_code)
                       return (
                         <tr key={t.id}>
                           {historyFilter === 'ALL' && (
@@ -812,26 +829,30 @@ export default function Transactions({ portfolios }) {
                           <td className="num">{fmtCurrency(parseFloat(t.total))}</td>
                           <td className="num" style={{ color: 'var(--tc-muted)' }}>{t.date}</td>
                           <td>
-                            <div className="row" style={{ gap: 4 }}>
-                              {!TRANSFER_LEG_TYPES.has(t.type) && (
+                            {locked ? (
+                              <span className="note" title="Restore the archived portfolio on the Portfolios page to change this">Archived</span>
+                            ) : (
+                              <div className="row" style={{ gap: 4 }}>
+                                {!TRANSFER_LEG_TYPES.has(t.type) && (
+                                  <button
+                                    className="tc-btn sm ghost"
+                                    onClick={() => startEdit(t)}
+                                    title="Edit transaction"
+                                    aria-label="Edit transaction"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                )}
                                 <button
-                                  className="tc-btn sm ghost"
-                                  onClick={() => startEdit(t)}
-                                  title="Edit transaction"
-                                  aria-label="Edit transaction"
+                                  className="tc-btn sm ghost danger"
+                                  onClick={() => deleteTxn(t)}
+                                  title={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
+                                  aria-label={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
                                 >
-                                  <Pencil size={12} />
+                                  <Trash2 size={12} />
                                 </button>
-                              )}
-                              <button
-                                className="tc-btn sm ghost danger"
-                                onClick={() => deleteTxn(t)}
-                                title={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
-                                aria-label={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )
