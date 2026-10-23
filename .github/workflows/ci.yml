@@ -29,6 +29,9 @@ jobs:
           # Read from package.json `engines.node` so CI tests on the same major
           # Vercel runs in production (Vercel also honours `engines.node`).
           node-version-file: package.json
+          # Without this, `24.x` is satisfied by whatever patch the runner has
+          # cached — Oct 2026 CI ran 24.21.0 after the 24.22.1 security release.
+          check-latest: true
           cache: npm
 
       - name: Install dependencies
