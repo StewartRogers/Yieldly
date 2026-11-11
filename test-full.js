@@ -20,6 +20,7 @@ const { parseCSVLine, parseDate } = require('./lib/parse');
 const { HOLDINGS_SQL, GROUP_ORDER, ACB_TX_SQL, ACB_TX_ORDER } = require('./lib/holdings');
 const { guessNextDividendDate, shouldAcceptTmxDate, estimateNextDividendDate, isStaleNextDividendDate, isOnDividendSchedule, resolveRefreshedNextDividendDate } = require('./lib/dividends');
 const { computeMonthlyACB: _computeMonthlyACB } = require('./app');
+const { MARKET_TIMEZONE, todayInZone, todayAsLocalDate, formatTimestamp, hasCurrentBCTimeZoneData } = require('./lib/time');
 
 // ─── In-memory database ──────────────────────────────────────────────────────
 // Validates driver-agnostic money math, so it runs synchronously on
@@ -886,18 +887,43 @@ section('C2g. computeMonthlyACB — over-sell clamps at zero, never negative');
   check('Feb = $0, not negative', acb.find(r => r.month === 2)?.total_acb, 0);
 }
 
-section('C2h. computeMonthlyACB — default `now` is Pacific-pinned, not server-local');
+section('C2h. computeMonthlyACB — default `now` is APP_TIMEZONE-pinned, not server-local');
 {
   // Bypasses the FIXED_NOW test wrapper to exercise the real default.
   const txRows = [
     { portfolio_id: 991, ticker: 'RY.TO', type: 'BUY', quantity: 10, total: 100, commission: 0, date: '2024-01-15' },
   ];
   const acb = _computeMonthlyACB(txRows);
-  const pacificNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-  const expectedLastMonth = { year: pacificNow.getFullYear(), month: pacificNow.getMonth() + 1 };
+  const [year, month] = todayInZone().split('-').map(Number);
   const lastRow = acb[acb.length - 1];
-  check('last row is the current Pacific year', lastRow?.year, expectedLastMonth.year);
-  check('last row is the current Pacific month', lastRow?.month, expectedLastMonth.month);
+  check('last row is the current app-timezone year', lastRow?.year, year);
+  check('last row is the current app-timezone month', lastRow?.month, month);
+}
+
+section('C2i. lib/time — B.C. Pacific Time (PCT, year-round UTC−7)');
+{
+  const VAN = 'America/Vancouver';
+  // Fails when this Node's bundled tzdata predates B.C.'s permanent UTC−7.
+  // In that case every winter "today" would be computed at UTC−8, so upgrade
+  // Node (and check Vercel's runtime) rather than loosening this check.
+  checkEq('runtime tzdata knows B.C. is UTC−7 in winter', hasCurrentBCTimeZoneData(), true);
+
+  // 00:30 PCT on Nov 12 is still 23:30 Nov 11 in Los Angeles: the bug the
+  // old America/Los_Angeles pin had for an hour after every winter midnight.
+  checkEq('00:30 PCT is already the new day', todayInZone(new Date('2026-11-12T07:30:00Z'), VAN), '2026-11-12');
+  checkEq('23:30 PCT is still the same day', todayInZone(new Date('2026-11-12T06:30:00Z'), VAN), '2026-11-11');
+  checkEq('summer is UTC−7 too', todayInZone(new Date('2027-07-15T06:59:00Z'), VAN), '2027-07-14');
+  // 23:30 EST: the market zone is independent of the app zone.
+  checkEq('market zone (New York) date', todayInZone(new Date('2026-11-12T04:30:00Z'), MARKET_TIMEZONE), '2026-11-11');
+
+  checkEq('formatTimestamp uses the PCT label, never MST',
+    formatTimestamp(new Date('2026-11-11T20:35:45Z'), VAN, 'PCT'), '2026-11-11 13:35:45 PCT');
+  checkEq('midnight renders as 00, not 24',
+    formatTimestamp(new Date('2026-11-12T07:00:05Z'), VAN, 'PCT'), '2026-11-12 00:00:05 PCT');
+
+  const d = todayAsLocalDate(new Date('2026-11-12T07:30:00Z'), VAN);
+  checkEq('todayAsLocalDate local Y/M/D = zone date',
+    [d.getFullYear(), d.getMonth() + 1, d.getDate()].join('-'), '2026-11-12');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

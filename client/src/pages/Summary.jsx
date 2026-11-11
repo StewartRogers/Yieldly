@@ -5,10 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { getOverview, refreshAllPrices, updateCashBalance, getPortfolioSummary } from '../api/client'
-
-function fmtTime(date) {
-  return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })
-}
+import { fmtTimeInZone as fmtTime } from '../utils/time'
 
 function CashCell({ portfolio, onRefresh }) {
   const [editing, setEditing] = useState(false)

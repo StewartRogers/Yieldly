@@ -13,6 +13,7 @@ const { parseCSVLine, parseDate } = require('./lib/parse');
 const { prepareHoldings, NET_SHARES, SHARE_EPSILON } = require('./lib/holdings');
 const { guessNextDividendDate, resolveRefreshedNextDividendDate, INTERVAL_MONTHS } = require('./lib/dividends');
 const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
+const { MARKET_TIMEZONE, todayInZone, todayAsLocalDate, log } = require('./lib/time');
 
 const noop = async () => {};
 
@@ -91,13 +92,11 @@ const isValidISODate = (v) => {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 };
 
-// "Today" for the future-date bound, pinned to Pacific time rather than the
-// server's own clock (UTC in production, whatever the dev machine is
-// locally) — so the bound doesn't shift depending on where the code runs.
-const todayPacific = () =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-
-const isFutureDate = (v) => v > todayPacific();
+// "Today" for the future-date bound is APP_TIMEZONE's date (B.C. Pacific Time,
+// PCT, by default), not the server's own clock (UTC in production, whatever
+// the dev machine is locally), so the bound doesn't shift depending on where
+// the code runs. See lib/time.js.
+const isFutureDate = (v) => v > todayInZone();
 // Accepts numbers or numeric strings; rejects NaN/Infinity/garbage.
 const toFiniteNumber = (v) => {
   if (v === undefined || v === null || v === '') return null;
@@ -257,7 +256,7 @@ function createApp(db, options = {}) {
   const app = express();
 
   function serverError(res, error) {
-    console.error(error);
+    log.error(error);
     res.status(500).json({ error: 'An internal error occurred' });
   }
 
@@ -729,7 +728,10 @@ function createApp(db, options = {}) {
     if (!holdingRows.length) return { message: 'No holdings to update', updated: 0 };
 
     const wait = ms => new Promise(r => setTimeout(r, ms));
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    // APP_TIMEZONE's date, not the server clock's: on Vercel (UTC) that was
+    // already tomorrow from 5 pm PCT onward, shifting next-dividend-date
+    // projections a day.
+    const today = todayAsLocalDate();
     const errors = [];
 
     // Dedup the network fetch per (ticker, market): the same ticker can be
@@ -752,10 +754,10 @@ function createApp(db, options = {}) {
       try {
         if (isUS) {
           quotes[key] = await fetchYahooQuote(ticker);
-          console.log(`${ticker} (${market} via Yahoo): $${quotes[key]?.price?.toFixed(2)}`);
+          log.info(`${ticker} (${market} via Yahoo): $${quotes[key]?.price?.toFixed(2)}`);
         } else {
           quotes[key] = await fetchTMXQuote(ticker);
-          console.log(`${ticker} (TMX): $${quotes[key]?.price?.toFixed(2)}`);
+          log.info(`${ticker} (TMX): $${quotes[key]?.price?.toFixed(2)}`);
         }
       } catch (e) {
         errors.push({ ticker, error: e.message });
@@ -849,14 +851,17 @@ function createApp(db, options = {}) {
       // append a $0 row to History every day.
       const portfolios = await db.all('SELECT * FROM portfolios WHERE archived_at IS NULL');
       // Vercel Cron fires at 05:00 UTC (~midnight-1am America/New_York,
-      // year-round) — before that trading day has opened, so the quotes
+      // year-round; 10 pm the previous evening in B.C. PCT, which no longer
+      // shifts with DST). That's before the next trading day has opened, so the quotes
       // performRefreshPrices() just fetched are necessarily the PRIOR
       // trading day's close. Label the snapshot with that prior calendar
       // day, not "today", so the row's date matches the prices it holds
       // (see the History page's buildPivot, which buckets snapshots by the
       // calendar month of this date — a same-day label would silently
       // shift every month's true final trading day into the next month).
-      const nowNY = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      // MARKET_TIMEZONE (New York), not APP_TIMEZONE: a trading day belongs
+      // to the exchange, not to where the user is.
+      const nowNY = todayInZone(new Date(), MARKET_TIMEZONE);
       const priorDay = new Date(`${nowNY}T00:00:00Z`);
       priorDay.setUTCDate(priorDay.getUTCDate() - 1);
       const snapshotDate = priorDay.toISOString().slice(0, 10);
@@ -1689,7 +1694,7 @@ function createApp(db, options = {}) {
       // back to the client in full.
       const truncate = (s) => (s.length > 200 ? `${s.slice(0, 200)}…` : s);
 
-      if (verbose) console.log(`Processing ${lines.length} lines from CSV`);
+      if (verbose) log.info(`Processing ${lines.length} lines from CSV`);
 
       const typeMap = { 'D': 'DIVIDEND', 'B': 'BUY', 'S': 'SELL', 'DR': 'DIVIDEND_REINVEST' };
 
@@ -1894,7 +1899,7 @@ function createApp(db, options = {}) {
       }
       if (cashDeltas.size) await backupPortfolios();
 
-      if (verbose) console.log(`Import complete: ${imported.length} imported, ${errors.length} errors`);
+      if (verbose) log.info(`Import complete: ${imported.length} imported, ${errors.length} errors`);
 
       res.json({
         success: true,
@@ -2139,18 +2144,15 @@ async function fetchYahooQuote(ticker, retry = true) {
 
 // ─── Monthly ACB (pure; no DB dependency) ────────────────────────────────────
 
-// Pacific-pinned "now" for computeMonthlyACB's default, matching isFutureDate
-// above — the previous default (`new Date()`) read the *server's* local time
-// (UTC in production), so a UTC evening call to /api/summary/monthly-acb
-// could compute one month later than the same moment shows anywhere else.
-// The toLocaleString round-trip re-parses Pacific wall-clock components as if
-// they were the server's own local time, so the plain `now.getFullYear()`/
-// `now.getMonth()` calls below (unchanged, and still exactly what explicit
-// callers like the test suite get when they pass their own `now`) read
-// Pacific values regardless of what timezone the server process is in.
-const nowInPacific = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-
-function computeMonthlyACB(allTxRows, now = nowInPacific()) {
+// computeMonthlyACB's default "now" is today in APP_TIMEZONE (B.C. PCT by
+// default), matching isFutureDate above. A plain `new Date()` would read the
+// *server's* local time (UTC in production), so a UTC-evening call to
+// /api/summary/monthly-acb could compute one month later than the user's
+// calendar shows. todayAsLocalDate() returns a Date whose local getFullYear()/
+// getMonth() are APP_TIMEZONE's, so the getters below read the user's month
+// whatever zone the server process runs in. Explicit callers like the test suite
+// still pass their own `now`.
+function computeMonthlyACB(allTxRows, now = todayAsLocalDate()) {
   // Guard against malformed dates (e.g. from a corrupted/hand-edited backup
   // restore) reaching the substring(0, 7) month-key logic below, which assumes
   // a well-formed YYYY-MM-DD string.

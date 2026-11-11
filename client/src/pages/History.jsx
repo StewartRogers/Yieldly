@@ -4,13 +4,14 @@ import { fmtCurrencyTrim } from '../utils/format'
 import { buildPivot, sumPivots, pivotValue, momChange, yearTotal, yoyChange } from '../utils/historyMatrix'
 import { Input } from '@/components/ui/input'
 import { getValueSnapshots, getCashflowMonthly, setValueSnapshot } from '../api/client'
+import { todayInZone, zonedDateParts } from '../utils/time'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const YEAR_SPAN = 6
 
-function todayISO() {
-  return new Date().toLocaleDateString('en-CA')
-}
+// "Today" and the current month are B.C. Pacific Time (APP_TIMEZONE), whatever
+// timezone the device is in. See utils/time.js.
+const todayISO = () => todayInZone()
 
 // Last calendar day of `month` (1-indexed) in `year`, as YYYY-MM-DD.
 function monthEndISO(year, month) {
@@ -115,9 +116,7 @@ function measureColCh(pivot, years, netCashFlowByYear, currentYear, currentMonth
 }
 
 function ValueMatrix({ pivot, netCashFlowByYear, editable, onSave }) {
-  const now         = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() + 1
+  const { year: currentYear, month: currentMonth } = zonedDateParts()
 
   const years = Array.from({ length: YEAR_SPAN }, (_, i) => currentYear - YEAR_SPAN + 1 + i)
   const lastYear = years[years.length - 1]
@@ -232,9 +231,7 @@ export default function History({ portfolios = [] }) {
     ? sumPivots(selectedCodes.map(c => pivotByCode[c] || {}))
     : (pivotByCode[selected] || {})
 
-  const now          = new Date()
-  const currentYear  = now.getFullYear()
-  const currentMonth = now.getMonth() + 1
+  const { year: currentYear, month: currentMonth } = zonedDateParts()
 
   const filteredCashflow = selected === 'ALL'
     ? cashflow
@@ -250,9 +247,9 @@ export default function History({ portfolios = [] }) {
   const handleSave = async (year, month, value) => {
     const portfolioId = portfolioIdByCode[selected]
     if (!portfolioId) return
-    const now = new Date()
+    const now = zonedDateParts()
     const cell = pivot[year]?.[month]
-    const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
+    const isCurrentMonth = year === now.year && month === now.month
     const targetDate = cell?.date || (isCurrentMonth ? todayISO() : monthEndISO(year, month))
     await setValueSnapshot(portfolioId, targetDate, value)
     setError('')

@@ -3,6 +3,7 @@ import { importCsv, exportData, importData, getDataCounts } from '../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { todayInZone } from '../utils/time'
 
 const FORMAT_COLUMNS = [
   { col: 'portfolio', example: 'RRSP',       notes: 'must exist' },
@@ -33,9 +34,9 @@ function downloadJSON(data, filename) {
   download(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename)
 }
 
-// toISOString() converts to UTC, so it rolls to tomorrow's date once local
-// time passes UTC midnight (e.g. ~7-8pm Eastern) — use the local calendar date.
-const todayStamp = () => new Date().toLocaleDateString('en-CA')
+// B.C. Pacific Time date (APP_TIMEZONE), not toISOString()'s UTC date, which
+// rolls to tomorrow from 5 pm PCT.
+const todayStamp = () => todayInZone()
 const counts = (d) => ({
   portfolios:   d?.portfolios?.length   ?? 0,
   transactions: d?.transactions?.length ?? 0,

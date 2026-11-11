@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import { Trash2, Pencil, X, TriangleAlert } from 'lucide-react'
+import { todayInZone, fmtSqliteUtcDateTime, APP_TIMEZONE_LABEL } from '../utils/time'
 
 const PER_PAGE = 20
 const CASH_ONLY_TYPES = new Set(['DIVIDEND', 'CONTRIBUTION', 'WITHDRAWAL'])
@@ -54,10 +55,10 @@ const TYPE_FILTER_OPTIONS = [
 ]
 
 
-// toISOString() converts to UTC, so it rolls to tomorrow's date once local
-// time passes UTC midnight (e.g. ~7-8pm Eastern) — use the browser's own
-// local calendar date instead.
-const todayLocal = () => new Date().toLocaleDateString('en-CA')
+// Today in B.C. Pacific Time (APP_TIMEZONE), the same "today" the server's
+// future-date check uses, whatever timezone the device is in. Not
+// toISOString(), which is UTC and rolls to tomorrow from 5 pm PCT.
+const todayLocal = () => todayInZone()
 
 function Pager({ page, totalPages, totalCount, onChange }) {
   if (totalPages <= 1) return null
@@ -780,6 +781,9 @@ export default function Transactions({ portfolios }) {
                       <th>Price</th>
                       <th>Total</th>
                       <th>Date</th>
+                      {/* When the row was entered into Yieldly (created_at), not
+                          when the trade happened: that's Date, which has no time. */}
+                      <th title="When this transaction was entered into Yieldly">Entered ({APP_TIMEZONE_LABEL})</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -828,6 +832,9 @@ export default function Transactions({ portfolios }) {
                           <td className="num">{parseFloat(t.price) > 0 ? fmtCurrency(parseFloat(t.price)) : '—'}</td>
                           <td className="num">{fmtCurrency(parseFloat(t.total))}</td>
                           <td className="num" style={{ color: 'var(--tc-muted)' }}>{t.date}</td>
+                          <td className="num" style={{ color: 'var(--tc-muted)', whiteSpace: 'nowrap' }}>
+                            {fmtSqliteUtcDateTime(t.created_at) || '—'}
+                          </td>
                           <td>
                             {locked ? (
                               <span className="note" title="Restore the archived portfolio on the Portfolios page to change this">Archived</span>

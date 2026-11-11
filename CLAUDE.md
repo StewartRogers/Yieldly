@@ -83,6 +83,16 @@ and is the only way to catch Safari-specific breakage without a Mac.
 
 Vite proxies `/api/*` to the Express server, so the client always calls `/api/...` paths — never the full server URL directly.
 
+## Timezone
+
+The user is in B.C., which since 1 Nov 2026 keeps one year-round standard, **Pacific Time (PCT)**, at UTC−7. Never call it MST or PST.
+- `lib/time.js` (server) and `client/src/utils/time.js` (client) are the only places that decide "today", the current month, or how a time is displayed. Both read `APP_TIMEZONE` (default `America/Vancouver`) and `APP_TIMEZONE_LABEL` (default `PCT`). The client gets them at build time via `envDir: '..'` + `envPrefix` in `vite.config.js`.
+- **Never** use `America/Los_Angeles` (still UTC−8 in winter), the server's local clock (`new Date()` + local getters; UTC on Vercel), `toISOString().slice(0, 10)` for "today", or Intl's `timeZoneName` for the label.
+- **Exchange trading days stay on New York** (`MARKET_TIMEZONE`): the snapshot cron labels a row with the prior NY calendar day. A trading day belongs to the exchange, not the user.
+- Transaction `date`, `next_dividend_date` and `snapshot_date` are plain calendar dates with no time or zone, so they never need converting. `created_at`/`updated_at`/`archived_at` are SQLite `CURRENT_TIMESTAMP` values in **UTC** without a `Z`; convert them on display (`sqliteUtcToZoneDate`, `fmtSqliteUtcDateTime`), never by slicing the string. The Transactions table shows `created_at` as an **Entered (PCT)** column, separate from the trade `date`. A backup restore keeps the original `created_at`, since it copies every column.
+- Vercel Cron schedules are UTC-only: `0 5 * * *` is 22:00 PCT, and with B.C. no longer changing clocks that's the same PCT time all year.
+- `test-full.js` §C2i asserts the runtime's tzdata knows B.C. is UTC−7 in winter; the entrypoints log a warning on startup if it doesn't. If it fails, upgrade Node; don't loosen the check.
+
 ## Architecture
 
 This is a single-user portfolio tracker with stateless JWT authentication (one superuser).

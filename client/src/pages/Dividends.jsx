@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getDividendsMonthly, getUpcomingDividends, backfillDividendFrequency } from '../api/client'
+import { zonedDateParts, daysFromToday } from '../utils/time'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const PER_PAGE = 15
@@ -12,11 +13,8 @@ function fmtNextDate(dateStr) {
   return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function daysAway(dateStr) {
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const target = new Date(`${dateStr}T00:00:00`)
-  return Math.round((target - today) / 86400000)
-}
+// Counted from today in B.C. Pacific Time (APP_TIMEZONE), not the device's zone.
+const daysAway = daysFromToday
 
 function fmtDaysAway(n) {
   if (n === 0) return 'Today'
@@ -131,9 +129,9 @@ function projectedByMonth(data, targetMonths) {
 }
 
 function ProjectedDividends({ data }) {
-  const today = new Date()
+  const today = zonedDateParts()
   const targetMonths = [0, 1, 2].map(offset => {
-    const d = new Date(today.getFullYear(), today.getMonth() + offset, 1)
+    const d = new Date(today.year, today.month - 1 + offset, 1)
     return { year: d.getFullYear(), month: d.getMonth() + 1 }
   })
   const totals = projectedByMonth(data, targetMonths)
@@ -169,8 +167,7 @@ function YoYCell({ prev, curr }) {
 }
 
 function KPIStrip({ data }) {
-  const now         = new Date()
-  const currentYear = now.getFullYear()
+  const currentYear = zonedDateParts().year
 
   const lookup = {}
   data.forEach(d => {

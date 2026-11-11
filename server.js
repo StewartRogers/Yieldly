@@ -5,6 +5,7 @@ const path = require('path');
 const { createApp } = require('./app');
 const { createDb, tursoUrl } = require('./database');
 const { makePortfoliosBackup, restorePortfoliosIfEmpty } = require('./lib/portfolios-backup');
+const { APP_TIMEZONE, APP_TIMEZONE_LABEL, log, warnIfStaleTimeZoneData } = require('./lib/time');
 
 const PORT = 2085;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -16,11 +17,11 @@ const isProduction = process.env.NODE_ENV === 'production';
 let SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   if (isProduction) {
-    console.error('FATAL: SESSION_SECRET is not set. Refusing to start in production.');
+    log.error('FATAL: SESSION_SECRET is not set. Refusing to start in production.');
     process.exit(1);
   }
   SESSION_SECRET = require('crypto').randomBytes(32).toString('hex');
-  console.warn('WARNING: SESSION_SECRET not set — using an ephemeral dev secret. Auth tokens reset on every restart. Set SESSION_SECRET in .env.');
+  log.warn('WARNING: SESSION_SECRET not set — using an ephemeral dev secret. Auth tokens reset on every restart. Set SESSION_SECRET in .env.');
 }
 
 async function main() {
@@ -34,7 +35,9 @@ async function main() {
   const backupPortfolios = makePortfoliosBackup(db, PORTFOLIOS_BACKUP);
   await restorePortfoliosIfEmpty(db, PORTFOLIOS_BACKUP);
 
-  console.log('Database ready', tursoUrl() ? '(Turso)' : '(local file)');
+  log.info('Database ready', tursoUrl() ? '(Turso)' : '(local file)');
+  log.info(`Timezone: ${APP_TIMEZONE} (${APP_TIMEZONE_LABEL})`);
+  warnIfStaleTimeZoneData();
 
   const app = createApp(db, {
     sessionSecret: SESSION_SECRET,
@@ -52,11 +55,11 @@ async function main() {
   await backupPortfolios(); // ensure portfolios.json is in sync on startup
 
   app.listen(PORT, () => {
-    console.log(`Yieldly server running at http://localhost:${PORT}`);
+    log.info(`Yieldly server running at http://localhost:${PORT}`);
   });
 }
 
 main().catch((e) => {
-  console.error('Failed to start server:', e);
+  log.error('Failed to start server:', e);
   process.exit(1);
 });

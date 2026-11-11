@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import { getPortfolioSummary, createPortfolio, refreshPortfolioPrices, updatePortfolioOrder, updatePortfolio, archivePortfolio, restorePortfolio } from '../api/client'
+import { sqliteUtcToZoneDate } from '../utils/time'
 
 // Renders a share count, flagging one that isn't cleanly rounded to 4
 // decimals (e.g. an unrounded DRIP amount) so it's visible right where the
@@ -546,7 +547,7 @@ export default function Portfolios({ portfolios, onPortfoliosChange, pricesTick 
                   <tr key={p.id}>
                     <td>{p.name}</td>
                     <td className="muted-txt">{p.code}</td>
-                    <td className="num" style={{ color: 'var(--tc-muted)' }}>{String(p.archived_at).slice(0, 10)}</td>
+                    <td className="num" style={{ color: 'var(--tc-muted)' }}>{sqliteUtcToZoneDate(p.archived_at)}</td>
                     <td>
                       <div className="row" style={{ justifyContent: 'flex-end' }}>
                         <button

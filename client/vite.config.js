@@ -10,6 +10,12 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Read env from the repo-root .env (same file as the server), and expose only
+  // APP_TIMEZONE / APP_TIMEZONE_LABEL besides VITE_* (see src/utils/time.js).
+  // Secrets in that file (SESSION_SECRET, TURSO_*, …) match neither prefix
+  // and stay out of the bundle. Vercel's build env is picked up the same way.
+  envDir: path.resolve(dirname, '..'),
+  envPrefix: ['VITE_', 'APP_TIMEZONE'],
   resolve: {
     alias: {
       '@': path.resolve(dirname, './src'),

@@ -14,6 +14,7 @@
 
 const { createApp } = require('../app');
 const { createDb, tursoUrl } = require('../database');
+const { log, warnIfStaleTimeZoneData } = require('../lib/time');
 
 let appPromise = null;
 
@@ -26,6 +27,7 @@ function getApp() {
       if (!tursoUrl()) {
         throw new Error('TURSO_DATABASE_URL (or yieldly_storage_TURSO_DATABASE_URL) is not set');
       }
+      warnIfStaleTimeZoneData(); // once per cold start; see lib/time.js
       // Idempotent (CREATE TABLE IF NOT EXISTS); cheap to run on cold start.
       const db = await createDb();
       return createApp(db, {
@@ -50,7 +52,7 @@ module.exports = async (req, res) => {
     const app = await getApp();
     return app(req, res);
   } catch (err) {
-    console.error('Function init failed:', err);
+    log.error('Function init failed:', err);
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ error: 'Server misconfigured' }));
