@@ -780,10 +780,7 @@ export default function Transactions({ portfolios }) {
                       <th>Shares</th>
                       <th>Price</th>
                       <th>Total</th>
-                      <th>Date</th>
-                      {/* When the row was entered into Yieldly (created_at), not
-                          when the trade happened: that's Date, which has no time. */}
-                      <th title="When this transaction was entered into Yieldly">Entered ({APP_TIMEZONE_LABEL})</th>
+                      <th title={`Trade date. Hover a date to see when it was entered (${APP_TIMEZONE_LABEL}).`}>Date</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -821,7 +818,7 @@ export default function Transactions({ portfolios }) {
                           <td className="num">
                             {t.quantity > 0 ? (
                               isUnroundedQty(t.quantity) ? (
-                                <span className="row" style={{ gap: 4, justifyContent: 'flex-end', color: 'var(--tc-warn, #d9a441)' }}
+                                <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end', color: 'var(--tc-warn, #d9a441)' }}
                                   title={`Not rounded to 4 decimals (exact: ${t.quantity})`}>
                                   {t.quantity.toFixed(4)}
                                   <TriangleAlert size={12} />
@@ -831,15 +828,23 @@ export default function Transactions({ portfolios }) {
                           </td>
                           <td className="num">{parseFloat(t.price) > 0 ? fmtCurrency(parseFloat(t.price)) : '—'}</td>
                           <td className="num">{fmtCurrency(parseFloat(t.total))}</td>
-                          <td className="num" style={{ color: 'var(--tc-muted)' }}>{t.date}</td>
-                          <td className="num" style={{ color: 'var(--tc-muted)', whiteSpace: 'nowrap' }}>
-                            {fmtSqliteUtcDateTime(t.created_at) || '—'}
+                          {/* The trade date (no time). When the row was entered into
+                              Yieldly (created_at, shown in PCT) is a hover title rather
+                              than its own column, which made the table scroll sideways. */}
+                          <td
+                            className="num"
+                            style={{ color: 'var(--tc-muted)', cursor: t.created_at ? 'help' : undefined }}
+                            title={t.created_at ? `Entered ${fmtSqliteUtcDateTime(t.created_at)} ${APP_TIMEZONE_LABEL}` : undefined}
+                          >
+                            {t.date}
                           </td>
                           <td>
                             {locked ? (
                               <span className="note" title="Restore the archived portfolio on the Portfolios page to change this">Archived</span>
                             ) : (
-                              <div className="row" style={{ gap: 4 }}>
+                              // nowrap: `.row` wraps by default, which stacked the
+                              // edit/delete icons whenever the table got tight.
+                              <div className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
                                 {!TRANSFER_LEG_TYPES.has(t.type) && (
                                   <button
                                     className="tc-btn sm ghost"
