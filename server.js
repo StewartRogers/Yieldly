@@ -46,7 +46,7 @@ async function main() {
     secureCookies: isProduction,
     trustProxy: process.env.TRUST_PROXY === '1',
     backupPortfolios,
-    serveClient: isProduction ? 'production' : 'development',
+    serveClient: isProduction ? 'production' : false, // dev: Vite serves the client on :2080
     verbose: process.env.DEBUG_IMPORT === '1',
     cronSecret: process.env.CRON_SECRET,
     setupToken: process.env.SETUP_TOKEN,

@@ -225,7 +225,6 @@ All API routes except `/api/auth/*` and `/api/cron/*` require authentication (re
 ```text
 yieldly/
 ├── client/              # React frontend used in production builds
-├── public/              # Static development UI
 ├── api/index.js         # Vercel serverless entrypoint (Express → Turso)
 ├── lib/                 # Shared server-side helpers
 │   ├── compute.js           # Holdings computation (ACB, return, yield)

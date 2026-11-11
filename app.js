@@ -221,7 +221,7 @@ function validateBackupPayload(payload) {
  *   secureCookies   {boolean}  set the Secure flag on the auth cookie
  *   trustProxy      {boolean}  trust the first proxy hop (HTTPS proxy / Vercel)
  *   backupPortfolios{function} async hook called after portfolio mutations (default no-op)
- *   serveClient     {'production'|'development'|false} static asset strategy
+ *   serveClient     {'production'|false} serve client/dist + SPA fallback (local prod only)
  *   rateLimit       {{windowMs,max}|false} auth rate-limit config (false disables)
  *   verbose         {boolean}  emit per-row CSV import logs (default false)
  *   cronSecret      {string}   bearer token required on /api/cron/* routes (unset = disabled)
@@ -304,8 +304,6 @@ function createApp(db, options = {}) {
   // Serve client assets (registered before API routes; SPA fallback comes last)
   if (serveClient === 'production') {
     app.use(express.static(path.join(__dirname, 'client', 'dist')));
-  } else if (serveClient === 'development') {
-    app.use(express.static('public'));
   }
 
   // ===== AUTHENTICATION (stateless JWT) =====
