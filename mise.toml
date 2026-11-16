@@ -1,4 +1,5 @@
 [tools]
-# Pinned to the patch level: 24.22.1 is the October 2026 security release
-# (CVE-2026-111497, Brotli). engines.node stays at 24.x to match Vercel.
-node = "24.22.1"
+# Pinned to the patch level: 24.22.3 is the 11 November 2026 security release
+# (16 CVEs: HTTP/2, TLS, HTTPS — incl. CVE-2026-123864, CVE-2026-126051).
+# engines.node stays at 24.x to match Vercel.
+node = "24.22.3"
