@@ -884,6 +884,43 @@ section('38. Running ACB — Defensive Branches & Direct Fallback');
   check('fallback buy_price = $10 (excl. commission)', h.buy_price, 10);
 }
 
+section('39. Running ACB — SPLIT keeps the basis, spreads it over more units');
+{
+  // GRT.UN-style 3-for-1: 100 units at $90 + $10 commission, split adds 200.
+  const [split] = applyRunningACB(
+    [{ portfolio_id: 1, ticker: 'GRT.UN' }],
+    [
+      { portfolio_id: 1, ticker: 'GRT.UN', type: 'BUY',   quantity: 100, total: 9000, commission: 10 },
+      { portfolio_id: 1, ticker: 'GRT.UN', type: 'SPLIT', quantity: 200, total: 0 },
+    ]
+  );
+  check('ACB unchanged by the split = $9,010', split.acb, 9010);
+  check('ACB per unit (ex-commission) falls to $30', split.acb_per_share, 30);
+
+  // A post-split SELL retires its share of the basis over the post-split units.
+  const [sold] = applyRunningACB(
+    [{ portfolio_id: 1, ticker: 'GRT.UN' }],
+    [
+      { portfolio_id: 1, ticker: 'GRT.UN', type: 'BUY',   quantity: 100, total: 9000 },
+      { portfolio_id: 1, ticker: 'GRT.UN', type: 'SPLIT', quantity: 200, total: 0 },
+      { portfolio_id: 1, ticker: 'GRT.UN', type: 'SELL',  quantity: 150, total: 4800 },
+    ]
+  );
+  check('sell half the post-split units → ACB $4,500', sold.acb, 4500);
+  check('ACB per unit still $30', sold.acb_per_share, 30);
+
+  // A 1-for-10 consolidation removes units (negative SPLIT quantity).
+  const [consol] = applyRunningACB(
+    [{ portfolio_id: 1, ticker: 'CONS' }],
+    [
+      { portfolio_id: 1, ticker: 'CONS', type: 'BUY',   quantity: 1000, total: 500 },
+      { portfolio_id: 1, ticker: 'CONS', type: 'SPLIT', quantity: -900, total: 0 },
+    ]
+  );
+  check('consolidation → ACB unchanged $500', consol.acb, 500);
+  check('consolidation → ACB per unit $5', consol.acb_per_share, 5);
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 const total = passed + failed;

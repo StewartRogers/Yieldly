@@ -10,8 +10,11 @@ const path = require('path');
 
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
-const { prepareHoldings, NET_SHARES, SHARE_EPSILON } = require('./lib/holdings');
-const { SHARE_TYPES, newlyUncoveredSell, uncoveredSellMessage, loadPositionRows } = require('./lib/ledger');
+const { prepareHoldings, NET_SHARES, SHARE_EPSILON, LEDGER_ORDER } = require('./lib/holdings');
+const {
+  SHARE_TYPES, PENDING_ID_BASE, walkLedger, newlyUncoveredSell, uncoveredSellMessage,
+  splitResyncStatements, loadPositionRows, toLedgerRow,
+} = require('./lib/ledger');
 const { guessNextDividendDate, resolveRefreshedNextDividendDate, INTERVAL_MONTHS } = require('./lib/dividends');
 const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
 const { MARKET_TIMEZONE, todayInZone, todayAsLocalDate, log } = require('./lib/time');
@@ -21,7 +24,7 @@ const noop = async () => {};
 // ─── Validation helpers ──────────────────────────────────────────────────────
 
 const TRANSACTION_TYPES = new Set([
-  'BUY', 'SELL', 'DIVIDEND', 'DIVIDEND_REINVEST', 'CONTRIBUTION', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT',
+  'BUY', 'SELL', 'DIVIDEND', 'DIVIDEND_REINVEST', 'CONTRIBUTION', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT', 'SPLIT',
 ]);
 
 // performRefreshPrices() treats anything that isn't exactly 'NYSE'/'NASDAQ' as
@@ -52,6 +55,19 @@ const CASH_BALANCE_DELTA = {
   DIVIDEND:          (total) => total,
   DIVIDEND_REINVEST: (total) => -total,
 };
+
+// stock_info.dividend_per_share is quoted per unit, so a split of ratio r
+// divides it by r (pass 1/r to undo one). It's only ever entered by hand —
+// a price refresh doesn't touch it — so nothing else would correct it.
+// dividend_yield is a ratio of price and needs no change; market_price is left
+// for the next price refresh, since it may already be the post-split quote.
+function splitDividendRescale(portfolioId, ticker, ratio) {
+  return {
+    sql: `UPDATE stock_info SET dividend_per_share = dividend_per_share / ?, updated_at = CURRENT_TIMESTAMP
+          WHERE portfolio_id = ? AND ticker = ? AND dividend_per_share IS NOT NULL`,
+    args: [ratio, portfolioId, ticker],
+  };
+}
 
 // Tolerance for cash comparisons — well below a cent, just enough to absorb
 // IEEE-754 noise from repeated additions (same rationale as SHARE_EPSILON).
@@ -175,7 +191,12 @@ function validateBackupPayload(payload) {
       if (n === null || Number.isNaN(n)) errors.push(`transactions[${i}].${f} must be a number`);
       // A negative SELL quantity would ADD shares instead of removing them and
       // corrupt ACB/returns, same reasoning as the /api/transactions guard.
-      else if (n < 0) errors.push(`transactions[${i}].${f} must not be negative`);
+      // The one exception: a consolidation's SPLIT row removes units, so its
+      // derived quantity is legitimately negative.
+      else if (n < 0 && !(f === 'quantity' && t.type === 'SPLIT')) errors.push(`transactions[${i}].${f} must not be negative`);
+    }
+    if (t.type === 'SPLIT' && !(toFiniteNumber(t.split_ratio) > 0)) {
+      errors.push(`transactions[${i}] is a SPLIT without a positive split_ratio`);
     }
     if (t.commission !== undefined && t.commission !== null) {
       const c = toFiniteNumber(t.commission);
@@ -946,11 +967,11 @@ function createApp(db, options = {}) {
   app.get('/api/summary/monthly-acb', async (req, res) => {
     try {
       const rows = await db.all(`
-        SELECT portfolio_id, ticker, type, quantity, total,
-               COALESCE(commission, 0) AS commission, date
-        FROM transactions
-        WHERE type IN ('BUY', 'DIVIDEND_REINVEST', 'SELL')
-        ORDER BY date ASC, id ASC
+        SELECT t.portfolio_id, t.ticker, t.type, t.quantity, t.total,
+               COALESCE(t.commission, 0) AS commission, t.date
+        FROM transactions t
+        WHERE t.type IN ('BUY', 'DIVIDEND_REINVEST', 'SELL', 'SPLIT')
+        ORDER BY ${LEDGER_ORDER}
       `);
       res.json(computeMonthlyACB(rows));
     } catch (error) {
@@ -1088,10 +1109,10 @@ function createApp(db, options = {}) {
   app.get('/api/portfolios/:portfolioId/transactions/ticker/:ticker', async (req, res) => {
     try {
       const transactions = await db.all(`
-        SELECT id, ticker, type, quantity, price, total, commission, date
-        FROM transactions
-        WHERE portfolio_id = ? AND ticker = ?
-        ORDER BY date ASC, created_at ASC
+        SELECT t.id, t.ticker, t.type, t.quantity, t.price, t.total, t.commission, t.date, t.split_ratio
+        FROM transactions t
+        WHERE t.portfolio_id = ? AND t.ticker = ?
+        ORDER BY ${LEDGER_ORDER}
       `, req.params.portfolioId, req.params.ticker.toUpperCase());
       res.json(transactions);
     } catch (error) {
@@ -1165,6 +1186,9 @@ function createApp(db, options = {}) {
       const normalizedType = typeof type === 'string' ? type.toUpperCase() : type;
       if (normalizedType === 'TRANSFER_IN' || normalizedType === 'TRANSFER_OUT') {
         return res.status(400).json({ error: 'Use POST /api/transfers to move cash between portfolios' });
+      }
+      if (normalizedType === 'SPLIT') {
+        return res.status(400).json({ error: 'Use POST /api/splits to record a stock split' });
       }
       const isCashFlow = normalizedType === 'CONTRIBUTION' || normalizedType === 'WITHDRAWAL';
       const finalTicker = (isCashFlow && !ticker) ? 'CASH' : ticker;
@@ -1266,14 +1290,18 @@ function createApp(db, options = {}) {
       // The check above is against today's share count, so a SELL backdated
       // to before the shares were bought would pass it — and the running-ACB
       // walk would then skip that SELL and leave the full basis on the
-      // remaining shares. Check coverage on the trade date too.
-      if (normalizedType === 'SELL') {
+      // remaining shares. Check coverage on the trade date too. Any unit-moving
+      // row dated before a split also changes the units that split added, so
+      // collect the SPLIT re-sync to run in the same transaction.
+      let splitResync = [];
+      if (SHARE_TYPES.includes(normalizedType)) {
         const before = await loadPositionRows(db, portfolio_id, finalTickerUpper);
-        const after = [...before, { id: Number.MAX_SAFE_INTEGER, type: 'SELL', quantity: finalQuantity, date }];
+        const after = [...before, { id: PENDING_ID_BASE, type: normalizedType, quantity: finalQuantity, date }];
         const short = newlyUncoveredSell(before, after);
         if (short) {
           return res.status(400).json({ error: uncoveredSellMessage(finalTickerUpper, short) });
         }
+        splitResync = splitResyncStatements(after);
       }
 
       // A BUY spends cash it doesn't have to be given a negative cash_balance
@@ -1343,6 +1371,7 @@ function createApp(db, options = {}) {
             args: [nextDividendDate, portfolio_id, finalTickerUpper],
           });
         }
+        for (const stmt of splitResync) await tx.execute(stmt);
         await tx.commit();
       } catch (e) {
         await tx.rollback();
@@ -1400,21 +1429,31 @@ function createApp(db, options = {}) {
         return res.status(409).json({ error: ARCHIVED_ERROR });
       }
 
-      // Removing a BUY/DRIP that a later SELL relied on would leave that SELL
-      // selling shares that were never held: NET_SHARES goes negative, the
-      // position disappears from every view, and archive then refuses with
-      // "still holds X" for a position the user can't see.
-      if (row.type === 'BUY' || row.type === 'DIVIDEND_REINVEST') {
+      // Removing a BUY/DRIP (or a split) that a later SELL relied on would
+      // leave that SELL selling shares that were never held: NET_SHARES goes
+      // negative, the position disappears from every view, and archive then
+      // refuses with "still holds X" for a position the user can't see. Any
+      // unit-moving row dated before a split also changes what that split
+      // added, so its re-sync runs in the same transaction.
+      let splitResync = [];
+      if (SHARE_TYPES.includes(row.type)) {
         const before = await loadPositionRows(db, row.portfolio_id, row.ticker);
-        const short = newlyUncoveredSell(before, before.filter(r => r.id !== Number(row.id)));
+        const after = before.filter(r => r.id !== Number(row.id));
+        const short = newlyUncoveredSell(before, after);
         if (short) {
           return res.status(400).json({ error: uncoveredSellMessage(row.ticker, short) });
         }
+        splitResync = splitResyncStatements(after);
       }
 
       const tx = await db.transaction('write');
       try {
         await tx.execute({ sql: 'DELETE FROM transactions WHERE id = ?', args: [row.id] });
+        for (const stmt of splitResync) await tx.execute(stmt);
+        // Undo the split's rescale of the stored per-unit dividend.
+        if (row.type === 'SPLIT' && Number(row.split_ratio) > 0) {
+          await tx.execute(splitDividendRescale(row.portfolio_id, row.ticker, 1 / Number(row.split_ratio)));
+        }
         const delta = CASH_BALANCE_DELTA[row.type]?.(row.total, row.commission) || 0;
         if (delta !== 0) {
           await tx.execute({
@@ -1457,6 +1496,11 @@ function createApp(db, options = {}) {
       if (existing.transfer_peer_id || existing.type === 'TRANSFER_IN' || existing.type === 'TRANSFER_OUT') {
         return res.status(400).json({ error: 'Transfers cannot be edited — delete and recreate them instead' });
       }
+      // A split's units are derived, not entered, and recording one also
+      // rescales the per-unit dividend — so it's recorded and removed whole.
+      if (existing.type === 'SPLIT') {
+        return res.status(400).json({ error: 'Splits cannot be edited — delete it and record the split again' });
+      }
       if (await anyArchived(existing.portfolio_id)) {
         return res.status(409).json({ error: ARCHIVED_ERROR });
       }
@@ -1468,6 +1512,9 @@ function createApp(db, options = {}) {
       const normalizedType = typeof type === 'string' ? type.toUpperCase() : type;
       if (normalizedType === 'TRANSFER_IN' || normalizedType === 'TRANSFER_OUT') {
         return res.status(400).json({ error: 'Use POST /api/transfers to move cash between portfolios' });
+      }
+      if (normalizedType === 'SPLIT') {
+        return res.status(400).json({ error: 'Use POST /api/splits to record a stock split' });
       }
       const isCashFlow = normalizedType === 'CONTRIBUTION' || normalizedType === 'WITHDRAWAL';
       const finalTicker = (isCashFlow && !ticker) ? 'CASH' : ticker;
@@ -1566,6 +1613,7 @@ function createApp(db, options = {}) {
       // row leaves (shrinking, re-dating, retyping or moving a BUY can strand a
       // later SELL) and the one it lands in (a SELL dated before its shares).
       // The current-share-count check above sees neither.
+      const splitResync = [];
       if (SHARE_TYPES.includes(existing.type) || SHARE_TYPES.includes(normalizedType)) {
         const editedRow = { id: Number(existing.id), type: normalizedType, quantity: finalQuantity, date };
         const positions = [[existing.portfolio_id, existing.ticker]];
@@ -1580,6 +1628,7 @@ function createApp(db, options = {}) {
           if (short) {
             return res.status(400).json({ error: uncoveredSellMessage(tkr, short) });
           }
+          splitResync.push(...splitResyncStatements(after));
         }
       }
 
@@ -1659,6 +1708,7 @@ function createApp(db, options = {}) {
             args: [nextDividendDate, portfolio_id, finalTickerUpper],
           });
         }
+        for (const stmt of splitResync) await tx.execute(stmt);
         await tx.commit();
       } catch (e) {
         await tx.rollback();
@@ -1675,6 +1725,111 @@ function createApp(db, options = {}) {
         total: finalTotal,
         commission: commission ? Number(commission) : 0,
         date,
+      });
+    } catch (error) {
+      serverError(res, error);
+    }
+  });
+
+  // ===== STOCK SPLITS =====
+  // Body: { ticker, date, new_units, old_units = 1 }. A 3-for-1 split is
+  // new_units 3 / old_units 1; a 1-for-10 consolidation is 1 / 10. `date` is
+  // the day the units start trading post-split (the effective / ex-date).
+  //
+  // One call records the split in every portfolio that held the ticker going
+  // into that date: a SPLIT row carrying the ratio and the units it added
+  // (derived, see lib/ledger.js), plus a rescale of the stored per-unit
+  // dividend. ACB is untouched — the same basis over more units — so ACB per
+  // unit falls by the ratio. Everything is written in one atomic batch.
+  app.post('/api/splits', async (req, res) => {
+    try {
+      const { ticker, date } = req.body || {};
+      const newUnits = toFiniteNumber(req.body?.new_units);
+      const oldUnits = req.body?.old_units === undefined ? 1 : toFiniteNumber(req.body.old_units);
+      if (typeof ticker !== 'string' || !TICKER_REGEX.test(ticker.trim().toUpperCase())) {
+        return res.status(400).json({ error: 'Invalid ticker' });
+      }
+      if (!isValidISODate(date)) {
+        return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD date' });
+      }
+      if (isFutureDate(date)) {
+        return res.status(400).json({ error: 'date cannot be in the future' });
+      }
+      if (!(newUnits > 0) || !(oldUnits > 0)) {
+        return res.status(400).json({ error: 'new_units and old_units must be positive numbers' });
+      }
+      const ratio = newUnits / oldUnits;
+      if (Math.abs(ratio - 1) < 1e-9) {
+        return res.status(400).json({ error: 'A split must change the number of units' });
+      }
+      const tickerUpper = ticker.trim().toUpperCase();
+
+      const portfolios = await db.all(
+        `SELECT DISTINCT p.id, p.code, p.archived_at
+           FROM transactions t JOIN portfolios p ON p.id = t.portfolio_id
+          WHERE t.ticker = ? ORDER BY p.display_order, p.id`,
+        tickerUpper,
+      );
+
+      const statements = [];
+      const applied = [];
+      // Portfolios that already have this split are skipped rather than
+      // failing the whole call, so re-recording fills in any portfolio that
+      // is missing it (e.g. after deleting it from one to fix an earlier row).
+      const alreadyRecorded = [];
+      for (const p of portfolios) {
+        const rows = await loadPositionRows(db, p.id, tickerUpper);
+        if (rows.some(r => r.type === 'SPLIT' && r.date === date)) {
+          alreadyRecorded.push(p.code);
+          continue;
+        }
+        const pending = { id: PENDING_ID_BASE, type: 'SPLIT', quantity: 0, date, split_ratio: ratio };
+        const after = [...rows, pending];
+        const added = walkLedger(after).splitUnits.get(PENDING_ID_BASE) || 0;
+        if (Math.abs(added) <= SHARE_EPSILON) continue; // held none going into the split
+        if (p.archived_at) {
+          return res.status(409).json({ error: `${p.code} held ${tickerUpper} on ${date} but is archived — restore it before recording the split` });
+        }
+        // A consolidation removes units, which can strand a later SELL.
+        const short = newlyUncoveredSell(rows, after);
+        if (short) {
+          return res.status(400).json({ error: `${p.code}: ${uncoveredSellMessage(tickerUpper, short)}` });
+        }
+        // The refresh routes a ticker to TMX or Yahoo by the market on its
+        // latest row — which this SPLIT will be — so carry the market forward.
+        const latest = await db.get(
+          `SELECT market FROM transactions WHERE portfolio_id = ? AND ticker = ? AND market IS NOT NULL
+            ORDER BY id DESC LIMIT 1`,
+          p.id, tickerUpper,
+        );
+        statements.push({
+          sql: `INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, commission, date, market, split_ratio)
+                VALUES (?, ?, 'SPLIT', ?, 0, 0, 0, ?, ?, ?)`,
+          args: [p.id, tickerUpper, added, date, latest?.market || 'TMX', ratio],
+        });
+        // A later split in the same position now applies to more (or fewer) units.
+        statements.push(...splitResyncStatements(after));
+        statements.push(splitDividendRescale(p.id, tickerUpper, ratio));
+        const unitsBefore = added / (ratio - 1);
+        applied.push({
+          portfolio_id: Number(p.id),
+          code: p.code,
+          units_before: unitsBefore,
+          units_added: added,
+          units_after: unitsBefore + added,
+        });
+      }
+
+      if (!applied.length) {
+        if (alreadyRecorded.length) {
+          return res.status(409).json({ error: `This split of ${tickerUpper} on ${date} is already recorded in ${alreadyRecorded.join(', ')}` });
+        }
+        return res.status(400).json({ error: `No portfolio held ${tickerUpper} going into ${date}` });
+      }
+      await db.batch(statements, 'write');
+      res.json({
+        ticker: tickerUpper, date, ratio, new_units: newUnits, old_units: oldUnits,
+        portfolios: applied, already_recorded: alreadyRecorded,
       });
     } catch (error) {
       serverError(res, error);
@@ -1793,39 +1948,31 @@ function createApp(db, options = {}) {
       // otherwise the per-row duplicate check below is one round-trip per line.
       const dedupeKey = (portfolioId, ticker, type, date, quantity, price, total) =>
         `${portfolioId}|${ticker}|${type}|${date}|${quantity}|${price}|${total}`;
-      const existingTx = await db.all('SELECT id, portfolio_id, ticker, type, date, quantity, price, total FROM transactions');
+      const existingTx = await db.all('SELECT id, portfolio_id, ticker, type, date, quantity, price, total, split_ratio FROM transactions');
       const existingKeys = new Set(
         existingTx.map(t => dedupeKey(t.portfolio_id, t.ticker, t.type, t.date, t.quantity, t.price, t.total))
       );
 
-      // Current net shares per position, so the import can enforce the same
-      // "can't sell what you don't hold" rule POST /api/transactions does.
-      // Without this an over-sell drives `shares` negative, HAVING shares > 0
-      // drops the position, and it vanishes from /summary and /overview with
-      // no error — the import reports success while the portfolio silently
-      // loses its cost basis. The map is updated as rows are applied so a
-      // sequence of sells within one file is checked cumulatively.
+      // Each position's unit-moving rows, kept up to date as rows are
+      // accepted, so the import enforces the same rules POST /api/transactions
+      // does: "can't sell what you don't hold" (without it an over-sell drove
+      // `shares` negative, HAVING dropped the position, and it vanished from
+      // /summary and /overview while the import reported success), checked
+      // on the trade date and cumulatively across the file. Units held come
+      // from walking these rows, so a split is applied by its ratio even when
+      // this file adds rows dated before it. Accepted rows get ids above any
+      // real one, so on a shared date they sort after existing rows and in
+      // file order — the order they'll be inserted in.
       const sharesKey = (portfolioId, ticker) => `${portfolioId}|${ticker}`;
-      const netShares = new Map(
-        (await db.all(
-          `SELECT t.portfolio_id, t.ticker, COALESCE(${NET_SHARES}, 0) AS shares
-             FROM transactions t GROUP BY t.portfolio_id, t.ticker`
-        )).map(r => [sharesKey(r.portfolio_id, r.ticker), Number(r.shares) || 0])
-      );
-
-      // Each position's share-moving rows, for the same date-aware SELL
-      // coverage check POST /api/transactions applies. Rows accepted from this
-      // file are appended with ids above any real one, so on a shared date
-      // they sort after existing rows and in file order — the order they'll
-      // be inserted, and so the order the running-ACB walk will see them.
       const positionRows = new Map();
       for (const t of existingTx) {
         if (!SHARE_TYPES.includes(t.type)) continue;
         const k = sharesKey(t.portfolio_id, t.ticker);
         if (!positionRows.has(k)) positionRows.set(k, []);
-        positionRows.get(k).push({ id: Number(t.id), type: t.type, quantity: Number(t.quantity) || 0, date: t.date });
+        positionRows.get(k).push(toLedgerRow(t));
       }
-      let pendingId = Number.MAX_SAFE_INTEGER - lines.length;
+      const touchedPositions = new Set();
+      let pendingId = PENDING_ID_BASE;
 
       // Inserts are collected and written in one atomic batch after the loop,
       // together with the cash_balance updates. Writing row-by-row meant a
@@ -1839,7 +1986,7 @@ function createApp(db, options = {}) {
       const cashDeltas = new Map();
 
       // Running cash balance per portfolio, seeded from the current DB value
-      // and updated as rows are applied — same pattern as netShares — so a
+      // and updated as rows are applied — same pattern as positionRows — so a
       // BUY's affordability check sees the effect of earlier rows in this
       // same file, not just what's already committed.
       const cashBalances = new Map(
@@ -1915,6 +2062,10 @@ function createApp(db, options = {}) {
             errors.push({ line: i + 1, error: 'TRANSFER_IN/TRANSFER_OUT cannot be imported from CSV — use the transfers form', data: truncate(line) });
             continue;
           }
+          if (type === 'SPLIT') {
+            errors.push({ line: i + 1, error: 'Splits cannot be imported from CSV — record them with the split form', data: truncate(line) });
+            continue;
+          }
 
           const quantity = parseFloat(quantityStr.replace(/[$\s,]/g, ''));
           const price = parseFloat(priceStr.replace(/[$\s,]/g, ''));
@@ -1943,7 +2094,8 @@ function createApp(db, options = {}) {
           // Same position guard as POST /api/transactions: SELL/DIVIDEND/
           // DIVIDEND_REINVEST all presuppose an open position, and a SELL may
           // not exceed the shares actually held.
-          const held = netShares.get(sharesKey(portfolio.id, cleanTicker)) || 0;
+          const posKey = sharesKey(portfolio.id, cleanTicker);
+          const held = walkLedger(positionRows.get(posKey) || []).shares;
           if (type === 'SELL' || type === 'DIVIDEND' || type === 'DIVIDEND_REINVEST') {
             if (held <= 0) {
               errors.push({ line: i + 1, error: `You don't own ${cleanTicker} in ${portfolio.code} — cannot import a ${type}`, data: truncate(line) });
@@ -1954,7 +2106,6 @@ function createApp(db, options = {}) {
               continue;
             }
           }
-          const posKey = sharesKey(portfolio.id, cleanTicker);
           if (type === 'SELL') {
             const rows = positionRows.get(posKey) || [];
             const short = newlyUncoveredSell(rows, [...rows, { id: pendingId, type, quantity, date: parsedDate }]);
@@ -1983,19 +2134,15 @@ function createApp(db, options = {}) {
           if (SHARE_TYPES.includes(type)) {
             if (!positionRows.has(posKey)) positionRows.set(posKey, []);
             positionRows.get(posKey).push({ id: pendingId++, type, quantity, date: parsedDate });
+            touchedPositions.add(posKey);
           }
 
-          // Keep the running share count and cash balance in step with what was
-          // just written, so later rows in the same file are validated against
-          // it and cash-flow rows don't silently skip cash_balance the way they
-          // used to (DELETE /api/transactions/:id reverses the delta
+          // Keep the running cash balance in step with what was just accepted,
+          // so later rows in the same file are validated against it and
+          // cash-flow rows don't silently skip cash_balance the way they used
+          // to (DELETE /api/transactions/:id reverses the delta
           // unconditionally, so an import that never applied it drove the
           // balance negative on deletion).
-          const shareDelta = (type === 'BUY' || type === 'DIVIDEND_REINVEST') ? quantity
-            : (type === 'SELL' ? -quantity : 0);
-          if (shareDelta !== 0) {
-            netShares.set(sharesKey(portfolio.id, cleanTicker), held + shareDelta);
-          }
           const cashDelta = CASH_BALANCE_DELTA[type]?.(total) || 0;
           if (cashDelta !== 0) {
             cashDeltas.set(portfolio.id, (cashDeltas.get(portfolio.id) || 0) + cashDelta);
@@ -2015,8 +2162,11 @@ function createApp(db, options = {}) {
         sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
         args: [delta, portfolioId],
       }));
+      // A row dated before an existing split changes the units that split
+      // added; re-sync those in the same batch.
+      const splitResync = [...touchedPositions].flatMap(k => splitResyncStatements(positionRows.get(k)));
       if (pendingInserts.length || cashUpdates.length) {
-        await db.batch([...pendingInserts, ...cashUpdates], 'write');
+        await db.batch([...pendingInserts, ...cashUpdates, ...splitResync], 'write');
       }
       if (cashDeltas.size) await backupPortfolios();
 
@@ -2339,6 +2489,9 @@ function computeMonthlyACB(allTxRows, now = todayAsLocalDate()) {
         const sold = Math.min(tx.quantity || 0, s.shares);
         s.acb    *= 1 - sold / s.shares;
         s.shares -= sold;
+      } else if (tx.type === 'SPLIT') {
+        // More (or fewer) units over the same basis — ACB is unchanged.
+        s.shares += tx.quantity || 0;
       }
     }
     results.push({ year: y, month: m, total_acb: totalACB() });

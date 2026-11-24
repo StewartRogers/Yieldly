@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { fmtCurrency, isUnroundedQty } from '../utils/format'
-import { getPortfolioTransactions, createTransaction, updateTransaction, createTransfer, deleteTransaction } from '../api/client'
+import { fmtCurrency, isUnroundedQty, fmtSplitRatio, fmtSignedQty } from '../utils/format'
+import { getPortfolioTransactions, createTransaction, updateTransaction, createTransfer, deleteTransaction, recordSplit } from '../api/client'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
@@ -17,6 +17,9 @@ const CASH_FLOW_TYPES = new Set(['CONTRIBUTION', 'WITHDRAWAL'])
 // which fans out into a linked TRANSFER_OUT/TRANSFER_IN row pair server-side —
 // those two real types only ever appear in transaction history, never in the form.
 const TRANSFER_LEG_TYPES = new Set(['TRANSFER_IN', 'TRANSFER_OUT'])
+// 'SPLIT' in the form calls recordSplit(), which writes one SPLIT row into
+// every portfolio that held the ticker. Those rows are deleted and recorded
+// again, never edited: their unit count is derived from the ratio.
 
 const TYPE_BADGE = {
   BUY:               'buy',
@@ -27,6 +30,7 @@ const TYPE_BADGE = {
   WITHDRAWAL:        'withdraw',
   TRANSFER_IN:       'transfer',
   TRANSFER_OUT:      'transfer',
+  SPLIT:             'split',
 }
 
 const TYPE_LABEL = {
@@ -39,6 +43,7 @@ const TYPE_LABEL = {
   TRANSFER:          'Transfer',
   TRANSFER_IN:       'Transfer in',
   TRANSFER_OUT:      'Transfer out',
+  SPLIT:             'Split',
 }
 
 // Transaction-history type filter pills — the real row types (no bare
@@ -52,6 +57,7 @@ const TYPE_FILTER_OPTIONS = [
   { value: 'WITHDRAWAL',         label: 'Withdrawal' },
   { value: 'TRANSFER_IN',        label: 'Transfer in' },
   { value: 'TRANSFER_OUT',       label: 'Transfer out' },
+  { value: 'SPLIT',              label: 'Split' },
 ]
 
 
@@ -168,7 +174,7 @@ function TickerCombobox({ id, value, options, onChange, placeholder, required })
   )
 }
 
-export default function Transactions({ portfolios }) {
+export default function Transactions({ portfolios, onPricesStale }) {
   const toast = useToast()
   const location = useLocation()
   const navigate = useNavigate()
@@ -183,6 +189,8 @@ export default function Transactions({ portfolios }) {
   const [price, setPrice]                     = useState('')
   const [cashTotal, setCashTotal]             = useState('')
   const [commission, setCommission]           = useState('')
+  const [splitNew, setSplitNew]               = useState('')
+  const [splitOld, setSplitOld]               = useState('1')
   const [date, setDate]                       = useState(todayLocal())
   const [allTxns, setAllTxns]                 = useState([])
   const [historyFilter, setFilter]            = useState('ALL')
@@ -209,6 +217,7 @@ export default function Transactions({ portfolios }) {
   )
 
   const isTransfer = type === 'TRANSFER'
+  const isSplit    = type === 'SPLIT'
   const isCashOnly = CASH_ONLY_TYPES.has(type) || isTransfer
   const isCashFlow = CASH_FLOW_TYPES.has(type)
 
@@ -223,6 +232,17 @@ export default function Transactions({ portfolios }) {
     }
     return [...set].sort()
   }, [allTxns, formPortfolioId])
+
+  // Every ticker held in any portfolio. A split applies across all of them,
+  // so its picker isn't scoped to the selected portfolio.
+  const allHeldTickers = useMemo(() => {
+    const set = new Set()
+    for (const t of allTxns) {
+      if (t.ticker === 'CASH') continue
+      if (t.type === 'BUY' || t.type === 'DIVIDEND_REINVEST') set.add(t.ticker)
+    }
+    return [...set].sort()
+  }, [allTxns])
 
   // Derived during render rather than mirrored into state by an effect. The
   // effect only ever wrote (never cleared), so setting quantity back to 0
@@ -314,6 +334,27 @@ export default function Transactions({ portfolios }) {
         })
         setCashTotal(''); setToPortfolioId(''); setDate(todayLocal())
         loadAllTxns()
+      } catch (err) { toast.error(err.message) }
+      return
+    }
+
+    if (isSplit) {
+      const tk = ticker.trim().toUpperCase()
+      const newUnits = parseFloat(splitNew)
+      const oldUnits = parseFloat(splitOld)
+      if (!tk) { toast.error('Enter the ticker that split'); return }
+      if (!(newUnits > 0) || !(oldUnits > 0)) { toast.error('Enter the split ratio, e.g. 3 new units for 1 old'); return }
+      if (newUnits === oldUnits) { toast.error('A split must change the number of units'); return }
+      try {
+        const r = await recordSplit({ ticker: tk, date, new_units: newUnits, old_units: oldUnits })
+        const where = r.portfolios.map(p => `${p.code} ${fmtSignedQty(p.units_added)}`).join(', ')
+        const skipped = r.already_recorded?.length ? ` (already in ${r.already_recorded.join(', ')})` : ''
+        toast.success(`${tk} ${fmtSplitRatio(r.ratio)} split recorded: ${where}${skipped}`)
+        setTicker(''); setSplitNew(''); setSplitOld('1'); setDate(todayLocal())
+        loadAllTxns()
+        // The stored price may still be the pre-split quote; until it's
+        // refreshed, the extra units would show a value about ratio x too high.
+        onPricesStale?.()
       } catch (err) { toast.error(err.message) }
       return
     }
@@ -427,11 +468,14 @@ export default function Transactions({ portfolios }) {
 
   const deleteTxn = async (t) => {
     const isTransferLeg = TRANSFER_LEG_TYPES.has(t.type)
+    const isSplitRow = t.type === 'SPLIT'
     const ok = await askConfirm({
-      title: isTransferLeg ? 'Delete transfer?' : 'Delete transaction?',
+      title: isTransferLeg ? 'Delete transfer?' : isSplitRow ? 'Delete split?' : 'Delete transaction?',
       message: isTransferLeg
         ? 'This removes both the outgoing and incoming entries. This cannot be undone.'
-        : 'This cannot be undone.',
+        : isSplitRow
+          ? `This removes the ${fmtSplitRatio(t.split_ratio)} split of ${t.ticker} from ${t._portfolioCode} only. Other portfolios keep theirs. Record the split again to restore it.`
+          : 'This cannot be undone.',
       confirmLabel: 'Delete',
       destructive: true,
     })
@@ -498,7 +542,7 @@ export default function Transactions({ portfolios }) {
           </div>
           <form onSubmit={handleSubmit} className="col" style={{ gap: 12 }}>
 
-            {!isTransfer ? (
+            {isSplit ? null : !isTransfer ? (
               <div className="tc-field">
                 <label htmlFor="tx-portfolio">Portfolio</label>
                 <Select value={formPortfolioId} onValueChange={setFormPortfolioId}>
@@ -560,6 +604,7 @@ export default function Transactions({ portfolios }) {
               <label htmlFor="tx-type">Type</label>
               <Select value={type} onValueChange={v => {
                 setType(v); setTicker(''); setQuantity(''); setPrice(''); setCashTotal(''); setToPortfolioId('')
+                setSplitNew(''); setSplitOld('1')
               }}>
                 <SelectTrigger id="tx-type" className="h-9 w-full" style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}>
                   <span className="flex flex-1 text-left text-sm">{TYPE_LABEL[type] ?? type}</span>
@@ -576,11 +621,56 @@ export default function Transactions({ portfolios }) {
                       row, and the server rejects PUT on transfer legs
                       outright — so the option is hidden while editing. */}
                   {!editingId && <SelectItem value="TRANSFER">Transfer</SelectItem>}
+                  {!editingId && <SelectItem value="SPLIT">Split</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
 
-            {!isCashFlow && !isTransfer && (
+            {isSplit && (
+              <>
+                <div className="tc-field">
+                  <label htmlFor="tx-split-ticker">Ticker</label>
+                  <TickerCombobox
+                    id="tx-split-ticker"
+                    value={ticker}
+                    options={allHeldTickers}
+                    onChange={setTicker}
+                    placeholder="GRT.UN"
+                    required
+                  />
+                </div>
+                <div className="grid-2">
+                  <div className="tc-field">
+                    <label htmlFor="tx-split-new">New units</label>
+                    <Input id="tx-split-new" className="h-9" type="number" step="any" min="0" placeholder="3" value={splitNew}
+                      style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
+                      onChange={e => setSplitNew(e.target.value)} required />
+                  </div>
+                  <div className="tc-field">
+                    {/* Kept short: a two-line label pushed this input below its neighbour. */}
+                    <label htmlFor="tx-split-old">Old units</label>
+                    <Input id="tx-split-old" className="h-9" type="number" step="any" min="0" placeholder="1" value={splitOld}
+                      style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
+                      onChange={e => setSplitOld(e.target.value)} required />
+                  </div>
+                </div>
+                <div className="tc-field">
+                  <label htmlFor="tx-split-date">Effective date</label>
+                  <Input id="tx-split-date" className="h-9" type="date" value={date} max={todayLocal()}
+                    style={{ background: 'var(--inset)', borderColor: 'var(--line-2)', color: 'var(--ink)' }}
+                    onChange={e => setDate(e.target.value)} required />
+                </div>
+                <div className="note" style={{ lineHeight: 1.5 }}>
+                  {parseFloat(splitNew) > 0 && parseFloat(splitOld) > 0 && parseFloat(splitNew) !== parseFloat(splitOld) && (
+                    <>{splitNew}-for-{splitOld}: every {splitOld} unit{parseFloat(splitOld) === 1 ? '' : 's'} become{parseFloat(splitOld) === 1 ? 's' : ''} {splitNew}. </>
+                  )}
+                  Effective date is the first day the units trade post-split. Applies to every portfolio that held
+                  {' '}{ticker.trim().toUpperCase() || 'the ticker'} before that date. ACB stays the same and is spread over the new units.
+                </div>
+              </>
+            )}
+
+            {!isCashFlow && !isTransfer && !isSplit && (
               <>
                 <div className="tc-field">
                   <label htmlFor="tx-ticker">Ticker</label>
@@ -609,7 +699,7 @@ export default function Transactions({ portfolios }) {
               </>
             )}
 
-            {!isCashOnly && (
+            {!isCashOnly && !isSplit && (
               <>
                 <div className="grid-2">
                   <div className="tc-field">
@@ -675,12 +765,12 @@ export default function Transactions({ portfolios }) {
             )}
 
             <button type="submit" className="tc-btn primary block mt2">
-              {editingId ? 'Save changes' : '+ Add transaction'}
+              {isSplit ? 'Record split' : editingId ? 'Save changes' : '+ Add transaction'}
             </button>
           </form>
 
           <div className="note" style={{ justifyContent: 'center', textAlign: 'center', lineHeight: 1.5, marginTop: 12 }}>
-            Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal · Transfer
+            Buy · Sell · Dividend · Reinvest · Contribution · Withdrawal · Transfer · Split
           </div>
         </div>
 
@@ -816,7 +906,7 @@ export default function Transactions({ portfolios }) {
                             </span>
                           </td>
                           <td className="num">
-                            {t.quantity > 0 ? (
+                            {t.type === 'SPLIT' ? fmtSignedQty(t.quantity) : t.quantity > 0 ? (
                               isUnroundedQty(t.quantity) ? (
                                 <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end', color: 'var(--tc-warn, #d9a441)' }}
                                   title={`Not rounded to 4 decimals (exact: ${t.quantity})`}>
@@ -826,8 +916,11 @@ export default function Transactions({ portfolios }) {
                               ) : t.quantity
                             ) : '—'}
                           </td>
-                          <td className="num">{parseFloat(t.price) > 0 ? fmtCurrency(parseFloat(t.price)) : '—'}</td>
-                          <td className="num">{fmtCurrency(parseFloat(t.total))}</td>
+                          <td className="num">
+                            {t.type === 'SPLIT' ? fmtSplitRatio(t.split_ratio)
+                              : parseFloat(t.price) > 0 ? fmtCurrency(parseFloat(t.price)) : '—'}
+                          </td>
+                          <td className="num">{t.type === 'SPLIT' ? '—' : fmtCurrency(parseFloat(t.total))}</td>
                           {/* The trade date (no time). When the row was entered into
                               Yieldly (created_at, shown in PCT) is a hover title rather
                               than its own column, which made the table scroll sideways. */}
@@ -845,7 +938,7 @@ export default function Transactions({ portfolios }) {
                               // nowrap: `.row` wraps by default, which stacked the
                               // edit/delete icons whenever the table got tight.
                               <div className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
-                                {!TRANSFER_LEG_TYPES.has(t.type) && (
+                                {!TRANSFER_LEG_TYPES.has(t.type) && t.type !== 'SPLIT' && (
                                   <button
                                     className="tc-btn sm ghost"
                                     onClick={() => startEdit(t)}
@@ -858,8 +951,8 @@ export default function Transactions({ portfolios }) {
                                 <button
                                   className="tc-btn sm ghost danger"
                                   onClick={() => deleteTxn(t)}
-                                  title={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
-                                  aria-label={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : 'Delete transaction'}
+                                  title={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : t.type === 'SPLIT' ? 'Delete split' : 'Delete transaction'}
+                                  aria-label={TRANSFER_LEG_TYPES.has(t.type) ? 'Delete transfer' : t.type === 'SPLIT' ? 'Delete split' : 'Delete transaction'}
                                 >
                                   <Trash2 size={12} />
                                 </button>
@@ -880,8 +973,8 @@ export default function Transactions({ portfolios }) {
 
       {/* ── Badge legend ── */}
       <div className="row mt4" style={{ flexWrap: 'wrap', gap: 14 }}>
-        {['buy','sell','div','reinvest','contrib','withdraw','transfer'].map(cls => {
-          const labels = { buy:'Buy', sell:'Sell', div:'Dividend', reinvest:'Reinvest', contrib:'Contribution', withdraw:'Withdrawal', transfer:'Transfer' }
+        {['buy','sell','div','reinvest','contrib','withdraw','transfer','split'].map(cls => {
+          const labels = { buy:'Buy', sell:'Sell', div:'Dividend', reinvest:'Reinvest', contrib:'Contribution', withdraw:'Withdrawal', transfer:'Transfer', split:'Split' }
           return (
             <span key={cls} className={`tc-badge ${cls}`}>
               <span className="dot" />{labels[cls]}

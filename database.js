@@ -66,6 +66,30 @@ async function addColumnIfMissing(db, table, column, definition) {
   }
 }
 
+// The transactions table's full shape, shared by the CREATE below and the
+// rebuild migration that widens the type CHECK on an older database (a CHECK
+// can't be altered in place). Keep the two from drifting by editing it here.
+//
+// split_ratio is only set on SPLIT rows: new units per old unit (3 for a
+// 3-for-1, 0.1 for a 1-for-10 consolidation). See lib/ledger.js.
+const TRANSACTION_TYPE_LIST = ['BUY', 'SELL', 'DIVIDEND', 'DIVIDEND_REINVEST', 'CONTRIBUTION', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT', 'SPLIT'];
+const TRANSACTIONS_COLUMNS = `
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      portfolio_id INTEGER NOT NULL,
+      ticker       TEXT NOT NULL DEFAULT 'CASH',
+      type         TEXT NOT NULL CHECK(type IN (${TRANSACTION_TYPE_LIST.map(t => `'${t}'`).join(',')})),
+      quantity     REAL NOT NULL DEFAULT 0,
+      price        REAL NOT NULL DEFAULT 0,
+      total        REAL NOT NULL DEFAULT 0,
+      commission   REAL DEFAULT 0,
+      date         TEXT NOT NULL,
+      market       TEXT DEFAULT 'TMX',
+      transfer_peer_id INTEGER,
+      split_ratio  REAL,
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
+    `;
+
 /**
  * Create and upgrade the schema. Safe to call on every connection / cold start.
  *
@@ -93,21 +117,7 @@ async function runMigrations(db) {
       archived_at   DATETIME
     );
 
-    CREATE TABLE IF NOT EXISTS transactions (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      portfolio_id INTEGER NOT NULL,
-      ticker       TEXT NOT NULL DEFAULT 'CASH',
-      type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')),
-      quantity     REAL NOT NULL DEFAULT 0,
-      price        REAL NOT NULL DEFAULT 0,
-      total        REAL NOT NULL DEFAULT 0,
-      commission   REAL DEFAULT 0,
-      date         TEXT NOT NULL,
-      market       TEXT DEFAULT 'TMX',
-      transfer_peer_id INTEGER,
-      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
-    );
+    CREATE TABLE IF NOT EXISTS transactions (${TRANSACTIONS_COLUMNS});
 
     CREATE TABLE IF NOT EXISTS stock_info (
       id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,39 +172,36 @@ async function runMigrations(db) {
   await addColumnIfMissing(db, 'users', 'failed_login_attempts', 'INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing(db, 'users', 'locked_until', 'DATETIME');
 
-  // --- Widen the transactions.type CHECK constraint (cash-flow + transfer types) ---
-  // Old DBs were created with a narrower CHECK; a constraint can't be altered in
-  // place, so rebuild the table (now that all columns above exist, including
-  // transfer_peer_id from the addColumnIfMissing above) when the stored DDL
-  // predates the transfer types.
+  await addColumnIfMissing(db, 'transactions', 'split_ratio', 'REAL');
+
+  // --- Widen the transactions.type CHECK constraint ---
+  // Old DBs were created with a narrower CHECK (before the cash-flow, transfer
+  // or SPLIT types); a constraint can't be altered in place, so rebuild the
+  // table when the stored DDL predates the newest type. Every column above
+  // exists by now, so the copy is column-for-column.
+  //
+  // One atomic batch: the old version ran these through executeMultiple with
+  // no transaction, so a failure after CREATE TABLE transactions_new left that
+  // table behind and every later cold start died on "table already exists".
+  // The leading DROP ... IF EXISTS also clears such a leftover. (No PRAGMA
+  // foreign_keys toggle: it's a no-op inside a transaction, and nothing
+  // references transactions, so dropping it can't cascade anywhere.)
   const txDef = await db.get(
     `SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'`
   );
-  if (txDef && txDef.sql && !String(txDef.sql).includes('TRANSFER_IN')) {
-    await db.exec(`
-      PRAGMA foreign_keys=OFF;
-      CREATE TABLE transactions_new (
-        id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        portfolio_id INTEGER NOT NULL,
-        ticker       TEXT NOT NULL DEFAULT 'CASH',
-        type         TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')),
-        quantity     REAL NOT NULL DEFAULT 0,
-        price        REAL NOT NULL DEFAULT 0,
-        total        REAL NOT NULL DEFAULT 0,
-        commission   REAL DEFAULT 0,
-        date         TEXT NOT NULL,
-        market       TEXT DEFAULT 'TMX',
-        transfer_peer_id INTEGER,
-        created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
-      );
-      INSERT INTO transactions_new (id, portfolio_id, ticker, type, quantity, price, total, commission, date, market, transfer_peer_id, created_at)
-      SELECT id, portfolio_id, ticker, type, quantity, price, total, COALESCE(commission,0), date, COALESCE(market,'TMX'), transfer_peer_id, created_at
-      FROM transactions;
-      DROP TABLE transactions;
-      ALTER TABLE transactions_new RENAME TO transactions;
-      PRAGMA foreign_keys=ON;
-    `);
+  const newestType = TRANSACTION_TYPE_LIST[TRANSACTION_TYPE_LIST.length - 1];
+  if (txDef && txDef.sql && !String(txDef.sql).includes(`'${newestType}'`)) {
+    const cols = 'id, portfolio_id, ticker, type, quantity, price, total, commission, date, market, transfer_peer_id, split_ratio, created_at';
+    await db.batch([
+      'DROP TABLE IF EXISTS transactions_new',
+      `CREATE TABLE transactions_new (${TRANSACTIONS_COLUMNS})`,
+      `INSERT INTO transactions_new (${cols})
+       SELECT id, portfolio_id, ticker, type, quantity, price, total, COALESCE(commission,0), date,
+              COALESCE(market,'TMX'), transfer_peer_id, split_ratio, created_at
+       FROM transactions`,
+      'DROP TABLE transactions',
+      'ALTER TABLE transactions_new RENAME TO transactions',
+    ], 'write');
   }
 
   // --- Indexes (last: a table rebuild above drops the table's old indexes) ---

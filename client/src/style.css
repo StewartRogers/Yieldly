@@ -65,6 +65,8 @@ input[type="number"]::-webkit-inner-spin-button {
   --t-contrib:  #2DD4BF;
   --t-withdraw: #FB7185;
   --t-transfer: #818CF8;
+  /* A split moves no money, so it gets a neutral slate rather than a hue. */
+  --t-split:    #CBD5E1;
 
   --radius-pill:  999px;
   --shadow-tc:    0 1px 0 rgba(255,255,255,.02), 0 10px 30px -18px rgba(0,0,0,.7);
@@ -371,6 +373,7 @@ h2 {
 .type.dividend-reinvest { color: var(--t-reinvest); background: rgba(167,139,250,.12); border-color: rgba(167,139,250,.3); }
 .type.contribution     { color: var(--t-contrib);  background: rgba(45,212,191,.12);  border-color: rgba(45,212,191,.3); }
 .type.withdrawal       { color: var(--t-withdraw); background: rgba(251,113,133,.12); border-color: rgba(251,113,133,.3); }
+.type.split            { color: var(--t-split);    background: rgba(203,213,225,.10); border-color: rgba(203,213,225,.3); }
 
 /* ===== STATUS BADGE CLASSES (for YoY and similar) ===== */
 .badge-pos {
@@ -659,6 +662,7 @@ table.tbl.matrix td:has(.cash-inline-form) { overflow: visible; position: relati
 .tc-badge.contrib  { color: var(--t-contrib);  background: rgba(45,212,191,.12);  border-color: rgba(45,212,191,.3); }
 .tc-badge.withdraw { color: var(--t-withdraw); background: rgba(251,113,133,.12); border-color: rgba(251,113,133,.3); }
 .tc-badge.transfer { color: var(--t-transfer); background: rgba(129,140,248,.12); border-color: rgba(129,140,248,.3); }
+.tc-badge.split    { color: var(--t-split);    background: rgba(203,213,225,.10); border-color: rgba(203,213,225,.3); }
 
 /* NEW tag */
 .tag-new {
