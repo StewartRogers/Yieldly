@@ -108,7 +108,7 @@ The app loads `.env` automatically. Copy `.env.example` to `.env` to get started
 - `TRUST_PROXY=1` - set when running behind a reverse proxy with HTTPS (trusts `X-Forwarded-*` headers from the proxy). The auth cookie's `Secure` flag is on by default whenever `NODE_ENV=production`, independent of this setting.
 - `DEBUG_IMPORT=1` - log per-row detail during CSV import
 - `CRON_SECRET` - bearer token required on `GET /api/cron/snapshot-values` (the daily portfolio value snapshot). Vercel sends it automatically as `Authorization: Bearer <value>` when a cron job triggers the route. Unset = route disabled. Generate with `openssl rand -hex 32`.
-- `SETUP_TOKEN` - optional token required to complete first-run account setup (`POST /api/auth/setup`). Without it, whoever submits the setup form first on a fresh deployment becomes the superuser — fine for a local DB only you can reach, but worth setting on a public deployment during the window between deploying and creating your account. The Login page shows a "Setup token" field automatically when this is set. Generate with `openssl rand -hex 32`.
+- `SETUP_TOKEN` - token required to complete first-run account setup (`POST /api/auth/setup`). Locally it's optional: without it, whoever submits the setup form first becomes the superuser, which is fine for a DB only you can reach. **On Vercel the setup screen is closed unless `SETUP_TOKEN` is set**, so a fresh or reset database can't be claimed by a stranger; either set it, or create the account with `npm run user:create` against Turso. The Login page shows a "Setup token" field automatically in both cases. Generate with `openssl rand -hex 32`.
 
 ## Deploying to Vercel + Turso
 
@@ -125,7 +125,7 @@ The same codebase runs on a local SQLite file in dev and on Turso when hosted �
    ```bash
    TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run db:migrate
    ```
-4. **Create the superuser** against Turso (or use the in-app setup screen on first load):
+4. **Create the superuser** against Turso (or set `SETUP_TOKEN` in Vercel and use the in-app setup screen on first load — on Vercel that screen is closed without a token):
    ```bash
    TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run user:create
    ```
@@ -168,7 +168,7 @@ All API routes except `/api/auth/*` and `/api/cron/*` require authentication (re
 ### Authentication
 
 - `GET /api/auth/session` - Check authentication status
-- `POST /api/auth/setup` - Create the superuser (only works when no user exists)
+- `POST /api/auth/setup` - Create the superuser (only works when no user exists; on Vercel, only with `SETUP_TOKEN`)
 - `POST /api/auth/login` - Sign in
 - `POST /api/auth/logout` - Sign out
 - `POST /api/change-password` - Change password (requires authentication and current password)

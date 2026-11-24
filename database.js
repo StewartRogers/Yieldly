@@ -13,6 +13,7 @@ const DEFAULT_DB_FILE = path.join(__dirname, 'yieldly.db');
  *   db.run(sql, ...args)  → { changes, lastInsertRowid }
  *   db.exec(sqlScript)    → run a multi-statement script (no args/results)
  *   db.transaction(mode)  → libSQL interactive transaction
+ *   db.batch(stmts, mode) → atomic libSQL batch (one transaction)
  *
  * Everything is async because a remote (Turso) database cannot be queried
  * synchronously. Locally the same wrapper drives a `file:` libSQL database.
@@ -40,6 +41,10 @@ function wrap(client) {
     },
     transaction(mode = 'write') {
       return client.transaction(mode);
+    },
+    /** Run [{sql, args}] atomically (libSQL wraps a batch in one transaction). */
+    batch(statements, mode = 'write') {
+      return client.batch(statements, mode);
     },
     async close() {
       await client.close();

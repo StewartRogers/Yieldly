@@ -114,14 +114,19 @@ function projectedByMonth(data, targetMonths) {
   data.forEach(h => {
     if (!h.next_dividend_date || !(h.next_payout > 0)) return
     const interval = INTERVAL_MONTHS[h.dividend_frequency]
-    const d = new Date(`${h.next_dividend_date}T00:00:00`)
+    // Step on {year, month} integers, never Date.setMonth: setMonth overflows
+    // a day-29/30/31 date into the following month (Jan 31 + 1 → Mar 3), which
+    // skipped February and then left the series drifting on the 3rd. Only the
+    // month matters for bucketing, so the day is dropped altogether.
+    let [year, month] = h.next_dividend_date.split('-').map(Number)
+    if (!year || !month) return
 
-    while (d.getFullYear() < windowEnd.year ||
-          (d.getFullYear() === windowEnd.year && d.getMonth() + 1 <= windowEnd.month)) {
-      const idx = targetMonths.findIndex(m => m.year === d.getFullYear() && m.month === d.getMonth() + 1)
+    while (year < windowEnd.year || (year === windowEnd.year && month <= windowEnd.month)) {
+      const idx = targetMonths.findIndex(m => m.year === year && m.month === month)
       if (idx !== -1) totals[idx] += h.next_payout
       if (!interval) break
-      d.setMonth(d.getMonth() + interval)
+      month += interval
+      while (month > 12) { month -= 12; year += 1 }
     }
   })
 

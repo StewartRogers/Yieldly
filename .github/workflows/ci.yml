@@ -12,9 +12,15 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch/PR supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       # Pinned to a commit SHA rather than the mutable `v4` tag — a tag can be
@@ -34,8 +40,10 @@ jobs:
           check-latest: true
           cache: npm
 
+      # `npm ci`, not `npm install`: installs exactly what package-lock.json
+      # pins (and fails if it's out of sync) instead of re-resolving ranges.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       # `npm test` runs all four suites (math, full, auth, history). CI
       # previously ran only test.js, so the security-critical auth suite —
@@ -43,3 +51,61 @@ jobs:
       # never ran on any push or PR.
       - name: Run test suite
         run: npm test
+
+  # The client was never checked in CI: a lint error or a broken `vite build`
+  # (which is what Vercel deploys) could reach main unnoticed.
+  client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: package.json
+          check-latest: true
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        run: npm ci --prefix client
+
+      - name: Lint
+        run: npm run lint --prefix client
+
+      - name: Build
+        run: npm run build --prefix client
+
+  # Playwright on Chromium, Firefox and WebKit (Safari's engine) — the only
+  # check for the responsive/cross-browser/accessibility invariants in
+  # CLAUDE.md. Boots its own server against a throwaway libSQL file.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: package.json
+          check-latest: true
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix client
+
+      - name: Install browsers
+        working-directory: client
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run browser suite
+        run: npm run test:browser
