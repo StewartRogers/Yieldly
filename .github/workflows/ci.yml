@@ -82,7 +82,10 @@ jobs:
   # check for the responsive/cross-browser/accessibility invariants in
   # CLAUDE.md. Boots its own server against a throwaway libSQL file.
   browser:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: that moved to Ubuntu 26.04, which Playwright
+    # 1.60 has no browser builds for ("Playwright does not support chromium on
+    # ubuntu26.04-x64"). Move this forward when a Playwright upgrade adds it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
