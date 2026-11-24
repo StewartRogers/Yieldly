@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Pencil, TriangleAlert } from 'lucide-react'
-import { fmtCurrency, isUnroundedQty } from '../utils/format'
+import { fmtCurrency, isUnroundedQty, fmtSplitRatio, fmtSignedQty } from '../utils/format'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getTickerTransactions } from '../api/client'
@@ -41,6 +41,8 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
           const isSell = t.type === 'SELL'
           if (isBuy)  { shares += t.quantity; cost += t.total; commission += (t.commission || 0) }
           if (isSell) { shares -= t.quantity }
+          // A split adds (or, for a consolidation, removes) units at no cost.
+          if (t.type === 'SPLIT') { shares += t.quantity }
         })
         setSummary({ shares, cost, commission,
           acb: shares > 0 ? (cost + commission) / shares : 0 })
@@ -91,7 +93,7 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
                       </span>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {t.quantity > 0 ? (
+                      {t.type === 'SPLIT' ? fmtSignedQty(t.quantity) : t.quantity > 0 ? (
                         isUnroundedQty(t.quantity) ? (
                           <span className="row" style={{ gap: 4, justifyContent: 'flex-end', color: 'var(--tc-warn, #d9a441)' }}
                             title={`Not rounded to 4 decimals (exact: ${t.quantity})`}>
@@ -102,14 +104,15 @@ export default function HoldingTransactionsModal({ portfolioId, ticker, onClose 
                       ) : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {t.price > 0 ? fmtCurrency(t.price) : '—'}
+                      {t.type === 'SPLIT' ? fmtSplitRatio(t.split_ratio) : t.price > 0 ? fmtCurrency(t.price) : '—'}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtCurrency(t.total)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{t.type === 'SPLIT' ? '—' : fmtCurrency(t.total)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {t.commission > 0 ? fmtCurrency(t.commission) : '—'}
                     </TableCell>
                     <TableCell className="text-right">
-                      {!t.type.startsWith('TRANSFER_') && (
+                      {/* Transfers and splits are deleted and re-recorded, never edited. */}
+                      {!t.type.startsWith('TRANSFER_') && t.type !== 'SPLIT' && (
                         <button
                           type="button"
                           className="tc-btn sm ghost"

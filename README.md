@@ -142,6 +142,7 @@ To migrate existing local data into Turso, dump `yieldly.db` and import it with 
 - `CONTRIBUTION`
 - `WITHDRAWAL`
 - `TRANSFER_IN` / `TRANSFER_OUT` - the two linked legs of a cash transfer between portfolios (see `POST /api/transfers`); not creatable via `POST /api/transactions`
+- `SPLIT` - a stock split or consolidation (see `POST /api/splits`). Adds (or removes) units at zero cost: ACB is unchanged and ACB per unit moves by the ratio. Recorded once for every portfolio that held the ticker; the units it adds are recalculated automatically if you later add, edit or delete an earlier trade. Not creatable via `POST /api/transactions` or CSV, and not editable — delete and record it again.
 
 Cash-flow transactions use `CASH` as the ticker internally. `CONTRIBUTION`, `WITHDRAWAL`, and transfers automatically adjust the portfolio's `cash_balance` (starting from 0 if it was previously unset).
 
@@ -192,6 +193,7 @@ All API routes except `/api/auth/*` and `/api/cron/*` require authentication (re
 
 - `POST /api/transactions` - Add a transaction (`CONTRIBUTION`/`WITHDRAWAL` also adjust `cash_balance`; `TRANSFER_IN`/`TRANSFER_OUT` are rejected here - use `POST /api/transfers`)
 - `DELETE /api/transactions/:id` - Delete a transaction, reversing any `cash_balance` change; deleting either leg of a transfer deletes both
+- `POST /api/splits` - Record a split (`ticker`, `date` = first post-split trading day, `new_units`, `old_units` default 1; e.g. 3-for-1 is `new_units: 3`). Writes a `SPLIT` row into every active portfolio that held the ticker going into `date` (skipping any that already have it) and divides that portfolio's stored `dividend_per_share` by the ratio. Market price is left for the next price refresh, which the UI triggers right after.
 - `POST /api/transfers` - Move cash between two of the user's own portfolios (`from_portfolio_id`, `to_portfolio_id`, `amount`, `date`); records a linked `TRANSFER_OUT`/`TRANSFER_IN` pair and adjusts both portfolios' `cash_balance`
 
 ### Summary and Income

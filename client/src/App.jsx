@@ -200,7 +200,7 @@ export default function App() {
             <Route path="/history"      element={<History      portfolios={portfolios} />} />
             <Route path="/dividends"    element={<Dividends    portfolios={portfolios} />} />
             <Route path="/portfolios"   element={<Portfolios   portfolios={portfolios} onPortfoliosChange={loadPortfolios} pricesTick={pricesTick} />} />
-            <Route path="/transactions" element={<Transactions portfolios={portfolios} />} />
+            <Route path="/transactions" element={<Transactions portfolios={portfolios} onPricesStale={handleNavRefresh} />} />
             <Route path="/import"       element={<Import       onImported={loadPortfolios} />} />
           </Routes>
         </Suspense>

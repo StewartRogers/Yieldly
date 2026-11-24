@@ -1234,6 +1234,172 @@ async function run() {
     checkTruthy(`${seen.length} outbound requests made`, seen.length >= 4);
     checkTruthy('every request has an AbortSignal', seen.every(s => s.signal instanceof AbortSignal));
   }
+
+  // ── 58-64. Stock splits ────────────────────────────────────────────────────
+  const sp = await bootApp();
+  try {
+    const setup = await req('POST', '/api/auth/setup', { username: 'owner', password: 'splitpass1' }, null, sp.base);
+    const cookie = extractToken(setup.cookie);
+    const call = (method, path, body) => req(method, path, body, cookie, sp.base);
+    const a = (await call('POST', '/api/portfolios', { name: 'TFSA', code: 'TFSA' })).body.id;
+    const b = (await call('POST', '/api/portfolios', { name: 'RRSP', code: 'RRSP' })).body.id;
+    const c = (await call('POST', '/api/portfolios', { name: 'Cash', code: 'CSH' })).body.id;
+    for (const id of [a, b, c]) {
+      await call('POST', '/api/transactions', { portfolio_id: id, type: 'CONTRIBUTION', total: 50000, date: '2025-01-01' });
+    }
+    const buyA = await call('POST', '/api/transactions', { portfolio_id: a, ticker: 'GRT.UN', type: 'BUY', quantity: 100, price: 90, total: 9000, commission: 10, date: '2025-03-01' });
+    await call('POST', '/api/transactions', { portfolio_id: b, ticker: 'GRT.UN', type: 'BUY', quantity: 40, price: 80, total: 3200, date: '2025-04-01' });
+    await call('POST', '/api/transactions', { portfolio_id: b, ticker: 'GRT.UN', type: 'SELL', quantity: 10, price: 85, total: 850, date: '2025-05-01' });
+    // C buys on the effective date itself, at a post-split price: not split again.
+    await call('POST', '/api/transactions', { portfolio_id: c, ticker: 'GRT.UN', type: 'BUY', quantity: 30, price: 30, total: 900, date: '2026-11-24' });
+    await call('PUT', `/api/portfolios/${a}/stocks/GRT.UN`, { dividend_per_share: 0.3, dividend_frequency: 'Monthly' });
+    const holding = async (pid) => (await call('GET', `/api/portfolios/${pid}/summary`)).body.find(h => h.ticker === 'GRT.UN');
+    const cashOf = async (pid) => (await call('GET', '/api/portfolios')).body.find(p => p.id === pid)?.cash_balance;
+    const cashA = await cashOf(a);
+
+    section('58. POST /api/splits – validation');
+    const split = (body) => call('POST', '/api/splits', { ticker: 'GRT.UN', date: '2026-11-24', new_units: 3, old_units: 1, ...body });
+    checkEq('bad ticker → 400', (await split({ ticker: 'bad ticker!' })).status, 400);
+    checkEq('bad date → 400', (await split({ date: '2026-02-30' })).status, 400);
+    checkEq('future date → 400', (await split({ date: '2099-01-01' })).status, 400);
+    checkEq('zero units → 400', (await split({ new_units: 0 })).status, 400);
+    checkEq('1-for-1 → 400', (await split({ new_units: 2, old_units: 2 })).status, 400);
+    const nobody = await split({ ticker: 'ZZZ' });
+    checkEq('ticker nobody held → 400', nobody.status, 400);
+    checkTruthy('error says nobody held it', /No portfolio held ZZZ/.test(nobody.body.error));
+    checkEq('SPLIT via POST /api/transactions → 400',
+      (await call('POST', '/api/transactions', { portfolio_id: a, ticker: 'GRT.UN', type: 'SPLIT', quantity: 200, date: '2026-11-24' })).status, 400);
+
+    section('59. POST /api/splits – GRT.UN 3-for-1 across portfolios');
+    const rec = await split({});
+    checkEq('record split → 200', rec.status, 200);
+    checkEq('applied to the two portfolios that held it going in', rec.body.portfolios?.length, 2);
+    const recA = rec.body.portfolios?.find(p => p.portfolio_id === a);
+    const recB = rec.body.portfolios?.find(p => p.portfolio_id === b);
+    check('TFSA: 100 → +200 units', recA?.units_added, 200);
+    check('RRSP: 30 held (40 − 10) → +60 units', recB?.units_added, 60);
+    const hA = await holding(a);
+    check('TFSA now holds 300 units', hA?.shares, 300);
+    check('TFSA ACB unchanged at $9,010', hA?.acb, 9010);
+    check('TFSA ACB per unit falls to $30', hA?.buy_price, 30);
+    check('RRSP now holds 90 units', (await holding(b))?.shares, 90);
+    check('same-day post-split BUY in CSH not multiplied (30 units)', (await holding(c))?.shares, 30);
+    check('cash untouched by the split', await cashOf(a), cashA);
+    check('per-unit dividend rescaled $0.30 → $0.10', hA?.dividend_per_share, 0.1);
+    const splitRow = (await call('GET', `/api/portfolios/${a}/transactions`)).body.find(t => t.type === 'SPLIT');
+    check('SPLIT row stores the ratio', splitRow?.split_ratio, 3);
+    checkEq('SPLIT row carries the position\'s market forward', splitRow?.market, 'TMX');
+    checkEq('same split again → 409', (await split({})).status, 409);
+    checkEq('editing a SPLIT → 400',
+      (await call('PUT', `/api/transactions/${splitRow.id}`, { portfolio_id: a, ticker: 'GRT.UN', type: 'SPLIT', quantity: 1, date: '2026-11-24' })).status, 400);
+    checkEq('turning a BUY into a SPLIT → 400',
+      (await call('PUT', `/api/transactions/${buyA.body.id}`, { portfolio_id: a, ticker: 'GRT.UN', type: 'SPLIT', quantity: 1, date: '2025-03-01' })).status, 400);
+
+    section('60. Splits stay right when earlier rows change');
+    const forgot = await call('POST', '/api/transactions', { portfolio_id: a, ticker: 'GRT.UN', type: 'BUY', quantity: 10, price: 90, total: 900, date: '2025-06-01' });
+    checkEq('backdated pre-split BUY → 200', forgot.status, 200);
+    const splitQty = async () => (await call('GET', `/api/portfolios/${a}/transactions`)).body.find(t => t.type === 'SPLIT')?.quantity;
+    check('split re-derived: 110 × 2 = 220 added', await splitQty(), 220);
+    check('TFSA holds 330 units', (await holding(a))?.shares, 330);
+    const moved = await call('PUT', `/api/transactions/${forgot.body.id}`, { portfolio_id: a, ticker: 'GRT.UN', type: 'BUY', quantity: 10, price: 30, total: 300, date: '2026-11-24' });
+    checkEq('re-date that BUY to the split day → 200', moved.status, 200);
+    check('split back to 200 added', await splitQty(), 200);
+    check('TFSA holds 310 units', (await holding(a))?.shares, 310);
+    checkEq('delete it → 200', (await call('DELETE', `/api/transactions/${forgot.body.id}`)).status, 200);
+    check('TFSA back to 300 units', (await holding(a))?.shares, 300);
+
+    const postSell = await call('POST', '/api/transactions', { portfolio_id: a, ticker: 'GRT.UN', type: 'SELL', quantity: 300, price: 31, total: 9300, date: '2026-11-24' });
+    checkEq('sell all 300 post-split units → 200', postSell.status, 200);
+    checkEq('deleting the original BUY now strands that SELL → 400',
+      (await call('DELETE', `/api/transactions/${buyA.body.id}`)).status, 400);
+
+    section('61. Deleting a SPLIT');
+    checkEq('delete the split while a post-split SELL needs its units → 400',
+      (await call('DELETE', `/api/transactions/${splitRow.id}`)).status, 400);
+    await call('DELETE', `/api/transactions/${postSell.body.id}`);
+    checkEq('after removing that SELL → 200', (await call('DELETE', `/api/transactions/${splitRow.id}`)).status, 200);
+    const undone = await holding(a);
+    check('units back to 100', undone?.shares, 100);
+    check('per-unit dividend restored to $0.30', undone?.dividend_per_share, 0.3);
+    const again = await split({});
+    checkEq('record it again → 200, filling in only TFSA', again.status, 200);
+    checkEq('applied to TFSA only', again.body.portfolios?.map(p => p.code).join(), 'TFSA');
+    checkEq('RRSP reported as already recorded', again.body.already_recorded?.join(), 'RRSP');
+
+    section('62. CSV import and splits');
+    const csvHead = 'Date,Symbol,Portfolio,Type,Quantity,Price,Total\n';
+    const csvSplit = await call('POST', '/api/import/csv', { csvData: `${csvHead}2026-11-24,GRT.UN,TFSA,SPLIT,3,0,0` });
+    checkEq('SPLIT row in CSV not imported', csvSplit.body.imported, 0);
+    checkTruthy('CSV says use the split form', /split form/.test(csvSplit.body.details?.errors?.[0]?.error));
+    const csv = await call('POST', '/api/import/csv', {
+      csvData: `${csvHead}2025-07-01,GRT.UN,TFSA,B,5,90,450\n2026-11-24,GRT.UN,TFSA,S,315,31,9765`,
+    });
+    checkEq('pre-split BUY + sell of all post-split units → both imported', csv.body.imported, 2);
+    check('split re-derived from the CSV row: 105 × 2 = 210', await splitQty(), 210);
+    checkEq('position closed', await holding(a), undefined);
+
+    section('63. Consolidation and backup round-trip');
+    await call('POST', '/api/transactions', { portfolio_id: b, ticker: 'PENNY', type: 'BUY', quantity: 1000, price: 0.5, total: 500, date: '2025-02-01' });
+    const consol = await call('POST', '/api/splits', { ticker: 'PENNY', date: '2026-01-15', new_units: 1, old_units: 10 });
+    checkEq('1-for-10 consolidation → 200', consol.status, 200);
+    check('−900 units', consol.body.portfolios?.[0]?.units_added, -900);
+    const penny = (await call('GET', `/api/portfolios/${b}/summary`)).body.find(h => h.ticker === 'PENNY');
+    check('100 units left', penny?.shares, 100);
+    check('ACB per unit $5', penny?.buy_price, 5);
+    checkEq('selling 101 post-consolidation units → 400',
+      (await call('POST', '/api/transactions', { portfolio_id: b, ticker: 'PENNY', type: 'SELL', quantity: 101, price: 6, total: 606, date: '2026-02-01' })).status, 400);
+    const exported = (await call('GET', '/api/export')).body;
+    const restore = await call('POST', '/api/import', exported);
+    checkEq('backup with a negative-quantity SPLIT restores → 200', restore.status, 200);
+    check('PENNY still 100 units after restore',
+      (await call('GET', `/api/portfolios/${b}/summary`)).body.find(h => h.ticker === 'PENNY')?.shares, 100);
+
+    section('64. Monthly ACB walks the split');
+    const months = (await call('GET', '/api/summary/monthly-acb')).body;
+    const nov = months.find(m => m.year === 2026 && m.month === 11)?.total_acb;
+    checkTruthy('monthly ACB has a Nov 2026 row', nov != null);
+  } finally {
+    sp.close();
+  }
+
+  // ── 65. Migration: an older table gains SPLIT + split_ratio, data kept ─────
+  section('65. Migration – old transactions table widened atomically');
+  {
+    const { createClient } = require('@libsql/client');
+    const url = tempDbUrl();
+    const raw = createClient({ url });
+    await raw.executeMultiple(`
+      CREATE TABLE portfolios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, code TEXT NOT NULL UNIQUE);
+      CREATE TABLE transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, portfolio_id INTEGER NOT NULL, ticker TEXT NOT NULL DEFAULT 'CASH',
+        type TEXT NOT NULL CHECK(type IN ('BUY','SELL','DIVIDEND','DIVIDEND_REINVEST','CONTRIBUTION','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')),
+        quantity REAL NOT NULL DEFAULT 0, price REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0,
+        commission REAL DEFAULT 0, date TEXT NOT NULL, market TEXT DEFAULT 'TMX', transfer_peer_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE);
+      INSERT INTO portfolios (id, name, code) VALUES (1, 'Old', 'OLD');
+      INSERT INTO transactions (id, portfolio_id, ticker, type, quantity, price, total, date, created_at)
+        VALUES (7, 1, 'ABC', 'BUY', 10, 5, 50, '2024-01-02', '2024-01-02 15:00:00');
+      CREATE TABLE transactions_new (id INTEGER);
+    `);
+    raw.close();
+    const migrated = await createDb(url);
+    const ddl = (await migrated.get(`SELECT sql FROM sqlite_master WHERE name = 'transactions'`)).sql;
+    checkTruthy('CHECK now allows SPLIT', ddl.includes("'SPLIT'"));
+    checkTruthy('split_ratio column added', ddl.includes('split_ratio'));
+    const row = await migrated.get('SELECT * FROM transactions WHERE id = 7');
+    checkEq('row kept with its id', Number(row?.id), 7);
+    checkEq('created_at kept', row?.created_at, '2024-01-02 15:00:00');
+    checkEq('leftover transactions_new from a failed run cleared',
+      (await migrated.get(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'transactions_new'`)).n, 0);
+    await migrated.run(
+      "INSERT INTO transactions (portfolio_id, ticker, type, quantity, date, split_ratio) VALUES (1, 'ABC', 'SPLIT', 10, '2024-06-01', 2)");
+    checkEq('a SPLIT row now inserts', Number((await migrated.get("SELECT COUNT(*) AS n FROM transactions WHERE type = 'SPLIT'")).n), 1);
+    const again = await createDb(url);
+    checkEq('re-running migrations is a no-op', Number((await again.get('SELECT COUNT(*) AS n FROM transactions')).n), 2);
+    await migrated.close();
+    await again.close();
+  }
 }
 
 // ─── Boot and run ────────────────────────────────────────────────────────────

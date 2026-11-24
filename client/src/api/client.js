@@ -102,6 +102,11 @@ export const deleteTransaction = (id) =>
 export const createTransfer = (data) =>
   request('/api/transfers', { method: 'POST', body: json(data) })
 
+// { ticker, date, new_units, old_units } — applied server-side to every
+// portfolio that held the ticker going into `date`.
+export const recordSplit = (data) =>
+  request('/api/splits', { method: 'POST', body: json(data) })
+
 // ── Summary & Dividends ─────────────────────────────────────────────────────
 export const getOverview = () =>
   request('/api/overview')

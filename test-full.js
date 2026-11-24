@@ -1571,6 +1571,22 @@ section('K5. Return percent when acb = 0 returns 0');
   check('return_percent = 0 when acb=0', result[0]?.return_percent ?? 0, 0);
 }
 
+section('M1. computeMonthlyACB — a SPLIT keeps ACB and resizes the next SELL');
+{
+  // 100 units for $1,000 in Jan; 3-for-1 in Feb (+200 units); sell 150 in Mar.
+  // Without the SPLIT, the Mar sale would look like 150 of 100 units (clamped
+  // to all of them) and zero the ACB; with it, it's half of 300.
+  const months = computeMonthlyACB([
+    { portfolio_id: 1, ticker: 'GRT.UN', type: 'BUY',   quantity: 100, total: 1000, commission: 0, date: '2024-01-10' },
+    { portfolio_id: 1, ticker: 'GRT.UN', type: 'SPLIT', quantity: 200, total: 0,    commission: 0, date: '2024-02-15' },
+    { portfolio_id: 1, ticker: 'GRT.UN', type: 'SELL',  quantity: 150, total: 600,  commission: 0, date: '2024-03-05' },
+  ]);
+  const acbIn = (m) => months.find(r => r.year === 2024 && r.month === m)?.total_acb;
+  check('Jan ACB $1,000', acbIn(1), 1000);
+  check('Feb ACB unchanged by the split', acbIn(2), 1000);
+  check('Mar ACB $500 after selling half the post-split units', acbIn(3), 500);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  SUMMARY
 // ─────────────────────────────────────────────────────────────────────────────
