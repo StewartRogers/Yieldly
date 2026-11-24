@@ -38,6 +38,10 @@ function getApp() {
         rateLimit: { windowMs: 15 * 60 * 1000, max: 10 },
         cronSecret: process.env.CRON_SECRET,
         setupToken: process.env.SETUP_TOKEN,
+        // A public URL: never let an empty database be claimed by whoever
+        // reaches it first. Without SETUP_TOKEN the setup route is closed and
+        // the account is created with `npm run user:create` against Turso.
+        allowOpenSetup: false,
       });
     })().catch((err) => {
       appPromise = null; // allow a retry on the next invocation

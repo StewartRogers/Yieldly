@@ -11,6 +11,7 @@ const path = require('path');
 const { computeHoldings } = require('./lib/compute');
 const { parseCSVLine, parseDate } = require('./lib/parse');
 const { prepareHoldings, NET_SHARES, SHARE_EPSILON } = require('./lib/holdings');
+const { SHARE_TYPES, newlyUncoveredSell, uncoveredSellMessage, loadPositionRows } = require('./lib/ledger');
 const { guessNextDividendDate, resolveRefreshedNextDividendDate, INTERVAL_MONTHS } = require('./lib/dividends');
 const { TOKEN_COOKIE, signToken, verifyToken, setAuthCookie, clearAuthCookie, createFirstUser } = require('./lib/auth');
 const { MARKET_TIMEZONE, todayInZone, todayAsLocalDate, log } = require('./lib/time');
@@ -239,6 +240,10 @@ function createApp(db, options = {}) {
     verbose = false,
     cronSecret,
     setupToken,
+    // With no setupToken, POST /api/auth/setup is first-come-first-served.
+    // That's fine on a local machine; a public deployment (api/index.js)
+    // passes false so an empty database can't be claimed by a stranger.
+    allowOpenSetup = true,
   } = options;
 
   // Every JWT this instance signs/verifies depends on this secret. Minting a
@@ -312,7 +317,7 @@ function createApp(db, options = {}) {
     try {
       const userCount = Number((await db.get('SELECT COUNT(*) as count FROM users')).count);
       if (userCount === 0) {
-        return res.json({ authenticated: false, needsSetup: true, setupTokenRequired: !!setupToken });
+        return res.json({ authenticated: false, needsSetup: true, setupTokenRequired: !!setupToken || !allowOpenSetup });
       }
       const payload = verifyToken(sessionSecret, req.cookies[TOKEN_COOKIE]);
       if (payload) {
@@ -332,6 +337,11 @@ function createApp(db, options = {}) {
       // before the real owner does becomes the superuser. When setupToken is
       // set, require it in the body — timing-safe so it can't be brute-forced
       // by byte via response latency.
+      if (!setupToken && !allowOpenSetup) {
+        return res.status(403).json({
+          error: 'Account setup is disabled on this deployment. Set SETUP_TOKEN and redeploy, or create the account with `npm run user:create`.',
+        });
+      }
       if (setupToken) {
         const expected = Buffer.from(setupToken);
         const actual = Buffer.from(String(req.body?.setupToken ?? ''));
@@ -359,35 +369,60 @@ function createApp(db, options = {}) {
   app.post('/api/auth/login', authLimiter, async (req, res) => {
     try {
       const { username, password } = req.body;
-      if (!username || !password) {
+      if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
       }
       const user = await db.get(
-        'SELECT id, username, password_hash, failed_login_attempts, locked_until FROM users WHERE username = ?',
+        'SELECT id, username, password_hash FROM users WHERE username = ?',
         username.trim()
       );
 
-      if (user?.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
-        return res.status(429).json({ error: 'Too many failed attempts. Please try again later.' });
+      const lockFor = () => new Date(Date.now() + LOGIN_LOCKOUT_MS).toISOString();
+      const tooMany = () => res.status(429).json({ error: 'Too many failed attempts. Please try again later.' });
+
+      // Reserve this attempt atomically *before* checking the password. The
+      // old read → bcrypt → write sequence let parallel guesses all read the
+      // same count, so a burst of 100 stored "1" and the lockout (the only
+      // limit shared across Vercel instances) never engaged. Counting first
+      // caps the number of passwords actually tested at the threshold.
+      //
+      // An expired lock resets the count to this attempt, rather than leaving
+      // it at 10+ where a single wrong guess every 15 minutes would re-lock
+      // the account indefinitely.
+      let attempts = 0;
+      if (user) {
+        const now = new Date().toISOString();
+        const reserved = await db.get(
+          `UPDATE users SET
+             failed_login_attempts = CASE WHEN locked_until IS NOT NULL AND locked_until <= ? THEN 1
+                                          ELSE COALESCE(failed_login_attempts, 0) + 1 END,
+             locked_until = CASE WHEN locked_until IS NOT NULL AND locked_until <= ? THEN NULL
+                                 ELSE locked_until END
+           WHERE id = ?
+           RETURNING failed_login_attempts, locked_until`,
+          now, now, user.id,
+        );
+        attempts = Number(reserved.failed_login_attempts) || 0;
+        if (reserved.locked_until) return tooMany();
+        if (attempts > LOGIN_LOCKOUT_THRESHOLD) {
+          // Over the limit but the lock isn't set yet (it's written after a
+          // failed compare, which a parallel request may not have reached).
+          await db.run('UPDATE users SET locked_until = ? WHERE id = ? AND locked_until IS NULL', lockFor(), user.id);
+          return tooMany();
+        }
       }
 
       // Always run bcrypt.compare, even on a miss (against DUMMY_PASSWORD_HASH),
       // so a nonexistent username takes the same time as a wrong password.
       const passwordOk = await bcrypt.compare(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
       if (!user || !passwordOk) {
-        if (user) {
-          const attempts = (user.failed_login_attempts || 0) + 1;
-          const lockedUntil = attempts >= LOGIN_LOCKOUT_THRESHOLD
-            ? new Date(Date.now() + LOGIN_LOCKOUT_MS).toISOString()
-            : null;
-          await db.run('UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?', attempts, lockedUntil, user.id);
+        if (user && attempts >= LOGIN_LOCKOUT_THRESHOLD) {
+          await db.run('UPDATE users SET locked_until = ? WHERE id = ? AND locked_until IS NULL', lockFor(), user.id);
         }
         return res.status(401).json({ error: 'Invalid username or password' });
       }
 
-      if (user.failed_login_attempts || user.locked_until) {
-        await db.run('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?', user.id);
-      }
+      await db.run('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?', user.id);
       const token = signToken(sessionSecret, { userId: user.id, username: user.username });
       setAuthCookie(res, token, secureCookies);
       res.json({ success: true, user: { id: user.id, username: user.username } });
@@ -1228,6 +1263,19 @@ function createApp(db, options = {}) {
         }
       }
 
+      // The check above is against today's share count, so a SELL backdated
+      // to before the shares were bought would pass it — and the running-ACB
+      // walk would then skip that SELL and leave the full basis on the
+      // remaining shares. Check coverage on the trade date too.
+      if (normalizedType === 'SELL') {
+        const before = await loadPositionRows(db, portfolio_id, finalTickerUpper);
+        const after = [...before, { id: Number.MAX_SAFE_INTEGER, type: 'SELL', quantity: finalQuantity, date }];
+        const short = newlyUncoveredSell(before, after);
+        if (short) {
+          return res.status(400).json({ error: uncoveredSellMessage(finalTickerUpper, short) });
+        }
+      }
+
       // A BUY spends cash it doesn't have to be given a negative cash_balance
       // no one intended — mirrors the SELL oversell guard above.
       if (normalizedType === 'BUY') {
@@ -1350,6 +1398,18 @@ function createApp(db, options = {}) {
       // blocked when either portfolio is archived.
       if (await anyArchived(row.portfolio_id, peer?.portfolio_id)) {
         return res.status(409).json({ error: ARCHIVED_ERROR });
+      }
+
+      // Removing a BUY/DRIP that a later SELL relied on would leave that SELL
+      // selling shares that were never held: NET_SHARES goes negative, the
+      // position disappears from every view, and archive then refuses with
+      // "still holds X" for a position the user can't see.
+      if (row.type === 'BUY' || row.type === 'DIVIDEND_REINVEST') {
+        const before = await loadPositionRows(db, row.portfolio_id, row.ticker);
+        const short = newlyUncoveredSell(before, before.filter(r => r.id !== Number(row.id)));
+        if (short) {
+          return res.status(400).json({ error: uncoveredSellMessage(row.ticker, short) });
+        }
       }
 
       const tx = await db.transaction('write');
@@ -1497,6 +1557,32 @@ function createApp(db, options = {}) {
         }
       }
 
+      // `portfolio_id` comes from the JSON body and may be "1" rather than 1;
+      // strict equality against the DB value treated that as a move to a
+      // different portfolio.
+      const samePortfolio = Number(existing.portfolio_id) === Number(portfolio_id);
+
+      // Date-aware coverage for every position this edit touches: the one the
+      // row leaves (shrinking, re-dating, retyping or moving a BUY can strand a
+      // later SELL) and the one it lands in (a SELL dated before its shares).
+      // The current-share-count check above sees neither.
+      if (SHARE_TYPES.includes(existing.type) || SHARE_TYPES.includes(normalizedType)) {
+        const editedRow = { id: Number(existing.id), type: normalizedType, quantity: finalQuantity, date };
+        const positions = [[existing.portfolio_id, existing.ticker]];
+        if (!(samePortfolio && finalTickerUpper === existing.ticker)) {
+          positions.push([portfolio_id, finalTickerUpper]);
+        }
+        for (const [pid, tkr] of positions) {
+          const before = await loadPositionRows(db, pid, tkr);
+          const after = before.filter(r => r.id !== editedRow.id);
+          if (Number(pid) === Number(portfolio_id) && tkr === finalTickerUpper) after.push(editedRow);
+          const short = newlyUncoveredSell(before, after);
+          if (short) {
+            return res.status(400).json({ error: uncoveredSellMessage(tkr, short) });
+          }
+        }
+      }
+
       // Same BUY affordability guard as POST, but first undoing this row's own
       // old cash effect if it's staying in the same portfolio — otherwise
       // re-editing a BUY (e.g. just fixing its date) would find its own
@@ -1504,7 +1590,7 @@ function createApp(db, options = {}) {
       if (normalizedType === 'BUY') {
         const requiredCash = finalTotal + finalCommission;
         let availableCash = Number(portfolio.cash_balance) || 0;
-        if (existing.portfolio_id === portfolio_id) availableCash -= oldCashDelta;
+        if (samePortfolio) availableCash -= oldCashDelta;
         if (requiredCash > availableCash + CASH_EPSILON) {
           return res.status(400).json({
             error: `Insufficient cash: this buy needs $${requiredCash.toFixed(2)} but only $${availableCash.toFixed(2)} is available in this portfolio`,
@@ -1545,7 +1631,7 @@ function createApp(db, options = {}) {
           args: [portfolio_id, finalTickerUpper, normalizedType, finalQuantity, finalPrice, finalTotal,
                  commission ? Number(commission) : 0, date, market || existing.market || 'TMX', existing.id],
         });
-        if (existing.portfolio_id !== portfolio_id) {
+        if (!samePortfolio) {
           if (oldCashDelta !== 0) {
             await tx.execute({
               sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) - ? WHERE id = ?',
@@ -1707,9 +1793,9 @@ function createApp(db, options = {}) {
       // otherwise the per-row duplicate check below is one round-trip per line.
       const dedupeKey = (portfolioId, ticker, type, date, quantity, price, total) =>
         `${portfolioId}|${ticker}|${type}|${date}|${quantity}|${price}|${total}`;
+      const existingTx = await db.all('SELECT id, portfolio_id, ticker, type, date, quantity, price, total FROM transactions');
       const existingKeys = new Set(
-        (await db.all('SELECT portfolio_id, ticker, type, date, quantity, price, total FROM transactions'))
-          .map(t => dedupeKey(t.portfolio_id, t.ticker, t.type, t.date, t.quantity, t.price, t.total))
+        existingTx.map(t => dedupeKey(t.portfolio_id, t.ticker, t.type, t.date, t.quantity, t.price, t.total))
       );
 
       // Current net shares per position, so the import can enforce the same
@@ -1726,6 +1812,27 @@ function createApp(db, options = {}) {
              FROM transactions t GROUP BY t.portfolio_id, t.ticker`
         )).map(r => [sharesKey(r.portfolio_id, r.ticker), Number(r.shares) || 0])
       );
+
+      // Each position's share-moving rows, for the same date-aware SELL
+      // coverage check POST /api/transactions applies. Rows accepted from this
+      // file are appended with ids above any real one, so on a shared date
+      // they sort after existing rows and in file order — the order they'll
+      // be inserted, and so the order the running-ACB walk will see them.
+      const positionRows = new Map();
+      for (const t of existingTx) {
+        if (!SHARE_TYPES.includes(t.type)) continue;
+        const k = sharesKey(t.portfolio_id, t.ticker);
+        if (!positionRows.has(k)) positionRows.set(k, []);
+        positionRows.get(k).push({ id: Number(t.id), type: t.type, quantity: Number(t.quantity) || 0, date: t.date });
+      }
+      let pendingId = Number.MAX_SAFE_INTEGER - lines.length;
+
+      // Inserts are collected and written in one atomic batch after the loop,
+      // together with the cash_balance updates. Writing row-by-row meant a
+      // Turso error or a function timeout part-way through left the inserted
+      // rows committed without their cash movement — which a later delete of
+      // those rows would then reverse anyway, driving cash_balance wrong.
+      const pendingInserts = [];
 
       // Cash-flow rows must move cash_balance exactly as the single-transaction
       // route does. Accumulated per portfolio and applied once after the loop.
@@ -1847,6 +1954,15 @@ function createApp(db, options = {}) {
               continue;
             }
           }
+          const posKey = sharesKey(portfolio.id, cleanTicker);
+          if (type === 'SELL') {
+            const rows = positionRows.get(posKey) || [];
+            const short = newlyUncoveredSell(rows, [...rows, { id: pendingId, type, quantity, date: parsedDate }]);
+            if (short) {
+              errors.push({ line: i + 1, error: uncoveredSellMessage(cleanTicker, short), data: truncate(line) });
+              continue;
+            }
+          }
 
           // Same BUY affordability guard as POST /api/transactions. The CSV
           // format has no commission column, so required cash is just total.
@@ -1858,11 +1974,16 @@ function createApp(db, options = {}) {
             }
           }
 
-          await db.run(`
-            INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `, portfolio.id, cleanTicker, type, quantity, price, total, parsedDate);
+          pendingInserts.push({
+            sql: `INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            args: [portfolio.id, cleanTicker, type, quantity, price, total, parsedDate],
+          });
           existingKeys.add(key); // catch duplicates within the same file, not just against the DB
+          if (SHARE_TYPES.includes(type)) {
+            if (!positionRows.has(posKey)) positionRows.set(posKey, []);
+            positionRows.get(posKey).push({ id: pendingId++, type, quantity, date: parsedDate });
+          }
 
           // Keep the running share count and cash balance in step with what was
           // just written, so later rows in the same file are validated against
@@ -1887,13 +2008,15 @@ function createApp(db, options = {}) {
         }
       }
 
-      // Apply the accumulated CONTRIBUTION/WITHDRAWAL cash movement once per
-      // portfolio rather than per row.
-      for (const [portfolioId, delta] of cashDeltas) {
-        await db.run(
-          'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
-          delta, portfolioId,
-        );
+      // One atomic batch: every accepted row plus the accumulated cash movement
+      // per portfolio. If any statement fails, nothing is written. It's also a
+      // single round-trip to Turso instead of one per row.
+      const cashUpdates = [...cashDeltas].map(([portfolioId, delta]) => ({
+        sql: 'UPDATE portfolios SET cash_balance = COALESCE(cash_balance,0) + ? WHERE id = ?',
+        args: [delta, portfolioId],
+      }));
+      if (pendingInserts.length || cashUpdates.length) {
+        await db.batch([...pendingInserts, ...cashUpdates], 'write');
       }
       if (cashDeltas.size) await backupPortfolios();
 
@@ -2046,6 +2169,14 @@ function createApp(db, options = {}) {
 
 // ─── Market data (no DB dependency) ──────────────────────────────────────────
 
+// Every outbound market-data request is capped. Without a signal, fetch
+// waits on a stalled connection for Node's ~300 s default, and the refresh
+// quotes tickers one after another — so one hung TMX/Yahoo request could run
+// the daily snapshot cron into Vercel's function limit and lose that day's
+// snapshot. A timeout throws, which performRefreshPrices already catches per
+// ticker (that ticker is reported as failed; the rest carry on).
+const FETCH_TIMEOUT_MS = 8000;
+
 function normalizeTicker(ticker) {
   return ticker.replace(/\.TO$/i, '').replace(/-/g, '.');
 }
@@ -2068,7 +2199,8 @@ async function fetchTMXQuote(ticker) {
       'Origin': 'https://money.tmx.com',
       'Referer': 'https://money.tmx.com/'
     },
-    body: JSON.stringify({ query, variables: { symbol, locale: 'en' } })
+    body: JSON.stringify({ query, variables: { symbol, locale: 'en' } }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
@@ -2087,6 +2219,7 @@ async function getYahooSession() {
   const cookieRes = await fetch('https://fc.yahoo.com', {
     headers: { 'User-Agent': UA },
     redirect: 'manual',
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   // Use getSetCookie() so each cookie stays a discrete string — splitting the
   // combined header on ',' would break on an Expires date's comma (e.g.
@@ -2098,6 +2231,7 @@ async function getYahooSession() {
 
   const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
     headers: { 'User-Agent': UA, 'Cookie': cookie },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!crumbRes.ok) throw new Error(`Yahoo Finance crumb fetch failed: HTTP ${crumbRes.status}`);
   const crumb = (await crumbRes.text()).trim();
@@ -2113,7 +2247,7 @@ async function fetchYahooQuote(ticker, retry = true) {
 
   const chartRes = await fetch(
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d&crumb=${encodeURIComponent(crumb)}`,
-    { headers }
+    { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
   );
   if ((chartRes.status === 401 || chartRes.status === 403) && retry) {
     _yahooSession = null;
@@ -2128,7 +2262,7 @@ async function fetchYahooQuote(ticker, retry = true) {
   try {
     const summaryRes = await fetch(
       `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=summaryDetail&crumb=${encodeURIComponent(crumb)}`,
-      { headers }
+      { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
     );
     if (summaryRes.ok) {
       const summaryData = await summaryRes.json();

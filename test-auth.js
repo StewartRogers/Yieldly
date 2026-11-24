@@ -1067,6 +1067,173 @@ async function run() {
   } finally {
     arch.close();
   }
+
+  // ── 51-53. Date-aware SELL coverage (POST / PUT / DELETE) ──────────────────
+  const led = await bootApp();
+  try {
+    const setup = await req('POST', '/api/auth/setup', { username: 'owner', password: 'ledgerpass1' }, null, led.base);
+    const cookie = extractToken(setup.cookie);
+    const call = (method, path, body) => req(method, path, body, cookie, led.base);
+    const p = (await call('POST', '/api/portfolios', { name: 'Ledger', code: 'LED' })).body.id;
+    await call('POST', '/api/transactions', { portfolio_id: p, type: 'CONTRIBUTION', total: 10000, date: '2024-01-01' });
+    const buy = await call('POST', '/api/transactions', { portfolio_id: p, ticker: 'ABC', type: 'BUY', quantity: 100, price: 10, total: 1000, date: '2025-06-01' });
+    checkEq('seed BUY 100 on 2025-06-01 → 200', buy.status, 200);
+
+    section('51. POST – a SELL dated before its shares were bought is rejected');
+    const early = await call('POST', '/api/transactions', { portfolio_id: p, ticker: 'ABC', type: 'SELL', quantity: 50, price: 12, total: 600, date: '2025-01-01' });
+    checkEq('SELL dated before the BUY → 400', early.status, 400);
+    checkTruthy('error names the date and what was held', /2025-01-01/.test(early.body.error) && /only 0 shares/.test(early.body.error));
+    const sameDay = await call('POST', '/api/transactions', { portfolio_id: p, ticker: 'ABC', type: 'SELL', quantity: 40, price: 12, total: 480, date: '2025-06-01' });
+    checkEq('SELL on the BUY\'s own date (sorts after it) → 200', sameDay.status, 200);
+    const later = await call('POST', '/api/transactions', { portfolio_id: p, ticker: 'ABC', type: 'SELL', quantity: 10, price: 12, total: 120, date: '2025-07-01' });
+    checkEq('later SELL within holdings → 200', later.status, 200);
+    const acb = (await call('GET', `/api/portfolios/${p}/summary`)).body.find(h => h.ticker === 'ABC');
+    check('ACB = 50 of 100 shares at $10 → $500', acb?.acb, 500);
+
+    section('52. DELETE / PUT – a BUY a later SELL relies on can\'t be removed');
+    const del = await call('DELETE', `/api/transactions/${buy.body.id}`);
+    checkEq('delete the BUY behind two SELLs → 400', del.status, 400);
+    checkTruthy('error names the stranded SELL', /SELL of 40 ABC on 2025-06-01/.test(del.body.error));
+    const edit = (body) => call('PUT', `/api/transactions/${buy.body.id}`,
+      { portfolio_id: p, ticker: 'ABC', type: 'BUY', quantity: 100, price: 10, total: 1000, date: '2025-06-01', ...body });
+    checkEq('shrink the BUY below what was sold → 400', (await edit({ quantity: 30, total: 300 })).status, 400);
+    checkEq('re-date the BUY after the SELLs → 400', (await edit({ date: '2025-08-01' })).status, 400);
+    checkEq('retype the BUY to a DIVIDEND → 400', (await edit({ type: 'DIVIDEND', quantity: 0 })).status, 400);
+    checkEq('move the BUY to another ticker → 400', (await edit({ ticker: 'XYZ' })).status, 400);
+    checkEq('shrink the BUY to exactly what was sold → 200', (await edit({ quantity: 50, total: 500 })).status, 200);
+    checkEq('restore it → 200', (await edit({})).status, 200);
+    checkEq('no-op edit with portfolio_id as a string → 200', (await edit({ portfolio_id: String(p) })).status, 200);
+    const sell = await call('PUT', `/api/transactions/${later.body.id}`,
+      { portfolio_id: p, ticker: 'ABC', type: 'SELL', quantity: 10, price: 12, total: 120, date: '2025-02-01' });
+    checkEq('re-date a SELL to before the BUY → 400', sell.status, 400);
+    checkEq('delete a SELL (frees shares) → 200', (await call('DELETE', `/api/transactions/${later.body.id}`)).status, 200);
+    const cash = (await call('GET', '/api/portfolios')).body.find(x => x.id === p)?.cash_balance;
+    check('rejected changes left cash untouched (10000 − 1000 + 480)', cash, 9480);
+
+    section('53. Legacy uncovered SELL – unrelated changes still allowed');
+    // A ledger written before this guard existed can already hold a short
+    // SELL. Rejecting every later write to that position would freeze it.
+    await led.db.run(
+      "INSERT INTO transactions (portfolio_id, ticker, type, quantity, price, total, date) VALUES (?, 'ABC', 'SELL', 5, 10, 50, '2020-01-01')", p);
+    checkEq('new covered SELL on that position → 200',
+      (await call('POST', '/api/transactions', { portfolio_id: p, ticker: 'ABC', type: 'SELL', quantity: 5, price: 12, total: 60, date: '2025-09-01' })).status, 200);
+    checkEq('new BUY on that position → 200',
+      (await call('POST', '/api/transactions', { portfolio_id: p, ticker: 'ABC', type: 'BUY', quantity: 1, price: 10, total: 10, date: '2025-09-02' })).status, 200);
+
+    section('54. CSV import – date-aware SELL check and atomic write');
+    const csvHead = 'Date,Symbol,Portfolio,Type,Quantity,Price,Total\n';
+    const backdated = await call('POST', '/api/import/csv', { csvData: `${csvHead}2025-01-15,ABC,LED,S,10,12,120` });
+    checkEq('backdated CSV SELL not imported', backdated.body.imported, 0);
+    checkTruthy('CSV error explains the date', /only 0 shares were held/.test(backdated.body.details?.errors?.[0]?.error));
+    const inFile = await call('POST', '/api/import/csv', {
+      csvData: `${csvHead}2025-10-01,NEW,LED,B,10,10,100\n2025-10-02,NEW,LED,S,5,11,55\n2025-09-30,NEW,LED,S,1,11,11`,
+    });
+    checkEq('BUY then SELL in one file → both imported', inFile.body.imported, 2);
+    checkTruthy('SELL dated before the file\'s own BUY rejected', /2025-09-30/.test(inFile.body.details?.errors?.[0]?.error));
+
+    const cashBefore = (await call('GET', '/api/portfolios')).body.find(x => x.id === p)?.cash_balance;
+    const countBefore = (await call('GET', `/api/portfolios/${p}/transactions`)).body.length;
+    // Force the batch to fail on its last statement: libSQL must roll back the
+    // inserts that ran before it, so nothing is half-written.
+    const realBatch = led.db.batch;
+    led.db.batch = (stmts, mode) => realBatch([...stmts, { sql: 'INSERT INTO no_such_table VALUES (1)', args: [] }], mode);
+    let failedImport;
+    try {
+      failedImport = await call('POST', '/api/import/csv', {
+        csvData: `${csvHead}2025-11-01,QQQ,LED,B,1,50,50\n2025-11-01,RRR,LED,B,1,50,50`,
+      });
+    } finally {
+      led.db.batch = realBatch;
+    }
+    checkEq('failing batch → 500', failedImport.status, 500);
+    checkEq('no rows written', (await call('GET', `/api/portfolios/${p}/transactions`)).body.length, countBefore);
+    check('cash_balance unchanged', (await call('GET', '/api/portfolios')).body.find(x => x.id === p)?.cash_balance, cashBefore);
+  } finally {
+    led.close();
+  }
+
+  // ── 55. Persistent login lockout ──────────────────────────────────────────
+  section('55. Login lockout – parallel guesses capped, expiry resets the count');
+  {
+    const lock = await bootApp({ rateLimit: false });
+    try {
+      await req('POST', '/api/auth/setup', { username: 'owner', password: 'rightpass1' }, null, lock.base);
+      const burst = await Promise.all(Array.from({ length: 25 }, () =>
+        req('POST', '/api/auth/login', { username: 'owner', password: 'wrongpass' }, null, lock.base)));
+      const tested = burst.filter(r => r.status === 401).length;
+      checkTruthy(`at most 10 of 25 parallel guesses reach bcrypt (got ${tested})`, tested <= 10);
+      checkEq('the rest → 429', burst.filter(r => r.status === 429).length, 25 - tested);
+      checkEq('right password while locked → 429',
+        (await req('POST', '/api/auth/login', { username: 'owner', password: 'rightpass1' }, null, lock.base)).status, 429);
+
+      await lock.db.run("UPDATE users SET locked_until = '2000-01-01T00:00:00.000Z'");
+      const afterExpiry = await req('POST', '/api/auth/login', { username: 'owner', password: 'wrongpass' }, null, lock.base);
+      checkEq('one wrong guess after the lock expires → 401, not re-locked', afterExpiry.status, 401);
+      const row = await lock.db.get('SELECT failed_login_attempts, locked_until FROM users');
+      checkEq('count restarted at 1', Number(row.failed_login_attempts), 1);
+      checkEq('lock cleared', row.locked_until, null);
+      checkEq('right password → 200',
+        (await req('POST', '/api/auth/login', { username: 'owner', password: 'rightpass1' }, null, lock.base)).status, 200);
+      checkEq('count reset on success',
+        Number((await lock.db.get('SELECT failed_login_attempts FROM users')).failed_login_attempts), 0);
+      checkEq('non-string username → 400',
+        (await req('POST', '/api/auth/login', { username: ['owner'], password: 'x' }, null, lock.base)).status, 400);
+    } finally {
+      lock.close();
+    }
+  }
+
+  // ── 56. Setup closed on a public deployment without SETUP_TOKEN ───────────
+  section('56. Setup – closed when allowOpenSetup is false and no token is set');
+  {
+    const closed = await bootApp({ allowOpenSetup: false });
+    try {
+      const session = await req('GET', '/api/auth/session', null, null, closed.base);
+      checkEq('session asks for a token', session.body.setupTokenRequired, true);
+      const attempt = await req('POST', '/api/auth/setup', { username: 'stranger', password: 'claimit123' }, null, closed.base);
+      checkEq('setup → 403', attempt.status, 403);
+      checkTruthy('error points at SETUP_TOKEN / user:create', /SETUP_TOKEN/.test(attempt.body.error));
+      checkEq('no user created', Number((await closed.db.get('SELECT COUNT(*) AS n FROM users')).n), 0);
+    } finally {
+      closed.close();
+    }
+    const tokened = await bootApp({ allowOpenSetup: false, setupToken: 'let-me-in-123' });
+    try {
+      checkEq('wrong token → 403',
+        (await req('POST', '/api/auth/setup', { username: 'owner', password: 'ownerpass1', setupToken: 'nope' }, null, tokened.base)).status, 403);
+      checkEq('right token → 200',
+        (await req('POST', '/api/auth/setup', { username: 'owner', password: 'ownerpass1', setupToken: 'let-me-in-123' }, null, tokened.base)).status, 200);
+    } finally {
+      tokened.close();
+    }
+  }
+
+  // ── 57. Market-data fetches carry a timeout ───────────────────────────────
+  section('57. fetchTMXQuote / fetchYahooQuote pass an abort signal');
+  {
+    const { fetchTMXQuote, fetchYahooQuote } = require('./app');
+    const realFetch = global.fetch;
+    const seen = [];
+    global.fetch = async (url, opts = {}) => {
+      seen.push({ url: String(url), signal: opts.signal });
+      const body = String(url).includes('getcrumb') ? 'crumb123'
+        : String(url).includes('tmx') ? { data: { getQuoteBySymbol: { price: 1 } } }
+        : { chart: { result: [{ meta: { regularMarketPrice: 1 } }] } };
+      return {
+        ok: true, status: 200,
+        headers: { getSetCookie: () => ['A=1; path=/'], get: () => null },
+        json: async () => body, text: async () => body,
+      };
+    };
+    try {
+      await fetchTMXQuote('ABC');
+      await fetchYahooQuote('AAPL');
+    } finally {
+      global.fetch = realFetch;
+    }
+    checkTruthy(`${seen.length} outbound requests made`, seen.length >= 4);
+    checkTruthy('every request has an AbortSignal', seen.every(s => s.signal instanceof AbortSignal));
+  }
 }
 
 // ─── Boot and run ────────────────────────────────────────────────────────────

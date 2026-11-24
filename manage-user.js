@@ -45,7 +45,12 @@ async function main() {
       process.exit(1);
     }
     const hash = await bcrypt.hash(password, 10);
-    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hash, user.id);
+    // Also lift any login lockout — a password reset is how the owner gets
+    // back in after one, and it must not leave them waiting it out.
+    await db.run(
+      'UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?',
+      hash, user.id,
+    );
     // Stateless JWT auth: there is no server-side session list to clear here.
     // Outstanding tokens on other devices expire naturally.
     console.log('Password updated.');
